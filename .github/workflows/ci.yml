@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: 4.4.1
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.0
+          arch: win64_msvc2022_64
+          cache: true
+          use-official: true
+          email: ${{ secrets.QT_EMAIL }}
+          pw: ${{ secrets.QT_PW }}
+      - name: Check formatting
+        shell: pwsh
+        run: clang-format --dry-run --Werror src/*.cpp src/*.h tests/*.cpp
+      - name: Configure
+        shell: pwsh
+        run: |
+          $env:QT_ROOT = $env:QT_ROOT_DIR
+          cmake --fresh --preset windows-debug -DANIMEHUB_ENABLE_CLANG_TIDY=ON
+      - name: Build
+        shell: pwsh
+        run: cmake --build --preset windows-debug
+      - name: Test
+        shell: pwsh
+        run: ctest --preset windows-debug

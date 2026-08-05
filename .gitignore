@@ -1,0 +1,15 @@
+/out/
+/build/
+/.cache/
+/.vs/
+/.vscode/
+/CMakeUserPresets.json
+/compile_commands.json
+*.user
+*.log
+*.exe
+*.dll
+*.pdb
+*.ilk
+.DS_Store
+Thumbs.db

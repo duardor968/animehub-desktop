@@ -1,0 +1,10 @@
+BasedOnStyle: LLVM
+AccessModifierOffset: -4
+AlignAfterOpenBracket: Align
+AllowShortFunctionsOnASingleLine: Empty
+BreakBeforeBraces: Attach
+ColumnLimit: 100
+IndentWidth: 4
+PointerAlignment: Left
+SortIncludes: CaseSensitive
+UseTab: Never
