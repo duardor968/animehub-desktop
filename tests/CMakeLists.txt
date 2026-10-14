@@ -27,9 +27,11 @@ animehub_add_test(mega-test mega_test.cpp)
 if(ANIMEHUB_BUNDLE_ENGINES)
   animehub_add_test(aria2-test aria2_test.cpp)
   animehub_add_test(download-manager-test download_manager_test.cpp)
-  foreach(test IN ITEMS aria2-test download-manager-test)
+  animehub_add_test(player-test player_test.cpp)
+  foreach(test IN ITEMS aria2-test download-manager-test player-test)
     target_compile_definitions(${test} PRIVATE
       ANIMEHUB_ARIA2_EXECUTABLE="${PROJECT_BINARY_DIR}/engines/aria2/aria2c.exe"
+      ANIMEHUB_MPV_EXECUTABLE="${PROJECT_BINARY_DIR}/engines/mpv/mpv.exe"
     )
   endforeach()
 endif()

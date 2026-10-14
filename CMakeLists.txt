@@ -40,7 +40,8 @@ endif()
 function(animehub_configure_target target)
   if(MSVC)
     target_compile_options(${target} PRIVATE
-      /W4 /permissive- /Zc:__cplusplus /utf-8 /external:anglebrackets /external:W0)
+      /W4 /permissive- /Zc:__cplusplus /utf-8 /external:anglebrackets /external:W0
+      /wd4702) # unreachable code: reported inside Qt's templates
   else()
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
   endif()
@@ -62,16 +63,66 @@ if(ANIMEHUB_BUNDLE_ENGINES AND WIN32)
 endif()
 
 qt_add_executable(animehub-desktop WIN32
+  src/app/anime_view.cpp
+  src/app/anime_view.h
+  src/app/app_controller.cpp
+  src/app/app_controller.h
+  src/app/app_settings.cpp
+  src/app/app_settings.h
+  src/app/card_model.cpp
+  src/app/card_model.h
+  src/app/catalog_view.cpp
+  src/app/catalog_view.h
+  src/app/display.cpp
+  src/app/display.h
+  src/app/downloads_view.cpp
+  src/app/downloads_view.h
+  src/app/episode_model.cpp
+  src/app/episode_model.h
+  src/app/glyph_provider.cpp
+  src/app/glyph_provider.h
+  src/app/library_model.cpp
+  src/app/library_model.h
   src/app/main.cpp
+  src/app/shell.cpp
+  src/app/shell.h
 )
+if(WIN32)
+  target_sources(animehub-desktop PRIVATE src/app/animehub.rc)
+endif()
+
+set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(animehub-desktop
   URI AnimeHub
   VERSION 1.0
   QML_FILES
     qml/Main.qml
+    qml/Theme.qml
+    qml/CloseDialog.qml
+    qml/SettingsDialog.qml
+    qml/anime/AnimeHeader.qml
+    qml/anime/AnimePage.qml
+    qml/anime/EpisodeMenu.qml
+    qml/anime/EpisodeRow.qml
+    qml/catalog/CatalogPage.qml
+    qml/components/Glyph.qml
+    qml/components/PageTab.qml
+    qml/components/Poster.qml
+    qml/components/PosterCard.qml
+    qml/components/ProgressLine.qml
+    qml/components/Shelf.qml
+    qml/components/Toast.qml
+    qml/downloads/DownloadBar.qml
+    qml/downloads/DownloadsPage.qml
+    qml/library/LibraryHome.qml
+    qml/library/LibraryList.qml
+    qml/library/LibraryPage.qml
+  RESOURCES
+    assets/animehub.png
 )
 
+target_include_directories(animehub-desktop PRIVATE src/app)
 target_link_libraries(animehub-desktop
   PRIVATE
     animehub-core
@@ -83,6 +134,11 @@ target_link_libraries(animehub-desktop
 )
 animehub_configure_target(animehub-desktop)
 set_target_properties(animehub-desktop PROPERTIES OUTPUT_NAME "AnimeHub")
+
+if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
+  include(cmake/Deploy.cmake)
+  animehub_deploy_runtime(animehub-desktop)
+endif()
 
 include(CTest)
 if(BUILD_TESTING)

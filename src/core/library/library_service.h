@@ -48,6 +48,8 @@ public:
 
     // Forgets files deleted outside AnimeHub.
     void verifyFiles();
+    // Something outside the service (playback, a finished download) changed this anime.
+    void announce(const QString& slug);
 
 signals:
     void animeChanged(const QString& slug);

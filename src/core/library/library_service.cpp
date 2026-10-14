@@ -209,6 +209,11 @@ void LibraryService::sweep() {
     }
 }
 
+void LibraryService::announce(const QString& slug) {
+    emit animeChanged(slug);
+    emit listChanged();
+}
+
 void LibraryService::verifyFiles() {
     const auto files = repository_.episodeFiles();
     if (!files) {

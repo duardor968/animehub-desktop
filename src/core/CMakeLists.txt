@@ -7,6 +7,8 @@ qt_add_library(animehub-core STATIC
   api/api_types.h
   api/response_cache.cpp
   api/response_cache.h
+  downloads/click_n_load.cpp
+  downloads/click_n_load.h
   downloads/aria2.cpp
   downloads/aria2.h
   downloads/download_manager.cpp

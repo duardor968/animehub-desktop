@@ -1,173 +1,164 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import AnimeHub
 
 ApplicationWindow {
     id: window
 
-    readonly property color canvas: "#0b0b0d"
-    readonly property color panel: "#121216"
-    readonly property color line: "#29292f"
-    readonly property color ink: "#f5f2ea"
-    readonly property color muted: "#98969e"
-    readonly property color accent: "#ff6b35"
+    required property AppController app
 
+    function showPage(index) {
+        tabs.currentIndex = index
+    }
+
+    width: app.settings.value("window/width", 1280)
+    height: app.settings.value("window/height", 820)
+    minimumWidth: 900
+    minimumHeight: 600
     visible: true
-    width: 1120
-    height: 720
-    minimumWidth: 880
-    minimumHeight: 560
-    title: qsTr("AnimeHub")
-    color: canvas
+    title: "AnimeHub"
+    color: Theme.canvas
+    palette.accent: Theme.accent
+    palette.highlight: Theme.accent
+    palette.window: Theme.canvas
 
-    RowLayout {
-        anchors.fill: parent
-        spacing: 0
+    Component.onCompleted: {
+        // INI settings come back as text.
+        if (String(app.settings.value("window/maximized", false)) === "true")
+            showMaximized()
+    }
 
-        Rectangle {
-            Layout.fillHeight: true
-            Layout.preferredWidth: 248
-            color: panel
+    onClosing: close => {
+        close.accepted = false
+        app.settings.setValue("window/maximized", visibility === Window.Maximized)
+        if (visibility !== Window.Maximized) {
+            app.settings.setValue("window/width", width)
+            app.settings.setValue("window/height", height)
+        }
+        app.requestClose()
+    }
 
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 28
-                spacing: 0
+    Connections {
+        target: window.app
+        function onShowRequested() {
+            window.show()
+            window.raise()
+            window.requestActivate()
+        }
+        function onHideRequested() { window.hide() }
+        function onCloseDecisionNeeded() { closeDialog.open() }
+        function onAnimeRequested(slug) {
+            window.showPage(0)
+            libraryPage.select(slug)
+        }
+    }
 
-                Label {
-                    text: qsTr("ANIMEHUB")
-                    color: ink
-                    font.pixelSize: 17
-                    font.weight: Font.Black
-                    font.letterSpacing: 3
-                }
+    header: Rectangle {
+        implicitHeight: 48
+        color: Theme.pane
 
-                Label {
-                    Layout.topMargin: 9
-                    text: qsTr("Biblioteca personal")
-                    color: muted
-                    font.pixelSize: 12
-                }
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            anchors.rightMargin: 8
+            spacing: 8
 
-                ColumnLayout {
-                    Layout.topMargin: 64
-                    spacing: 8
+            TabBar {
+                id: tabs
+                Layout.alignment: Qt.AlignBottom
+                background: null
+                PageTab { text: "Biblioteca" }
+                PageTab { text: "Catálogo" }
+                PageTab { text: "Descargas" }
+            }
 
-                    Repeater {
-                        model: [qsTr("Descubrir"), qsTr("Biblioteca"), qsTr("Descargas")]
+            Item { Layout.fillWidth: true }
 
-                        delegate: Rectangle {
-                            required property int index
-                            required property string modelData
-
-                            Layout.preferredWidth: 192
-                            Layout.preferredHeight: 42
-                            color: index === 0 ? "#201712" : "transparent"
-                            border.color: index === 0 ? "#4a2a1e" : "transparent"
-                            radius: 4
-
-                            Label {
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.leftMargin: 14
-                                text: modelData
-                                color: index === 0 ? window.accent : window.muted
-                                font.pixelSize: 13
-                                font.weight: index === 0 ? Font.DemiBold : Font.Normal
-                            }
-                        }
-                    }
-                }
-
-                Item { Layout.fillHeight: true }
-
-                Label {
-                    text: qsTr("FOUNDATION 0.1")
-                    color: muted
-                    font.family: "Consolas"
-                    font.pixelSize: 10
-                    font.letterSpacing: 1.6
-                }
+            ToolButton {
+                icon.source: Theme.source(Theme.icon.settings)
+                display: AbstractButton.IconOnly
+                text: "Ajustes"
+                ToolTip.visible: hovered
+                ToolTip.text: "Ajustes (Ctrl+,)"
+                onClicked: settingsDialog.open()
             }
         }
 
         Rectangle {
-            Layout.fillHeight: true
-            Layout.preferredWidth: 1
-            color: line
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 1
+            color: Theme.stroke
+        }
+    }
+
+    StackLayout {
+        anchors.fill: parent
+        currentIndex: tabs.currentIndex
+
+        LibraryPage {
+            id: libraryPage
+            app: window.app
+            onBrowseCatalog: window.showPage(1)
         }
 
-        Item {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+        CatalogPage {
+            app: window.app
+            active: StackLayout.isCurrentItem
+        }
 
-            ColumnLayout {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                anchors.margins: 56
-                spacing: 0
-
-                Label {
-                    text: qsTr("BASE NATIVA")
-                    color: accent
-                    font.family: "Consolas"
-                    font.pixelSize: 11
-                    font.bold: true
-                    font.letterSpacing: 2.4
-                }
-
-                Label {
-                    Layout.topMargin: 18
-                    Layout.maximumWidth: 680
-                    text: qsTr("Tu anime.\nEn tus manos.")
-                    color: ink
-                    font.pixelSize: 68
-                    font.weight: Font.Black
-                    font.letterSpacing: -3
-                    lineHeight: 0.84
-                }
-
-                Label {
-                    Layout.topMargin: 28
-                    Layout.maximumWidth: 570
-                    text: qsTr("Una aplicación local para administrar biblioteca, reproducción y descargas sin convertir el escritorio en otra pestaña web.")
-                    color: muted
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: 16
-                    lineHeight: 1.45
-                }
-
-                Rectangle {
-                    Layout.topMargin: 42
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: line
-                }
-
-                RowLayout {
-                    Layout.topMargin: 18
-                    Layout.fillWidth: true
-
-                    Label {
-                        text: qsTr("QT QUICK · C++26 · WINDOWS")
-                        color: muted
-                        font.family: "Consolas"
-                        font.pixelSize: 10
-                        font.letterSpacing: 1.4
-                    }
-
-                    Item { Layout.fillWidth: true }
-
-                    Label {
-                        text: qsTr("Scaffold listo").toUpperCase()
-                        color: ink
-                        font.family: "Consolas"
-                        font.pixelSize: 10
-                        font.letterSpacing: 1.4
-                    }
-                }
+        DownloadsPage {
+            app: window.app
+            onBrowseCatalog: window.showPage(1)
+            onOpenAnime: slug => {
+                window.showPage(0)
+                libraryPage.select(slug)
             }
         }
     }
+
+    footer: DownloadBar {
+        downloads: window.app.downloads
+        visible: window.app.downloads.activeCount > 0 && tabs.currentIndex !== 2
+        onClicked: window.showPage(2)
+    }
+
+    Toast {
+        id: toast
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 24
+        z: 10
+    }
+
+    Connections {
+        target: window.app.libraryAnime
+        function onMessage(text, problem) { toast.show(text, problem) }
+    }
+    Connections {
+        target: window.app.catalogAnime
+        function onMessage(text, problem) { toast.show(text, problem) }
+    }
+    Connections {
+        target: window.app.downloads
+        function onMessage(text, problem) { toast.show(text, problem) }
+    }
+
+    SettingsDialog {
+        id: settingsDialog
+        app: window.app
+    }
+
+    CloseDialog {
+        id: closeDialog
+        app: window.app
+    }
+
+    Shortcut { sequence: "Ctrl+1"; onActivated: window.showPage(0) }
+    Shortcut { sequence: "Ctrl+2"; onActivated: window.showPage(1) }
+    Shortcut { sequence: "Ctrl+3"; onActivated: window.showPage(2) }
+    Shortcut { sequence: "Ctrl+,"; onActivated: settingsDialog.open() }
+    Shortcut { sequence: "Ctrl+Q"; onActivated: window.app.quit() }
 }

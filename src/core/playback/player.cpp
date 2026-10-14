@@ -1,5 +1,6 @@
 #include "player.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -55,6 +56,7 @@ Player::Player(library::LibraryRepository& library, std::function<PlayerSettings
 Player::~Player() {
     if (session_) {
         save(true);
+        endSession(); // detach before the socket's destructor reports a disconnection
     }
 }
 
@@ -116,8 +118,16 @@ std::expected<void, QString> Player::playWithMpv(const PlayRequest& request,
     }
     // "--" ends the options: a file name can never be read as one.
     arguments << QStringLiteral("--") << QDir::toNativeSeparators(request.filePath);
-    if (!QProcess::startDetached(settings.mpvExecutable, arguments,
-                                 QFileInfo(settings.mpvExecutable).absolutePath())) {
+    // Detached and without AnimeHub's standard handles: the video outlives AnimeHub and holds
+    // nothing of it open.
+    QProcess mpv;
+    mpv.setProgram(settings.mpvExecutable);
+    mpv.setArguments(arguments);
+    mpv.setWorkingDirectory(QFileInfo(settings.mpvExecutable).absolutePath());
+    mpv.setStandardInputFile(QProcess::nullDevice());
+    mpv.setStandardOutputFile(QProcess::nullDevice());
+    mpv.setStandardErrorFile(QProcess::nullDevice());
+    if (!mpv.startDetached()) {
         return std::unexpected(QStringLiteral("No se pudo abrir el reproductor incluido (mpv)."));
     }
     session_ = std::move(session);
@@ -221,9 +231,11 @@ void Player::endSession() {
     if (!session_) {
         return;
     }
-    auto session = std::move(session_);
+    // Often called from the socket's own signal: the session dies once that signal returns.
+    std::shared_ptr<Session> session(session_.release());
     session->socket.disconnect(this);
     session->socket.abort();
+    QTimer::singleShot(0, QCoreApplication::instance(), [session] {});
 }
 
 } // namespace animehub::playback
