@@ -26,14 +26,16 @@ Item {
         sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
         opacity: status === Image.Ready ? 0.55 : 0
         Behavior on opacity { NumberAnimation { duration: 200 } }
+    }
 
-        Rectangle {
-            anchors.fill: parent
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0) }
-                GradientStop { position: 0.55; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0.5) }
-                GradientStop { position: 1.0; color: Theme.canvas }
-            }
+    // A sibling, not a child: it must not inherit the image's opacity to reach the canvas.
+    Rectangle {
+        anchors.fill: backdrop
+        visible: root.hasBackdrop
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0) }
+            GradientStop { position: 0.6; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0.45) }
+            GradientStop { position: 1.0; color: Theme.canvas }
         }
     }
 
@@ -61,14 +63,16 @@ Item {
             spacing: 24
 
             Poster {
-                Layout.preferredWidth: 150
-                Layout.preferredHeight: 213
+                readonly property int side: Math.round(Math.min(150, Math.max(96, content.width * 0.2)))
+                Layout.preferredWidth: side
+                Layout.preferredHeight: Math.round(side * 1.42)
                 Layout.alignment: Qt.AlignBottom
                 source: root.view.posterUrl
             }
 
             ColumnLayout {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 Layout.alignment: Qt.AlignBottom
                 spacing: 6
 
@@ -112,8 +116,11 @@ Item {
                     elide: Text.ElideRight
                 }
 
-                RowLayout {
+                // Wraps instead of pushing the page wider than the window.
+                Flow {
                     Layout.topMargin: 14
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     spacing: 8
 
                     Button {
@@ -127,13 +134,16 @@ Item {
                         onClicked: root.view.primary()
                     }
 
-                    ColumnLayout {
+                    Column {
                         visible: root.view.resumeProgress >= 0
+                        height: primary.height
+                        topPadding: 8
+                        leftPadding: 4
+                        rightPadding: 4
                         spacing: 4
-                        Layout.leftMargin: 4
 
                         ProgressLine {
-                            Layout.preferredWidth: 140
+                            width: 140
                             value: root.view.resumeProgress
                         }
 
@@ -153,15 +163,15 @@ Item {
 
                     ToolButton {
                         visible: root.view.loaded
-                        checkable: true
-                        checked: root.view.favorite
-                        icon.source: Theme.source(checked ? Theme.icon.starFilled : Theme.icon.star)
-                        icon.color: checked ? Theme.warning : Theme.ink
+                        icon.source: Theme.source(root.view.favorite ? Theme.icon.starFilled : Theme.icon.star)
+                        icon.color: root.view.favorite ? Theme.warning : Theme.ink
                         display: AbstractButton.IconOnly
-                        text: "Favorito"
+                        text: root.view.favorite ? "Quitar de favoritos" : "Añadir a favoritos"
+                        Accessible.checkable: true
+                        Accessible.checked: root.view.favorite
                         ToolTip.visible: hovered
-                        ToolTip.text: checked ? "Quitar de favoritos" : "Añadir a favoritos"
-                        onToggled: root.view.setFavorite(checked)
+                        ToolTip.text: text
+                        onClicked: root.view.setFavorite(!root.view.favorite)
                     }
 
                     ToolButton {

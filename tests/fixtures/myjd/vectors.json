@@ -1,0 +1,13 @@
+{
+  "email": "duardo@example.test",
+  "password": "contraseña de prueba",
+  "session": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  "path": "/my/connect?email=duardo%40example.test&appkey=animehub-desktop&rid=1791990000000",
+  "login": "cf6b5296eb25cb9acdb2d5a12fd43758b9bab25c5f18679e82995e5da802a8a5",
+  "device": "b7e3001910e32b29d43a0c2b7efebb82a6caa0805428ea30194e470baf8260a0",
+  "serverToken": "ffd329ac7b01e3f7daa82a7904266a26e8dae5e9024dfd1f6281fd107e4e1ebf",
+  "deviceToken": "06606514f97ae3584f5e432dbca525c396d5d29ccc69d7c4f2bdfdf156f28263",
+  "signature": "6cd2d9c98068fb8af96571fe7cb1f23be706f6cd627d96f10e21d1cd8cd76e0a",
+  "payload": "{\"apiVer\":1,\"rid\":1791990000001,\"url\":\"/linkgrabberv2/addLinks\"}",
+  "cipher": "TTE6c+s1QE2I6l0RjiYHABOmlU2egBnqI/+n+i30qhIDAY3SjMLYe/rq9FslSi/YMsgcLKj8AKFnJ/7fdF5r7kn0dQIYzfDu7BH01iPR8lA="
+}

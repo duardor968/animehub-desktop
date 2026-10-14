@@ -45,7 +45,9 @@ StackView {
 
             TextField {
                 id: search
-                Layout.preferredWidth: 320
+                Layout.fillWidth: true
+                Layout.minimumWidth: 160
+                Layout.maximumWidth: 360
                 placeholderText: "Buscar en el catálogo"
                 text: stack.catalog.search
                 onTextEdited: stack.catalog.search = text
@@ -54,7 +56,8 @@ StackView {
 
             ComboBox {
                 id: status
-                Layout.preferredWidth: 190
+                Layout.preferredWidth: 180
+                Layout.minimumWidth: 130
                 model: ["Cualquier estado", "En emisión", "Finalizado", "Próximamente"]
                 currentIndex: stack.catalog.status
                 onActivated: index => stack.catalog.status = index
@@ -62,7 +65,8 @@ StackView {
             }
 
             ComboBox {
-                Layout.preferredWidth: 190
+                Layout.preferredWidth: 180
+                Layout.minimumWidth: 130
                 textRole: "name"
                 valueRole: "slug"
                 model: [{ slug: "", name: "Todos los géneros" }].concat(stack.catalog.genres)
@@ -72,7 +76,8 @@ StackView {
             }
 
             ComboBox {
-                Layout.preferredWidth: 190
+                Layout.preferredWidth: 180
+                Layout.minimumWidth: 130
                 textRole: "text"
                 valueRole: "value"
                 model: [

@@ -81,6 +81,8 @@ qt_add_executable(animehub-desktop WIN32
   src/app/episode_model.h
   src/app/glyph_provider.cpp
   src/app/glyph_provider.h
+  src/app/jdownloader_view.cpp
+  src/app/jdownloader_view.h
   src/app/library_model.cpp
   src/app/library_model.h
   src/app/main.cpp

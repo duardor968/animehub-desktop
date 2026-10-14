@@ -5,6 +5,7 @@
 #include "app_settings.h"
 #include "catalog_view.h"
 #include "downloads_view.h"
+#include "jdownloader_view.h"
 #include "library_model.h"
 
 #include <QLocalServer>
@@ -36,6 +37,7 @@ class AppController final : public QObject {
     Q_PROPERTY(LibraryModel* library READ library CONSTANT)
     Q_PROPERTY(CatalogView* catalog READ catalog CONSTANT)
     Q_PROPERTY(DownloadsView* downloads READ downloads CONSTANT)
+    Q_PROPERTY(JDownloaderView* jdownloader READ jdownloader CONSTANT)
     Q_PROPERTY(AnimeView* libraryAnime READ libraryAnime CONSTANT)
     Q_PROPERTY(AnimeView* catalogAnime READ catalogAnime CONSTANT)
     Q_PROPERTY(QString version READ version CONSTANT)
@@ -70,6 +72,9 @@ public:
     }
     [[nodiscard]] DownloadsView* downloads() {
         return downloads_view_.get();
+    }
+    [[nodiscard]] JDownloaderView* jdownloader() {
+        return jdownloader_view_.get();
     }
     [[nodiscard]] AnimeView* libraryAnime() {
         return library_anime_.get();
@@ -116,6 +121,8 @@ private:
     std::unique_ptr<downloads::mega::Api> mega_;
     std::unique_ptr<downloads::pixeldrain::Api> pixeldrain_;
     std::unique_ptr<downloads::ClickNLoad> click_n_load_;
+    std::unique_ptr<downloads::myjd::Client> myjd_;
+    std::unique_ptr<JDownloaderView> jdownloader_view_;
     std::unique_ptr<downloads::DownloadManager> downloads_;
     std::unique_ptr<playback::Player> player_;
     std::unique_ptr<LibraryModel> library_model_;

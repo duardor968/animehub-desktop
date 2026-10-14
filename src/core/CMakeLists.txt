@@ -18,6 +18,8 @@ qt_add_library(animehub-core STATIC
   downloads/download_types.h
   downloads/mega.cpp
   downloads/mega.h
+  downloads/myjdownloader.cpp
+  downloads/myjdownloader.h
   downloads/pixeldrain.cpp
   downloads/pixeldrain.h
   library/library_service.cpp
@@ -29,6 +31,7 @@ qt_add_library(animehub-core STATIC
   playback/player.cpp
   playback/player.h
   platform/aes.h
+  platform/credentials.h
   platform/process_job.h
   storage/database.cpp
   storage/database.h
@@ -37,8 +40,9 @@ qt_add_library(animehub-core STATIC
 )
 
 if(WIN32)
-  target_sources(animehub-core PRIVATE platform/aes_win.cpp platform/process_job_win.cpp)
-  target_link_libraries(animehub-core PRIVATE bcrypt)
+  target_sources(animehub-core PRIVATE
+    platform/aes_win.cpp platform/credentials_win.cpp platform/process_job_win.cpp)
+  target_link_libraries(animehub-core PRIVATE bcrypt advapi32)
 else()
   message(FATAL_ERROR "AnimeHub Desktop needs a platform AES backend for this OS.")
 endif()

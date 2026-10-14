@@ -24,11 +24,15 @@ class AppSettings final : public QObject {
     Q_PROPERTY(bool systemPlayer READ systemPlayer WRITE setSystemPlayer NOTIFY changed)
     Q_PROPERTY(bool notifications READ notifications WRITE setNotifications NOTIFY changed)
     Q_PROPERTY(CloseAction closeAction READ closeAction WRITE setCloseAction NOTIFY changed)
-    Q_PROPERTY(bool clickNLoad READ clickNLoad WRITE setClickNLoad NOTIFY changed)
+    Q_PROPERTY(JDownloader jdownloader READ jdownloader WRITE setJdownloader NOTIFY changed)
+    Q_PROPERTY(
+        QString jdownloaderDevice READ jdownloaderDevice WRITE setJdownloaderDevice NOTIFY changed)
 
 public:
     enum class CloseAction { Ask, Tray, Quit };
     Q_ENUM(CloseAction)
+    enum class JDownloader { Off, Local, Remote };
+    Q_ENUM(JDownloader)
 
     AppSettings(const QString& path, QString default_download_directory, QObject* parent = nullptr);
 
@@ -46,8 +50,10 @@ public:
     void setNotifications(bool enabled);
     [[nodiscard]] CloseAction closeAction() const;
     void setCloseAction(CloseAction action);
-    [[nodiscard]] bool clickNLoad() const;
-    void setClickNLoad(bool enabled);
+    [[nodiscard]] JDownloader jdownloader() const;
+    void setJdownloader(JDownloader mode);
+    [[nodiscard]] QString jdownloaderDevice() const;
+    void setJdownloaderDevice(const QString& id);
 
     [[nodiscard]] downloads::DownloadSettings downloads() const;
     [[nodiscard]] QList<api::Provider> providers() const;

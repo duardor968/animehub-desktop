@@ -14,7 +14,7 @@ ApplicationWindow {
 
     width: app.settings.value("window/width", 1280)
     height: app.settings.value("window/height", 820)
-    minimumWidth: 900
+    minimumWidth: 820
     minimumHeight: 600
     visible: true
     title: "AnimeHub"

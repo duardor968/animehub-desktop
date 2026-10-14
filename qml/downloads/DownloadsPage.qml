@@ -194,7 +194,7 @@ Item {
                 }
                 ToolButton {
                     visible: row.finished
-                    icon.source: Theme.source(Theme.icon.remove)
+                    icon.source: Theme.source(Theme.icon.cancel)
                     display: AbstractButton.IconOnly
                     text: "Quitar de la lista"
                     ToolTip.visible: hovered

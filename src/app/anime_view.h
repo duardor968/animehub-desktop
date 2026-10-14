@@ -2,9 +2,9 @@
 #define ANIMEHUB_APP_ANIME_VIEW_H
 
 #include "app_settings.h"
-#include "downloads/click_n_load.h"
 #include "downloads/download_manager.h"
 #include "episode_model.h"
+#include "jdownloader_view.h"
 #include "library/library_service.h"
 #include "playback/player.h"
 
@@ -18,7 +18,7 @@ struct Services {
     api::ApiClient& api;
     library::LibraryService& library;
     downloads::DownloadManager& downloads;
-    downloads::ClickNLoad& clickNLoad;
+    JDownloaderView& jdownloader;
     playback::Player& player;
     AppSettings& settings;
 };

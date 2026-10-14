@@ -12,7 +12,8 @@ const auto kConcurrent = QStringLiteral("downloads/concurrent");
 const auto kSystemPlayer = QStringLiteral("playback/systemPlayer");
 const auto kNotifications = QStringLiteral("notifications/enabled");
 const auto kCloseAction = QStringLiteral("window/closeAction");
-const auto kClickNLoad = QStringLiteral("jdownloader/clickNLoad");
+const auto kJDownloader = QStringLiteral("jdownloader/mode");
+const auto kJDownloaderDevice = QStringLiteral("jdownloader/device");
 
 } // namespace
 
@@ -110,12 +111,29 @@ void AppSettings::setCloseAction(CloseAction action) {
                                                       : QStringLiteral("ask"));
 }
 
-bool AppSettings::clickNLoad() const {
-    return settings_.value(kClickNLoad, false).toBool();
+AppSettings::JDownloader AppSettings::jdownloader() const {
+    const auto value = settings_.value(kJDownloader).toString();
+    if (value == u"local") {
+        return JDownloader::Local;
+    }
+    if (value == u"remote") {
+        return JDownloader::Remote;
+    }
+    return JDownloader::Off;
 }
 
-void AppSettings::setClickNLoad(bool enabled) {
-    write(kClickNLoad, enabled);
+void AppSettings::setJdownloader(JDownloader mode) {
+    write(kJDownloader, mode == JDownloader::Local    ? QStringLiteral("local")
+                        : mode == JDownloader::Remote ? QStringLiteral("remote")
+                                                      : QStringLiteral("off"));
+}
+
+QString AppSettings::jdownloaderDevice() const {
+    return settings_.value(kJDownloaderDevice).toString();
+}
+
+void AppSettings::setJdownloaderDevice(const QString& id) {
+    write(kJDownloaderDevice, id);
 }
 
 QList<api::Provider> AppSettings::providers() const {

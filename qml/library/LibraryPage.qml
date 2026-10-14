@@ -47,6 +47,9 @@ Item {
 
         StackLayout {
             SplitView.fillWidth: true
+            SplitView.minimumWidth: 480
+            // Not the widest child's implicit width (an unwrapped synopsis): the split decides.
+            implicitWidth: 480
             currentIndex: page.selected ? 1 : 0
 
             LibraryHome {

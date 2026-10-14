@@ -179,7 +179,7 @@ QString AnimeView::downloadFolder() const {
 }
 
 bool AnimeView::canSendToJDownloader() const {
-    return services_.settings.clickNLoad();
+    return services_.settings.jdownloader() != AppSettings::JDownloader::Off;
 }
 
 namespace {
@@ -464,28 +464,9 @@ void AnimeView::sendToJDownloader(double number) {
                 emit message(QStringLiteral("No hay enlaces para este episodio."), true);
                 return;
             }
-            services_.clickNLoad.send(
+            services_.jdownloader.send(
                 package, links, this,
-                [this](const std::expected<void, downloads::ClickNLoad::Failure>& sent) {
-                    if (sent) {
-                        emit message(QStringLiteral("Enlaces enviados a JDownloader."), false);
-                        return;
-                    }
-                    switch (sent.error()) {
-                    case downloads::ClickNLoad::Failure::Unreachable:
-                        emit message(QStringLiteral("Abre JDownloader con Click'n'Load activo "
-                                                    "(puerto 9666)."),
-                                     true);
-                        break;
-                    case downloads::ClickNLoad::Failure::Foreign:
-                        emit message(QStringLiteral("Otro programa está usando el puerto 9666."),
-                                     true);
-                        break;
-                    case downloads::ClickNLoad::Failure::Rejected:
-                        emit message(QStringLiteral("JDownloader no aceptó los enlaces."), true);
-                        break;
-                    }
-                });
+                [this](bool sent, const QString& text) { emit message(text, !sent); });
         });
 }
 

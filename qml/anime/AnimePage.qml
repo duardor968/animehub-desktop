@@ -19,9 +19,22 @@ Item {
         view: page.view
     }
 
+    // A new anime starts at its top; its header grows as images arrive, so keep it there until
+    // the user scrolls.
+    property bool scrolled: false
+    Connections {
+        target: page.view
+        function onSlugChanged() {
+            page.scrolled = false
+            episodes.positionViewAtBeginning()
+        }
+    }
+
     ListView {
         id: episodes
         anchors.fill: parent
+        onMovementStarted: page.scrolled = true
+        onOriginYChanged: if (!page.scrolled) positionViewAtBeginning()
         clip: true
         model: page.view.episodes
         boundsBehavior: Flickable.StopAtBounds

@@ -143,12 +143,16 @@ Dialog {
 
             SectionTitle { text: "JDownloader" }
 
-            FieldLabel { text: "Click'n'Load" }
+            FieldLabel { text: "Enviar enlaces a" }
             RowLayout {
-                Switch {
-                    text: "Enviar enlaces a JDownloader"
-                    checked: dialog.settings.clickNLoad
-                    onToggled: dialog.settings.clickNLoad = checked
+                Layout.fillWidth: true
+
+                ComboBox {
+                    Layout.fillWidth: true
+                    model: ["No enviar", "JDownloader en este equipo", "MyJDownloader"]
+                    currentIndex: dialog.settings.jdownloader
+                    onActivated: index => dialog.settings.jdownloader = index
+                    Accessible.name: "Enviar enlaces a"
                 }
 
                 Glyph {
@@ -161,12 +165,118 @@ Dialog {
                 }
             }
 
+            FieldLabel {
+                text: "Cuenta"
+                visible: remote.visible
+            }
+            RowLayout {
+                id: remote
+                Layout.fillWidth: true
+                visible: dialog.settings.jdownloader === AppSettings.Remote
+
+                Label {
+                    Layout.fillWidth: true
+                    text: dialog.app.jdownloader.account || "Sin conectar"
+                    color: dialog.app.jdownloader.account ? Theme.ink : Theme.muted
+                    elide: Text.ElideRight
+                }
+                BusyIndicator {
+                    Layout.preferredWidth: 20
+                    Layout.preferredHeight: 20
+                    running: dialog.app.jdownloader.busy
+                    visible: running
+                }
+                Button {
+                    text: dialog.app.jdownloader.account ? "Desconectar" : "Conectar…"
+                    onClicked: dialog.app.jdownloader.account ? dialog.app.jdownloader.disconnectAccount()
+                                                              : accountDialog.open()
+                }
+            }
+
+            FieldLabel {
+                text: "Equipo"
+                visible: device.visible
+            }
+            ComboBox {
+                id: device
+                Layout.fillWidth: true
+                visible: remote.visible && dialog.app.jdownloader.devices.length > 0
+                textRole: "name"
+                valueRole: "id"
+                model: dialog.app.jdownloader.devices
+                currentIndex: Math.max(0, indexOfValue(dialog.settings.jdownloaderDevice))
+                onActivated: dialog.settings.jdownloaderDevice = currentValue
+                Accessible.name: "Equipo con JDownloader"
+            }
+
+            Item {
+                visible: jdProblem.visible
+                Layout.preferredWidth: 1
+            }
+            Label {
+                id: jdProblem
+                Layout.fillWidth: true
+                visible: remote.visible && dialog.app.jdownloader.problem !== ""
+                text: dialog.app.jdownloader.problem
+                color: Theme.danger
+                wrapMode: Text.Wrap
+            }
+
             Label {
                 Layout.columnSpan: 2
                 Layout.topMargin: 24
                 text: "AnimeHub " + dialog.app.version
                 color: Theme.faint
                 font.pixelSize: Theme.caption
+            }
+        }
+    }
+
+    Dialog {
+        id: accountDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: 420
+        modal: true
+        title: "Conectar MyJDownloader"
+        onOpened: {
+            password.text = ""
+            email.forceActiveFocus()
+        }
+        onAccepted: dialog.app.jdownloader.connectAccount(email.text, password.text)
+
+        ColumnLayout {
+            width: 372
+            spacing: 10
+
+            TextField {
+                id: email
+                Layout.fillWidth: true
+                placeholderText: "Correo"
+                inputMethodHints: Qt.ImhEmailCharactersOnly
+                text: dialog.app.jdownloader.account
+                Accessible.name: "Correo de MyJDownloader"
+            }
+            TextField {
+                id: password
+                Layout.fillWidth: true
+                placeholderText: "Contraseña"
+                echoMode: TextInput.Password
+                Accessible.name: "Contraseña de MyJDownloader"
+                onAccepted: accountDialog.accept()
+            }
+        }
+
+        footer: DialogButtonBox {
+            Button {
+                text: "Conectar"
+                highlighted: true
+                enabled: email.text.trim() !== "" && password.text !== ""
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+            Button {
+                text: "Cancelar"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
             }
         }
     }
