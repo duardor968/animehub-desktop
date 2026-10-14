@@ -194,6 +194,14 @@ ApplicationWindow {
         function onMessage(text, problem) { toast.show(text, problem) }
     }
     Connections {
+        target: window.app.libraryAnime
+        function onUndoable(text) { toast.show(text, false, "Deshacer", () => window.app.libraryAnime.undo()) }
+    }
+    Connections {
+        target: window.app.catalogAnime
+        function onUndoable(text) { toast.show(text, false, "Deshacer", () => window.app.catalogAnime.undo()) }
+    }
+    Connections {
         target: window.app.downloads
         function onMessage(text, problem) { toast.show(text, problem) }
     }

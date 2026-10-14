@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// The top of an anime's page: backdrop, poster, titles, main action and synopsis.
+// The top of an anime's page: backdrop, poster, titles, facts, the actions and the synopsis.
 Item {
     id: root
 
@@ -11,9 +11,18 @@ Item {
     property string backText
 
     signal back()
+    signal chooseRange()
+    signal chooseEpisodes()
+    // A film has no episode list: its position is typed from here.
+    signal askPosition()
 
     readonly property bool hasBackdrop: backdrop.status === Image.Ready
-    implicitHeight: content.y + content.implicitHeight + 8
+    // The actions leave the column beside the poster when they no longer fit in one line there.
+    readonly property bool actionsBelow: primaryActions.implicitWidth + actionRow.spacing
+                                         + secondaryActions.implicitWidth > titles.width
+    // The row of actions, for the compact bar to appear once it scrolls away.
+    readonly property Item actions: actionRow
+    implicitHeight: content.y + content.implicitHeight
 
     Image {
         id: backdrop
@@ -102,14 +111,26 @@ Item {
                     elide: Text.ElideRight
                 }
 
+                // "★ 9,1 (48 mil) · TV Anime · 2023 · Finalizado · 28 episodios": one text, so a
+                // narrow column wraps it between words instead of cutting it.
                 Label {
+                    readonly property string star: "<span style=\"font-family:'" + Theme.iconFont
+                                                    + "'; font-size:13px\">" + Theme.glyph(Theme.icon.starFilled)
+                                                    + "</span>"
+                    readonly property string score: root.view.score === "" ? ""
+                        : "<span style=\"color:" + Theme.ink + "; font-weight:600\">" + star + "&nbsp;"
+                          + root.view.score + "</span>" + (root.view.facts !== "" ? " · " : "")
+
                     Layout.fillWidth: true
                     Layout.topMargin: 4
-                    visible: text !== ""
-                    text: root.view.facts
+                    visible: root.view.score !== "" || root.view.facts !== ""
+                    textFormat: Text.RichText
+                    text: score + root.view.facts.replace(/&/g, "&amp;").replace(/</g, "&lt;")
                     color: Theme.muted
                     font.pixelSize: Theme.body
-                    elide: Text.ElideRight
+                    wrapMode: Text.Wrap
+                    Accessible.name: (root.view.score !== "" ? "Puntuación " + root.view.score + ". " : "")
+                                     + root.view.facts
                 }
 
                 Label {
@@ -118,85 +139,44 @@ Item {
                     text: root.view.genres
                     color: Theme.muted
                     font.pixelSize: Theme.body
-                    elide: Text.ElideRight
+                    wrapMode: Text.Wrap
                 }
 
-                // Wraps instead of pushing the page wider than the window.
-                Flow {
+                RowLayout {
+                    visible: root.view.nextAiring !== ""
+                    spacing: 8
+
+                    Glyph {
+                        glyph: Theme.icon.clock
+                        size: 14
+                        color: Theme.muted
+                    }
+
+                    Label {
+                        text: "Próximo episodio: " + root.view.nextAiring
+                        color: Theme.ink
+                        font.pixelSize: Theme.body
+                    }
+                }
+
+                // Where the actions go while they fit beside the poster.
+                Item {
+                    id: besideSlot
                     Layout.topMargin: 14
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                    spacing: 8
-
-                    // Where the episode was left goes with the button that resumes it.
-                    Column {
-                        spacing: 8
-
-                        Button {
-                            id: primary
-                            visible: root.view.primaryAction !== AnimeView.None
-                            highlighted: root.view.primaryAction !== AnimeView.Wait
-                            enabled: root.view.primaryAction !== AnimeView.Wait
-                            text: root.view.primaryText
-                            icon.source: Theme.source(root.view.primaryAction === AnimeView.Play
-                                                      ? Theme.icon.play : Theme.icon.download)
-                            onClicked: root.view.primary()
-                        }
-
-                        RowLayout {
-                            visible: root.view.resumeProgress >= 0
-                            spacing: 10
-
-                            ProgressLine {
-                                Layout.preferredWidth: 180
-                                value: root.view.resumeProgress
-                            }
-
-                            Label {
-                                text: root.view.resumeText
-                                color: Theme.muted
-                                font.pixelSize: Theme.caption
-                            }
-                        }
-                    }
-
-                    Button {
-                        visible: root.view.loaded && !root.view.inLibrary
-                        text: "Añadir a la biblioteca"
-                        icon.source: Theme.source(Theme.icon.add)
-                        onClicked: root.view.setInLibrary(true)
-                    }
-
-                    // The two icons wrap together, never one alone.
-                    Row {
-                        spacing: 4
-
-                        ToolButton {
-                            visible: root.view.loaded
-                            icon.source: Theme.source(root.view.favorite ? Theme.icon.starFilled : Theme.icon.star)
-                            icon.color: root.view.favorite ? Theme.warning : Theme.ink
-                            display: AbstractButton.IconOnly
-                            text: root.view.favorite ? "Quitar de favoritos" : "Añadir a favoritos"
-                            Accessible.checkable: true
-                            Accessible.checked: root.view.favorite
-                            ToolTip.visible: hovered
-                            ToolTip.text: text
-                            onClicked: root.view.setFavorite(!root.view.favorite)
-                        }
-
-                        ToolButton {
-                            id: moreButton
-                            visible: root.view.loaded
-                            icon.source: Theme.source(Theme.icon.more)
-                            display: AbstractButton.IconOnly
-                            text: "Más opciones"
-                            ToolTip.visible: hovered
-                            ToolTip.text: text
-                            onClicked: moreMenu.popup(moreButton, 0, moreButton.height)
-                        }
-                    }
+                    implicitHeight: actionRow.implicitHeight
+                    visible: !root.actionsBelow
                 }
             }
+        }
+
+        // ...and once they do not: the whole width under the poster.
+        Item {
+            id: belowSlot
+            Layout.fillWidth: true
+            implicitHeight: actionRow.implicitHeight
+            visible: root.actionsBelow
         }
 
         Label {
@@ -249,25 +229,70 @@ Item {
                 onClicked: root.view.reload()
             }
         }
+    }
 
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.topMargin: 8
-            visible: root.view.episodes.count > 0
+    // The main action and the rest; beside the poster while they fit there, under it otherwise.
+    // Each group wraps as one.
+    Flow {
+        id: actionRow
+        parent: root.actionsBelow ? belowSlot : besideSlot
+        width: parent.width
+        spacing: 8
 
-            Label {
-                text: "Episodios"
-                color: Theme.ink
-                font.pixelSize: Theme.subtitle
-                font.weight: Font.DemiBold
-                Accessible.role: Accessible.Heading
+        PrimaryActions {
+            id: primaryActions
+            view: root.view
+            onChooseRange: root.chooseRange()
+            onChooseEpisodes: root.chooseEpisodes()
+        }
+
+        Row {
+            id: secondaryActions
+            spacing: 8
+
+            Button {
+                visible: root.view.trailerUrl.toString() !== ""
+                text: "Tráiler"
+                icon.source: Theme.source("e8a7")
+                Accessible.name: "Ver el tráiler en el navegador"
+                onClicked: root.view.openTrailer()
             }
 
-            BusyIndicator {
-                Layout.preferredWidth: 20
-                Layout.preferredHeight: 20
-                running: root.view.refreshing
-                visible: running
+            // Being in the library is a state: pressing it takes the anime out.
+            Button {
+                visible: root.view.loaded
+                text: root.view.inLibrary ? "En la biblioteca" : "Añadir a la biblioteca"
+                icon.source: Theme.source(root.view.inLibrary ? Theme.icon.check : Theme.icon.add)
+                Accessible.checkable: true
+                Accessible.checked: root.view.inLibrary
+                ToolTip.visible: hovered && root.view.inLibrary
+                ToolTip.text: "Quitar de la biblioteca"
+                onClicked: root.view.setInLibrary(!root.view.inLibrary)
+            }
+
+            ToolButton {
+                visible: root.view.loaded
+                icon.source: Theme.source(root.view.favorite ? Theme.icon.starFilled
+                                                             : Theme.icon.star)
+                icon.color: root.view.favorite ? Theme.warning : Theme.ink
+                display: AbstractButton.IconOnly
+                text: root.view.favorite ? "Quitar de favoritos" : "Añadir a favoritos"
+                Accessible.checkable: true
+                Accessible.checked: root.view.favorite
+                ToolTip.visible: hovered
+                ToolTip.text: text
+                onClicked: root.view.setFavorite(!root.view.favorite)
+            }
+
+            ToolButton {
+                id: moreButton
+                visible: root.view.loaded
+                icon.source: Theme.source(Theme.icon.more)
+                display: AbstractButton.IconOnly
+                text: "Más opciones"
+                ToolTip.visible: hovered
+                ToolTip.text: text
+                onClicked: moreMenu.popup(moreButton, 0, moreButton.height)
             }
         }
     }
@@ -275,7 +300,12 @@ Item {
     ActionMenu {
         id: moreMenu
 
+        // Checked when the menu opens: the folder appears with the first download.
+        property bool folderExists: false
+        onAboutToShow: folderExists = root.view.hasFolder()
+
         MenuEntry {
+            visible: root.view.airing
             text: "Avisar de episodios nuevos"
             checkable: true
             checked: root.view.notify
@@ -283,6 +313,7 @@ Item {
             onTriggered: root.view.setNotify(checked)
         }
         MenuEntry {
+            visible: root.view.airing
             text: "Descargar episodios nuevos"
             checkable: true
             checked: root.view.autoDownload
@@ -295,34 +326,61 @@ Item {
                 }
             }
         }
-        MenuSeparator {}
-        MenuEntry {
-            text: "Descargar los no vistos"
-            glyph: Theme.icon.download
-            onTriggered: root.view.downloadUnwatched()
-        }
-        MenuEntry {
-            text: "Marcar todo como visto"
-            onTriggered: root.view.markAllWatched()
-        }
-        MenuEntry {
-            text: "Marcar todo como no visto"
-            onTriggered: root.view.markAllUnwatched()
-        }
-        MenuEntry {
-            text: "Abrir la carpeta"
-            glyph: Theme.icon.folder
-            onTriggered: root.view.openFolder()
-        }
         MenuSeparator {
-            visible: root.view.inLibrary
+            visible: root.view.airing
             height: visible ? implicitHeight : 0
         }
         MenuEntry {
-            text: "Quitar de la biblioteca"
-            glyph: Theme.icon.remove
-            visible: root.view.inLibrary
-            onTriggered: root.view.setInLibrary(false)
+            visible: root.view.watchedProgress < 1
+            text: root.view.single ? "Marcar como visto" : "Marcar todo como visto"
+            onTriggered: root.view.markAllWatched()
+        }
+        MenuEntry {
+            visible: root.view.watchedProgress > 0 || root.view.nextProgress >= 0
+            text: root.view.single ? "Marcar como no visto" : "Marcar todo como no visto"
+            onTriggered: root.view.markAllUnwatched()
+        }
+        MenuEntry {
+            visible: root.view.single
+            text: "Continuar desde…"
+            glyph: Theme.icon.clock
+            onTriggered: root.askPosition()
+        }
+        MenuSeparator {
+            visible: root.view.hasDownloads || moreMenu.folderExists || root.view.watchedOnDisk
+                     || (root.view.single && (root.view.diskText !== ""
+                                              || root.view.canSendToJDownloader))
+            height: visible ? implicitHeight : 0
+        }
+        MenuEntry {
+            visible: root.view.hasDownloads
+            text: "Cancelar la descarga"
+            glyph: Theme.icon.cancel
+            onTriggered: root.view.cancelSeries(false)
+        }
+        MenuEntry {
+            visible: root.view.single && root.view.canSendToJDownloader && root.view.diskText === ""
+            text: "Enviar a JDownloader"
+            glyph: Theme.icon.send
+            onTriggered: root.view.sendToJDownloader(root.view.firstNumber)
+        }
+        MenuEntry {
+            visible: root.view.watchedOnDisk && !root.view.single
+            text: "Mover los vistos a la Papelera"
+            glyph: Theme.icon.trash
+            onTriggered: root.view.trashWatched()
+        }
+        MenuEntry {
+            visible: root.view.single && root.view.diskText !== ""
+            text: "Mover a la Papelera"
+            glyph: Theme.icon.trash
+            onTriggered: root.view.trashFile(root.view.firstNumber)
+        }
+        MenuEntry {
+            visible: moreMenu.folderExists
+            text: "Abrir la carpeta"
+            glyph: Theme.icon.folder
+            onTriggered: root.view.openFolder()
         }
     }
 
@@ -344,7 +402,7 @@ Item {
         footer: DialogButtonBox {
             Button {
                 text: "Activar"
-                highlighted: true
+                highlighted: autoDownloadDialog.visible // DialogButtonBox clears it while it builds
                 DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
             }
             Button {

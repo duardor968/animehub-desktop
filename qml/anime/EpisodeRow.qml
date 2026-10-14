@@ -9,6 +9,8 @@ ItemDelegate {
 
     required property AnimeView view
     required property EpisodeMenu menu
+    // The page is choosing episodes: every row shows its check box.
+    property bool selecting: false
     required property int index
     required property real number
     required property string label
@@ -22,17 +24,44 @@ ItemDelegate {
     required property string downloadState
     required property real downloadProgress
     required property string downloadText
+    required property bool selected
+    required property bool first
 
     readonly property bool watched: watchState === 2
     readonly property bool transferring: downloadState !== "" && downloadState !== "failed"
+    // "Visto · En disco", "8:12 de 24:00 · En disco"
+    readonly property string status: {
+        const parts = []
+        if (watched)
+            parts.push("Visto")
+        else if (progressText !== "")
+            parts.push(progressText)
+        if (hasFile)
+            parts.push("En disco")
+        return parts.join(" · ")
+    }
+
+    function toggle(extend) {
+        view.episodes.toggle(number, extend)
+    }
 
     height: 76
     leftPadding: 32
     rightPadding: 24
-    Accessible.name: label + (title ? ", " + title : "") + (watched ? ", visto" : "")
+    Accessible.name: label + (title ? ", " + title : "") + (status ? ", " + status : "")
+                     + (selected ? ", seleccionado" : "")
     onDoubleClicked: if (hasFile) view.play(number)
-    onClicked: ListView.view.currentIndex = index
+    // The clicked row takes the keyboard: Space marks it, Enter plays it.
+    onClicked: {
+        ListView.view.currentIndex = index
+        forceActiveFocus()
+    }
     Keys.onReturnPressed: if (hasFile) view.play(number)
+    // Space marks the episode, as its check box would; Mayús+Espacio extends the span.
+    Keys.onSpacePressed: event => {
+        toggle(event.modifiers & Qt.ShiftModifier)
+        event.accepted = true
+    }
 
     contentItem: RowLayout {
         spacing: 16
@@ -54,6 +83,35 @@ ItemDelegate {
                 visible: row.progress >= 0
                 value: row.progress
                 radius: 0
+            }
+
+            // On the thumbnail's corner, as on the web; shown on hover or while choosing.
+            CheckBox {
+                id: box
+                x: 4
+                y: 4
+                padding: 0
+                focusPolicy: Qt.NoFocus
+                checked: row.selected
+                opacity: row.selected || row.selecting || row.hovered ? 1 : 0
+                visible: opacity > 0
+                Behavior on opacity { NumberAnimation { duration: 120 } }
+                Accessible.name: "Seleccionar " + row.label.toLowerCase()
+                // Keyboard and screen readers toggle the box itself.
+                onToggled: {
+                    row.toggle(false)
+                    checked = Qt.binding(() => row.selected)
+                }
+
+                // Mayús+clic marks a span: a click's modifiers do not reach the box's signal.
+                // The row takes the focus, so Esc and Space reach the page from here.
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: mouse => {
+                        row.forceActiveFocus()
+                        row.toggle(mouse.modifiers & Qt.ShiftModifier)
+                    }
+                }
             }
         }
 
@@ -98,7 +156,7 @@ ItemDelegate {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 6
-                visible: row.watched || row.progressText !== ""
+                visible: row.status !== ""
 
                 Glyph {
                     visible: row.watched
@@ -109,9 +167,10 @@ ItemDelegate {
 
                 Label {
                     Layout.fillWidth: true
-                    text: row.watched ? "Visto" : row.progressText
+                    text: row.status
                     color: Theme.muted
                     font.pixelSize: Theme.caption
+                    elide: Text.ElideRight
                 }
             }
         }

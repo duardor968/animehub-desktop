@@ -105,8 +105,16 @@ qt_add_qml_module(animehub-desktop
     qml/SettingsDialog.qml
     qml/anime/AnimeHeader.qml
     qml/anime/AnimePage.qml
+    qml/anime/CompactBar.qml
+    qml/anime/ConfirmDialog.qml
     qml/anime/EpisodeMenu.qml
     qml/anime/EpisodeRow.qml
+    qml/anime/EpisodesBar.qml
+    qml/anime/Pager.qml
+    qml/anime/PrimaryActions.qml
+    qml/anime/ProgressBand.qml
+    qml/anime/RangeDialog.qml
+    qml/anime/SelectionBar.qml
     qml/catalog/CatalogPage.qml
     qml/components/ActionMenu.qml
     qml/components/Glyph.qml
