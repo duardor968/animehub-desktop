@@ -19,6 +19,7 @@ AnimeHub Desktop es una aplicación nativa C++26 con Qt Quick para Windows: bibl
 
 - Referencia: la biblioteca de Steam. Pestañas arriba (Biblioteca · Catálogo · Descargas) y Ajustes en un diálogo; en Biblioteca, lista a la izquierda y a la derecha el inicio con portadas o la ficha. Barra de descarga abajo solo con descargas activas.
 - Controles del estilo FluentWinUI3 de Qt sin re-estilar, tema oscuro, acento de marca `#2f81f7`, iconos Segoe Fluent Icons (`image://glyph/<código>` para `icon.source`). Tokens en `qml/Theme.qml`.
+- Menús con `ActionMenu` y `MenuEntry`, diálogos con `ModalDialog` y portadas con los tokens `poster*` de `Theme`: corrigen el ancho fijo de los menús de Fluent, la alineación de sus textos, la barra de título bajo el velo modal y los tamaños entre filas y rejillas.
 - Teclado, foco visible, nombres accesibles y la acción "pulsar" de accesibilidad en todo control; la ventana debe funcionar desde su ancho mínimo.
 - Las acciones destructivas o automáticas comunican destino, alcance y recuperación (los archivos van a la papelera).
 
