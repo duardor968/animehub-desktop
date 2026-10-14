@@ -297,7 +297,8 @@ private slots:
         QVERIFY(!leftovers(downloads_).isEmpty());
         manager_->cancel(id);
         QCOMPARE(taskOf(id)->state, TaskState::Cancelled);
-        QTRY_VERIFY_WITH_TIMEOUT(leftovers(downloads_).isEmpty(), 6000);
+        // aria2 lets go of the files once it has stopped, later on a slow machine.
+        QTRY_VERIFY_WITH_TIMEOUT(leftovers(downloads_).isEmpty(), kTimeout);
         // A cancelled episode can be queued again.
         QVERIFY(manager_->enqueue(QStringLiteral("sousou-no-frieren"), 1,
                                   QStringLiteral("Sousou no Frieren"), TaskOrigin::Manual));

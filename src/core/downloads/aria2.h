@@ -61,7 +61,8 @@ public:
     void pause(const QString& gid);
     void resume(const QString& gid);
     // Stops the transfer and forgets it; the partial file and its control file stay on disk.
-    void remove(const QString& gid);
+    // `stopped` runs, while `context` lives, once aria2 has let go of the files (or after ~5 s).
+    void remove(const QString& gid, QObject* context = nullptr, std::function<void()> stopped = {});
     using StatusDone = std::function<void(const std::expected<QList<Transfer>, QString>&)>;
     void status(const QStringList& gids, QObject* context, StatusDone done);
     // Asks aria2 to save its control files and exit; `done` runs once it has (or after 6 s).
@@ -74,6 +75,7 @@ signals:
 private:
     void call(const QString& method, QJsonArray params, QObject* context, Done done);
     void waitUntilReady(int attempt);
+    void waitStopped(const QString& gid, int attempts_left, std::function<void()> stopped);
     [[nodiscard]] QUrl endpoint() const;
 
     QNetworkAccessManager& network_;

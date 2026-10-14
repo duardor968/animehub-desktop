@@ -8,6 +8,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPointer>
 #include <QRandomGenerator>
 #include <QTcpServer>
 
@@ -228,10 +229,38 @@ void Aria2::resume(const QString& gid) {
     call(QStringLiteral("aria2.unpause"), {gid}, this, [](const auto&) {});
 }
 
-void Aria2::remove(const QString& gid) {
-    call(QStringLiteral("aria2.forceRemove"), {gid}, this, [this, gid](const auto&) {
-        call(QStringLiteral("aria2.removeDownloadResult"), {gid}, this, [](const auto&) {});
-    });
+void Aria2::remove(const QString& gid, QObject* context, std::function<void()> stopped) {
+    // The callback runs only while its context lives.
+    auto guarded = [context = QPointer<QObject>(context), stopped = std::move(stopped)] {
+        if (stopped && context) {
+            stopped();
+        }
+    };
+    call(QStringLiteral("aria2.forceRemove"), {gid}, this,
+         [this, gid, guarded = std::move(guarded)](const auto&) mutable {
+             waitStopped(gid, 50, std::move(guarded));
+         });
+}
+
+// aria2 stops a removed transfer on a later turn of its loop and only then closes its files.
+void Aria2::waitStopped(const QString& gid, int attempts_left, std::function<void()> stopped) {
+    status({gid}, this,
+           [this, gid, attempts_left, stopped = std::move(stopped)](const auto& result) mutable {
+               using S = Transfer::Status;
+               const bool running =
+                   result && !result->isEmpty() &&
+                   (result->first().status == S::Active || result->first().status == S::Waiting ||
+                    result->first().status == S::Paused);
+               if (running && attempts_left > 0) {
+                   QTimer::singleShot(100, this,
+                                      [this, gid, attempts_left, stopped = std::move(stopped)] {
+                                          waitStopped(gid, attempts_left - 1, stopped);
+                                      });
+                   return;
+               }
+               call(QStringLiteral("aria2.removeDownloadResult"), {gid}, this, [](const auto&) {});
+               stopped();
+           });
 }
 
 void Aria2::shutdown(std::function<void()> done) {

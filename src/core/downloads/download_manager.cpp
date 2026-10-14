@@ -10,6 +10,8 @@
 #include <QStorageInfo>
 #include <QThreadPool>
 
+#include <algorithm>
+
 namespace animehub::downloads {
 namespace {
 
@@ -738,15 +740,19 @@ void DownloadManager::store(const Task& task, bool announce) {
     }
 }
 
-void DownloadManager::dropTransfer(qint64 id) {
+void DownloadManager::dropTransfer(qint64 id, std::function<void()> stopped) {
     auto& live = live_[id];
     ++live.generation;
     if (live.cancel) {
         live.cancel->store(true);
     }
     if (!live.gid.isEmpty()) {
-        services_.aria2.remove(live.gid);
+        services_.aria2.remove(live.gid, this, std::move(stopped));
         live.gid.clear();
+        return;
+    }
+    if (stopped) {
+        stopped();
     }
 }
 
@@ -815,8 +821,16 @@ void DownloadManager::cancel(qint64 id) {
     if (it == tasks_.end() || finished(it->state)) {
         return;
     }
-    dropTransfer(id);
-    deletePartials(it->targetPath);
+    // The partial files go once aria2 has let go of them, unless the episode was asked for
+    // again meanwhile: they are then that task's.
+    dropTransfer(id, [this, path = it->targetPath] {
+        const bool reused = std::ranges::any_of(tasks_, [&path](const Task& task) {
+            return !finished(task.state) && task.targetPath == path;
+        });
+        if (!reused) {
+            deletePartials(path);
+        }
+    });
     it->state = TaskState::Cancelled;
     it->bytesPerSecond = 0;
     it->finishedAt = QDateTime::currentDateTimeUtc();

@@ -102,7 +102,8 @@ private:
     void fail(qint64 id, TaskIssue issue, const QString& detail = {});
     void setState(qint64 id, TaskState state);
     void store(const Task& task, bool announce = true);
-    void dropTransfer(qint64 id);
+    // Stops whatever moves the task's bytes; `stopped` runs once the files are free.
+    void dropTransfer(qint64 id, std::function<void()> stopped = {});
     void deletePartials(const QString& final_path);
     void removeFiles(const QStringList& paths, int attempts_left);
     [[nodiscard]] bool isCurrent(qint64 id, quint64 generation, TaskState state) const;
