@@ -280,7 +280,10 @@ private slots:
         const auto paused_at = taskOf(id)->bytesDone;
         QTest::qWait(1000);
         QCOMPARE(taskOf(id)->bytesDone, paused_at);
-        manager_->resume(id);
+        // Asking for the episode again resumes the same task.
+        QCOMPARE(*manager_->enqueue(QStringLiteral("sousou-no-frieren"), 1,
+                                    QStringLiteral("Sousou no Frieren"), TaskOrigin::Manual),
+                 id);
         QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 1, kTimeout);
         QCOMPARE(sha256File(taskOf(id)->targetPath), vectors().value(u"plainSha256").toString());
     }

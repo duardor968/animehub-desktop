@@ -178,6 +178,8 @@ std::expected<qint64, QString> DownloadManager::enqueue(const QString& slug, dou
     if (const auto existing = activeTaskFor(slug, number)) {
         if (existing->state == TaskState::Failed) {
             retry(existing->id);
+        } else if (existing->state == TaskState::Paused) {
+            resume(existing->id);
         }
         return existing->id;
     }
