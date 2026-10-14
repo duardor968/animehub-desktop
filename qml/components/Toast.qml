@@ -2,18 +2,23 @@ import QtQuick
 import QtQuick.Controls
 import AnimeHub
 
-// A short outcome at the bottom of the window ("Enlaces enviados a JDownloader").
+// A short outcome at the bottom of the window ("Enlaces enviados a JDownloader"), with an
+// optional action such as "Deshacer".
 Rectangle {
     id: root
 
-    function show(text, problem) {
+    function show(text, problem, actionText, action) {
         label.text = text
         root.problem = problem
+        root.actionText = actionText || ""
+        root.action = action || null
         opacity = 1
         timer.restart()
     }
 
     property bool problem: false
+    property string actionText
+    property var action: null
 
     width: Math.min(row.implicitWidth + 32, parent.width - 48)
     height: row.implicitHeight + 20
@@ -41,15 +46,29 @@ Rectangle {
             id: label
             color: Theme.ink
             font.pixelSize: Theme.body
-            width: Math.min(implicitWidth, root.parent ? root.parent.width - 120 : 600)
+            width: Math.min(implicitWidth, root.parent ? root.parent.width - 240 : 600)
             wrapMode: Text.Wrap
             anchors.verticalCenter: parent.verticalCenter
+        }
+
+        Button {
+            visible: root.actionText !== ""
+            flat: true
+            text: root.actionText
+            anchors.verticalCenter: parent.verticalCenter
+            onClicked: {
+                const action = root.action
+                root.opacity = 0
+                if (action)
+                    action()
+            }
         }
     }
 
     Timer {
         id: timer
-        interval: root.problem ? 6000 : 3500
+        // Long enough to reach an action.
+        interval: root.actionText !== "" ? 8000 : root.problem ? 6000 : 3500
         onTriggered: root.opacity = 0
     }
 }
