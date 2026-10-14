@@ -110,6 +110,7 @@ qt_add_qml_module(animehub-desktop
     qml/anime/EpisodeMenu.qml
     qml/anime/EpisodeRow.qml
     qml/anime/EpisodesBar.qml
+    qml/anime/OptionsMenu.qml
     qml/anime/Pager.qml
     qml/anime/PrimaryActions.qml
     qml/anime/ProgressBand.qml

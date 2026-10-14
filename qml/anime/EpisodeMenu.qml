@@ -23,7 +23,7 @@ Item {
         hasFile = row.hasFile
         first = row.first
         downloadState = row.downloadState
-        menu.popup(anchor, 0, anchor.height)
+        menu.show(anchor)
     }
 
     // "Continuar desde…" for one episode (or the film).
@@ -33,48 +33,58 @@ Item {
         continueDialog.open()
     }
 
-    ActionMenu {
+    OptionsMenu {
         id: menu
 
+        entries: [watchedEntry, throughEntry, positionEntry, fileSeparator, cancelEntry, revealEntry,
+                  trashEntry, sendEntry]
+
         MenuEntry {
+            id: watchedEntry
             text: root.watched ? "Marcar como no visto" : "Marcar como visto"
             onTriggered: root.watched ? root.view.markUnwatched(root.number)
                                       : root.view.markWatched(root.number)
         }
         MenuEntry {
-            visible: !root.first
+            id: throughEntry
+            property bool wanted: !root.first
             text: "Marcar como visto hasta aquí"
             onTriggered: root.view.markWatchedThrough(root.number)
         }
         MenuEntry {
+            id: positionEntry
             text: "Continuar desde…"
             glyph: Theme.icon.clock
             onTriggered: continueDialog.open()
         }
         MenuSeparator {
-            visible: root.downloadState !== "" || root.hasFile || root.view.canSendToJDownloader
-            height: visible ? implicitHeight : 0
+            id: fileSeparator
+            property bool separator: true
         }
         MenuEntry {
-            visible: root.downloadState !== ""
+            id: cancelEntry
+            property bool wanted: root.downloadState !== ""
             text: "Cancelar la descarga"
             glyph: Theme.icon.cancel
             onTriggered: root.view.cancelDownload(root.number, false)
         }
         MenuEntry {
-            visible: root.hasFile
+            id: revealEntry
+            property bool wanted: root.hasFile
             text: "Mostrar en la carpeta"
             glyph: Theme.icon.folder
             onTriggered: root.view.showFile(root.number)
         }
         MenuEntry {
-            visible: root.hasFile
+            id: trashEntry
+            property bool wanted: root.hasFile
             text: "Mover a la Papelera"
             glyph: Theme.icon.trash
             onTriggered: root.view.trashFile(root.number)
         }
         MenuEntry {
-            visible: root.view.canSendToJDownloader && !root.hasFile
+            id: sendEntry
+            property bool wanted: root.view.canSendToJDownloader && !root.hasFile
             text: "Enviar a JDownloader"
             glyph: Theme.icon.send
             onTriggered: root.view.sendToJDownloader(root.number)

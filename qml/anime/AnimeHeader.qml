@@ -292,20 +292,27 @@ Item {
                 text: "Más opciones"
                 ToolTip.visible: hovered
                 ToolTip.text: text
-                onClicked: moreMenu.popup(moreButton, 0, moreButton.height)
+                onClicked: {
+                    moreMenu.folderExists = root.view.hasFolder()
+                    moreMenu.show(moreButton)
+                }
             }
         }
     }
 
-    ActionMenu {
+    OptionsMenu {
         id: moreMenu
 
         // Checked when the menu opens: the folder appears with the first download.
         property bool folderExists: false
-        onAboutToShow: folderExists = root.view.hasFolder()
+
+        entries: [notifyEntry, autoEntry, airingSeparator, watchedEntry, unwatchedEntry,
+                  positionEntry, filesSeparator, cancelEntry, sendEntry, trashWatchedEntry,
+                  trashFilmEntry, folderEntry]
 
         MenuEntry {
-            visible: root.view.airing
+            id: notifyEntry
+            property bool wanted: root.view.airing
             text: "Avisar de episodios nuevos"
             checkable: true
             checked: root.view.notify
@@ -313,7 +320,8 @@ Item {
             onTriggered: root.view.setNotify(checked)
         }
         MenuEntry {
-            visible: root.view.airing
+            id: autoEntry
+            property bool wanted: root.view.airing
             text: "Descargar episodios nuevos"
             checkable: true
             checked: root.view.autoDownload
@@ -327,57 +335,64 @@ Item {
             }
         }
         MenuSeparator {
-            visible: root.view.airing
-            height: visible ? implicitHeight : 0
+            id: airingSeparator
+            property bool separator: true
         }
         MenuEntry {
-            visible: root.view.watchedProgress < 1
+            id: watchedEntry
+            property bool wanted: root.view.watchedProgress < 1
             text: root.view.single ? "Marcar como visto" : "Marcar todo como visto"
             onTriggered: root.view.markAllWatched()
         }
         MenuEntry {
-            visible: root.view.watchedProgress > 0 || root.view.nextProgress >= 0
+            id: unwatchedEntry
+            property bool wanted: root.view.watchedProgress > 0 || root.view.nextProgress >= 0
             text: root.view.single ? "Marcar como no visto" : "Marcar todo como no visto"
             onTriggered: root.view.markAllUnwatched()
         }
         MenuEntry {
-            visible: root.view.single
+            id: positionEntry
+            property bool wanted: root.view.single
             text: "Continuar desde…"
             glyph: Theme.icon.clock
             onTriggered: root.askPosition()
         }
         MenuSeparator {
-            visible: root.view.hasDownloads || moreMenu.folderExists || root.view.watchedOnDisk
-                     || (root.view.single && (root.view.diskText !== ""
-                                              || root.view.canSendToJDownloader))
-            height: visible ? implicitHeight : 0
+            id: filesSeparator
+            property bool separator: true
         }
         MenuEntry {
-            visible: root.view.hasDownloads
+            id: cancelEntry
+            property bool wanted: root.view.hasDownloads
             text: "Cancelar la descarga"
             glyph: Theme.icon.cancel
             onTriggered: root.view.cancelSeries(false)
         }
         MenuEntry {
-            visible: root.view.single && root.view.canSendToJDownloader && root.view.diskText === ""
+            id: sendEntry
+            property bool wanted: root.view.single && root.view.canSendToJDownloader
+                                  && root.view.diskText === ""
             text: "Enviar a JDownloader"
             glyph: Theme.icon.send
             onTriggered: root.view.sendToJDownloader(root.view.firstNumber)
         }
         MenuEntry {
-            visible: root.view.watchedOnDisk && !root.view.single
+            id: trashWatchedEntry
+            property bool wanted: root.view.watchedOnDisk && !root.view.single
             text: "Mover los vistos a la Papelera"
             glyph: Theme.icon.trash
             onTriggered: root.view.trashWatched()
         }
         MenuEntry {
-            visible: root.view.single && root.view.diskText !== ""
+            id: trashFilmEntry
+            property bool wanted: root.view.single && root.view.diskText !== ""
             text: "Mover a la Papelera"
             glyph: Theme.icon.trash
             onTriggered: root.view.trashFile(root.view.firstNumber)
         }
         MenuEntry {
-            visible: moreMenu.folderExists
+            id: folderEntry
+            property bool wanted: moreMenu.folderExists
             text: "Abrir la carpeta"
             glyph: Theme.icon.folder
             onTriggered: root.view.openFolder()

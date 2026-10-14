@@ -47,7 +47,7 @@ Row {
             text: "Elegir qué descargar"
             ToolTip.visible: hovered
             ToolTip.text: text
-            onClicked: downloadMenu.popup(main, 0, main.height)
+            onClicked: downloadMenu.show(main)
         }
     }
 
@@ -100,29 +100,35 @@ Row {
         text: "Descargar"
         icon.source: Theme.source(root.chevron)
         LayoutMirroring.enabled: true
-        onClicked: downloadMenu.popup(more, 0, more.height)
+        onClicked: downloadMenu.show(more)
     }
 
-    ActionMenu {
+    OptionsMenu {
         id: downloadMenu
 
+        entries: [missingEntry, unwatchedEntry, rangeEntry, chooseEntry]
+
         MenuEntry {
+            id: missingEntry
             // The main button already does it.
-            visible: root.action !== AnimeView.Download
+            property bool wanted: root.action !== AnimeView.Download
             enabled: root.view.missingCount > 0
             text: "Todo lo que falta (" + root.view.missingCount + ")"
             onTriggered: root.view.downloadMissing()
         }
         MenuEntry {
+            id: unwatchedEntry
             enabled: root.view.unwatchedMissingCount > 0
             text: "Los no vistos (" + root.view.unwatchedMissingCount + ")"
             onTriggered: root.view.downloadUnwatched()
         }
         MenuEntry {
+            id: rangeEntry
             text: "Un tramo…"
             onTriggered: root.chooseRange()
         }
         MenuEntry {
+            id: chooseEntry
             text: "Elegir episodios"
             onTriggered: root.chooseEpisodes()
         }
