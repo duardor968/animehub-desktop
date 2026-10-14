@@ -40,7 +40,7 @@ public:
     void install(HttpTestServer& server) {
         server.route("POST", "/my/connect", [this](const HttpTestServer::Request& r) {
             if (!signedWith(r, secrets.login)) {
-                return HttpTestServer::Response{.status = 403, .body = R_AUTH};
+                return HttpTestServer::Response{.status = 403, .body = kAuthFailed};
             }
             return reply(secrets.login, rid(r),
                          {{QStringLiteral("sessiontoken"), session},
@@ -49,7 +49,7 @@ public:
         server.route("POST", "/my/reconnect", [this](const HttpTestServer::Request& r) {
             const auto old_server = myjd::updateToken(secrets.login, session);
             if (!signedWith(r, old_server)) {
-                return HttpTestServer::Response{.status = 403, .body = R_AUTH};
+                return HttpTestServer::Response{.status = 403, .body = kAuthFailed};
             }
             ++reconnects;
             session = QStringLiteral("8899aabbccddeeff");
@@ -61,11 +61,11 @@ public:
         server.route("POST", "/my/listdevices", [this](const HttpTestServer::Request& r) {
             if (expireOnce) {
                 expireOnce = false;
-                return HttpTestServer::Response{.status = 403, .body = R_TOKEN};
+                return HttpTestServer::Response{.status = 403, .body = kTokenInvalid};
             }
             const auto key = serverToken();
             if (!signedWith(r, key)) {
-                return HttpTestServer::Response{.status = 403, .body = R_AUTH};
+                return HttpTestServer::Response{.status = 403, .body = kAuthFailed};
             }
             const QJsonArray list{
                 QJsonObject{{QStringLiteral("id"), QStringLiteral("dev1")},
@@ -92,8 +92,8 @@ public:
     }
 
 private:
-    static inline const QByteArray R_AUTH = "{\"src\":\"MYJD\",\"type\":\"AUTH_FAILED\"}";
-    static inline const QByteArray R_TOKEN = "{\"src\":\"MYJD\",\"type\":\"TOKEN_INVALID\"}";
+    static inline const QByteArray kAuthFailed = "{\"src\":\"MYJD\",\"type\":\"AUTH_FAILED\"}";
+    static inline const QByteArray kTokenInvalid = "{\"src\":\"MYJD\",\"type\":\"TOKEN_INVALID\"}";
     QByteArray server_base;
 
     QByteArray serverToken() const {
