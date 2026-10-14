@@ -27,6 +27,8 @@ class CatalogView final : public QObject {
     Q_PROPERTY(bool loading READ loading NOTIFY stateChanged)
     Q_PROPERTY(bool hasMore READ hasMore NOTIFY stateChanged)
     Q_PROPERTY(int total READ total NOTIFY stateChanged)
+    // The source stops counting at 1000 matches: `total` is then a lower bound.
+    Q_PROPERTY(bool capped READ capped NOTIFY stateChanged)
     Q_PROPERTY(QString problem READ problem NOTIFY stateChanged)
     Q_PROPERTY(CardModel* results READ results CONSTANT)
     Q_PROPERTY(CardModel* recentEpisodes READ recentEpisodes CONSTANT)
@@ -59,6 +61,9 @@ public:
     }
     [[nodiscard]] int total() const {
         return total_;
+    }
+    [[nodiscard]] bool capped() const {
+        return capped_;
     }
     [[nodiscard]] QString problem() const {
         return problem_;
@@ -102,6 +107,7 @@ private:
     int page_ = 0;
     int total_pages_ = 0;
     int total_ = 0;
+    bool capped_ = false;
     bool loading_ = false;
     bool started_ = false;
     QString problem_;

@@ -162,6 +162,7 @@ StackView {
                 Label {
                     text: stack.catalog.browsing
                           ? (stack.catalog.loading && grid.count === 0 ? "Buscando…"
+                             : stack.catalog.capped ? "Más de " + stack.catalog.total + " resultados"
                              : stack.catalog.total === 1 ? "1 resultado"
                              : stack.catalog.total + " resultados")
                           : "Todo el catálogo"

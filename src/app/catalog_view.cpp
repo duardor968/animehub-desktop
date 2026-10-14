@@ -167,6 +167,7 @@ void CatalogView::reload() {
     page_ = 0;
     total_pages_ = 0;
     total_ = 0;
+    capped_ = false;
     results_.setCards({});
     fetch(1);
 }
@@ -215,6 +216,7 @@ void CatalogView::fetch(int page) {
             page_ = page;
             total_pages_ = value.totalPages;
             total_ = value.totalRecords;
+            capped_ = value.capped;
             if (genres_.isEmpty() && !value.genres.isEmpty()) {
                 for (const auto& genre : value.genres) {
                     genres_.append(QVariantMap{{QStringLiteral("slug"), genre.slug},
