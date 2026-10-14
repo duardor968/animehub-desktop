@@ -41,6 +41,7 @@ DownloadsView::DownloadsView(downloads::DownloadManager& manager,
                              library::LibraryRepository& library, playback::Player& player,
                              QObject* parent)
     : QAbstractListModel(parent), manager_(manager), library_(library), player_(player) {
+    connect(&manager_, &downloads::DownloadManager::loaded, this, &DownloadsView::reload);
     connect(&manager_, &downloads::DownloadManager::taskAdded, this, &DownloadsView::reload);
     connect(&manager_, &downloads::DownloadManager::taskRemoved, this, &DownloadsView::reload);
     connect(&manager_, &downloads::DownloadManager::taskChanged, this, &DownloadsView::update);

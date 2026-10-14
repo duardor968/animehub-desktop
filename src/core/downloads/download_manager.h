@@ -66,6 +66,7 @@ public:
     [[nodiscard]] std::optional<Task> activeTaskFor(const QString& slug, double number) const;
 
 signals:
+    void loaded(); // the queue saved by the previous session is ready
     void taskAdded(qint64 id);
     void taskChanged(qint64 id);
     void taskRemoved(qint64 id);

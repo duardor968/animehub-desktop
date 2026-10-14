@@ -77,7 +77,18 @@ Item {
         anchors.centerIn: parent
         modal: true
         title: "Continuar el " + root.label.toLowerCase() + " desde"
-        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        footer: DialogButtonBox {
+            Button {
+                text: "Guardar"
+                highlighted: true
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+            Button {
+                text: "Cancelar"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+        }
         onOpened: {
             minute.text = ""
             minute.forceActiveFocus()

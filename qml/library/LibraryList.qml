@@ -59,16 +59,22 @@ Rectangle {
                                             && root.model.continueShelf.count > 0
 
             section.property: "section"
-            section.delegate: Label {
+            // ListView controls the visibility of section delegates; the label hides itself.
+            section.delegate: Item {
                 required property string section
-                visible: list.grouped
-                height: visible ? implicitHeight + 16 : 0
-                leftPadding: 16
-                topPadding: 10
-                text: section
-                color: Theme.muted
-                font.pixelSize: Theme.caption
-                font.weight: Font.DemiBold
+                width: ListView.view.width
+                height: list.grouped ? 34 : 0
+
+                Label {
+                    visible: list.grouped
+                    x: 16
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 6
+                    text: parent.section
+                    color: Theme.muted
+                    font.pixelSize: Theme.caption
+                    font.weight: Font.DemiBold
+                }
             }
 
             Keys.onReturnPressed: root.activated(root.model.slugAt(currentIndex))

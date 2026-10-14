@@ -12,6 +12,16 @@ function(animehub_deploy_runtime target)
   set(CMAKE_INSTALL_UCRT_LIBRARIES FALSE)
   include(InstallRequiredSystemLibraries)
 
+  set(unused)
+  foreach(path IN ITEMS qmltooling generic networkinformation
+               sqldrivers/qsqlibase.dll sqldrivers/qsqlmimer.dll sqldrivers/qsqloci.dll
+               sqldrivers/qsqlodbc.dll sqldrivers/qsqlpsql.dll
+               tls/qcertonlybackend.dll tls/qopensslbackend.dll
+               imageformats/qicns.dll imageformats/qtga.dll imageformats/qtiff.dll
+               imageformats/qwbmp.dll)
+    list(APPEND unused "$<TARGET_FILE_DIR:${target}>/${path}")
+  endforeach()
+
   add_custom_command(TARGET ${target} POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E env QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES=1
             "${ANIMEHUB_WINDEPLOYQT}"
@@ -19,13 +29,15 @@ function(animehub_deploy_runtime target)
             --qmldir "${PROJECT_SOURCE_DIR}/qml"
             --no-translations
             --no-system-d3d-compiler
+            --no-system-dxc-compiler
             --no-opengl-sw
             --no-compiler-runtime
             --no-ffmpeg
-            --skip-plugin-types qmltooling,generic,networkinformation
-            --exclude-plugins qsqlodbc,qsqlpsql,qsqlmimer,qsqlibase,qsqloci,qopensslbackend,qcertonlybackend,qtiff,qwbmp,qicns,qtga,qpdf
             --verbose 0
             "$<TARGET_FILE:${target}>"
+    # windeployqt 6.11 ignores --skip-plugin-types and --exclude-plugins: drop what AnimeHub does
+    # not use (QML debugging, touch, reachability, other databases, OpenSSL, unused images).
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf ${unused}
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
             "$<TARGET_FILE_DIR:${target}>"
     COMMENT "Deploying the Qt and MSVC runtime next to AnimeHub.exe"

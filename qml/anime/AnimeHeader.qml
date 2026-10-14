@@ -308,11 +308,13 @@ Item {
         id: autoDownloadDialog
         parent: Overlay.overlay
         anchors.centerIn: parent
+        width: 480
         modal: true
         title: "Descargar episodios nuevos"
 
+        // Fixed widths on both sides: Fluent's Dialog loops when its content follows it.
         Label {
-            width: 420
+            width: 432
             wrapMode: Text.Wrap
             color: Theme.ink
             text: "Cuando salga un episodio nuevo de " + root.view.title

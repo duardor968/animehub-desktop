@@ -112,6 +112,7 @@ void DownloadManager::start() {
             tasks_.insert(task.id, task);
         }
     }
+    emit loaded();
     services_.aria2.start();
     pump();
 }

@@ -43,6 +43,11 @@ QString LibraryModel::captionOf(const LibraryEntry& entry) {
     if (entry.watchedEpisodes > 0) {
         return QStringLiteral("Al día");
     }
+    if (entry.downloadedEpisodes > 0) {
+        return entry.downloadedEpisodes == 1
+                   ? QStringLiteral("1 episodio descargado")
+                   : QStringLiteral("%1 episodios descargados").arg(entry.downloadedEpisodes);
+    }
     return QStringLiteral("Sin empezar");
 }
 

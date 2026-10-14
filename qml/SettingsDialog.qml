@@ -16,7 +16,13 @@ Dialog {
     height: Math.min(implicitHeight, parent.height - 48)
     modal: true
     title: "Ajustes"
-    standardButtons: Dialog.Close
+
+    footer: DialogButtonBox {
+        Button {
+            text: "Cerrar"
+            DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+        }
+    }
 
     component SectionTitle: Label {
         Layout.columnSpan: 2
@@ -52,7 +58,7 @@ Dialog {
 
                 Label {
                     Layout.fillWidth: true
-                    text: dialog.settings.downloadDirectory
+                    text: dialog.settings.downloadDirectory.replace(/\//g, "\\")
                     color: Theme.ink
                     elide: Text.ElideMiddle
                     ToolTip.visible: folderArea.containsMouse
