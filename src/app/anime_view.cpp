@@ -152,10 +152,6 @@ bool AnimeView::favorite() const {
     return record_ && record_->favorite;
 }
 
-bool AnimeView::pending() const {
-    return record_ && record_->pending;
-}
-
 bool AnimeView::notify() const {
     return !record_ || record_->notify;
 }
@@ -478,10 +474,6 @@ void AnimeView::sendToJDownloader(double number) {
 
 void AnimeView::setFavorite(bool value) {
     report(services_.library.setFlag(slug_, library::Flag::Favorite, value));
-}
-
-void AnimeView::setPending(bool value) {
-    report(services_.library.setFlag(slug_, library::Flag::Pending, value));
 }
 
 void AnimeView::setNotify(bool value) {

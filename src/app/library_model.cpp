@@ -22,6 +22,11 @@ bool LibraryModel::continuing(const LibraryEntry& entry) {
     return entry.lastActivityAt.isValid() && entry.resumeNumber.has_value() && !entry.finished();
 }
 
+// A watched episode or one in progress.
+bool LibraryModel::started(const LibraryEntry& entry) {
+    return entry.watchedEpisodes > 0 || entry.resumePositionMs > 0;
+}
+
 QString LibraryModel::captionOf(const LibraryEntry& entry) {
     if (entry.newEpisodes > 0) {
         return entry.newEpisodes == 1
@@ -53,7 +58,7 @@ QString LibraryModel::captionOf(const LibraryEntry& entry) {
 
 double LibraryModel::progressOf(const LibraryEntry& entry) {
     const int total = std::max(entry.episodeCount.value_or(0), entry.knownEpisodes);
-    if (entry.watchedEpisodes == 0 && entry.resumePositionMs == 0) {
+    if (!started(entry)) {
         return -1;
     }
     return total > 0 ? std::clamp(static_cast<double>(entry.watchedEpisodes) / total, 0.0, 1.0)
@@ -143,12 +148,14 @@ void LibraryModel::rebuildRows() {
         switch (filter_) {
         case Filter::All:
             return true;
-        case Filter::Pending:
-            return entry.pending;
-        case Filter::Favorites:
-            return entry.favorite;
+        case Filter::Watching:
+            return started(entry) && !entry.finished();
+        case Filter::NotStarted:
+            return !started(entry);
         case Filter::Watched:
             return entry.finished();
+        case Filter::Favorites:
+            return entry.favorite;
         case Filter::Downloaded:
             return entry.downloadedEpisodes > 0;
         }

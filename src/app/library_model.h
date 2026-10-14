@@ -26,7 +26,7 @@ class LibraryModel final : public QAbstractListModel {
     Q_PROPERTY(CardModel* allShelf READ allShelf CONSTANT)
 
 public:
-    enum class Filter { All, Pending, Favorites, Watched, Downloaded };
+    enum class Filter { All, Watching, NotStarted, Watched, Favorites, Downloaded };
     Q_ENUM(Filter)
 
     enum Role {
@@ -80,6 +80,7 @@ private:
     [[nodiscard]] static QString captionOf(const library::LibraryEntry& entry);
     [[nodiscard]] static double progressOf(const library::LibraryEntry& entry);
     [[nodiscard]] static bool continuing(const library::LibraryEntry& entry);
+    [[nodiscard]] static bool started(const library::LibraryEntry& entry);
 
     library::LibraryService& library_;
     QList<library::LibraryEntry> entries_;

@@ -10,7 +10,7 @@ namespace animehub::library {
 
 using storage::Stored;
 
-enum class Flag { Favorite, Pending, Notify, AutoDownload };
+enum class Flag { Favorite, Notify, AutoDownload };
 
 // SQLite access for anime snapshots, the user's flags and per-episode state.
 class LibraryRepository {

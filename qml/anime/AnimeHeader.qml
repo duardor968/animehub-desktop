@@ -276,12 +276,6 @@ Item {
         id: moreMenu
 
         MenuEntry {
-            text: "Pendiente"
-            checkable: true
-            checked: root.view.pending
-            onTriggered: root.view.setPending(checked)
-        }
-        MenuEntry {
             text: "Avisar de episodios nuevos"
             checkable: true
             checked: root.view.notify

@@ -1,5 +1,6 @@
 #include "library_service.h"
 
+#include <QFile>
 #include <QFileInfo>
 
 namespace animehub::library {
@@ -11,8 +12,11 @@ constexpr int kEpisodesPerPage = 50;
 
 } // namespace
 
-LibraryService::LibraryService(LibraryRepository& repository, api::ApiClient& api, QObject* parent)
-    : QObject(parent), repository_(repository), api_(api) {
+LibraryService::LibraryService(LibraryRepository& repository, api::ApiClient& api, QObject* parent,
+                               MoveToTrash move_to_trash)
+    : QObject(parent), repository_(repository), api_(api),
+      move_to_trash_(move_to_trash ? std::move(move_to_trash)
+                                   : [](const QString& path) { return QFile::moveToTrash(path); }) {
     recent_timer_.setInterval(20min);
     connect(&recent_timer_, &QTimer::timeout, this, &LibraryService::checkNow);
     sweep_timer_.setInterval(6h);
@@ -88,6 +92,56 @@ Stored<void> LibraryService::markAllUnwatched(const QString& slug) {
 
 Stored<void> LibraryService::seen(const QString& slug) {
     return changed(repository_.clearNew(slug), slug, true);
+}
+
+Stored<Trashed> LibraryService::trashWatched(const QString& slug) {
+    return trash(slug,
+                 [](const EpisodeRecord& episode) { return episode.state == WatchState::Watched; });
+}
+
+Stored<Trashed> LibraryService::trashFiles(const QString& slug, const QList<double>& numbers) {
+    return trash(slug, [&numbers](const EpisodeRecord& episode) {
+        return numbers.contains(episode.number);
+    });
+}
+
+Stored<Trashed> LibraryService::trash(const QString& slug,
+                                      const std::function<bool(const EpisodeRecord&)>& chosen) {
+    const auto episodes = repository_.episodes(slug);
+    if (!episodes) {
+        return std::unexpected(episodes.error());
+    }
+    Trashed trashed;
+    std::optional<storage::StorageError> error;
+    bool touched = false;
+    for (const auto& episode : *episodes) {
+        if (episode.filePath.isEmpty() || !chosen(episode)) {
+            continue;
+        }
+        const QFileInfo file(episode.filePath);
+        if (file.exists()) {
+            const auto size = file.size();
+            if (!move_to_trash_(episode.filePath)) {
+                ++trashed.failed;
+                continue;
+            }
+            ++trashed.count;
+            trashed.bytes += size;
+        }
+        touched = true;
+        if (auto cleared = repository_.clearEpisodeFile(slug, episode.number); !cleared) {
+            error = cleared.error();
+            break;
+        }
+    }
+    if (touched) {
+        emit animeChanged(slug);
+        emit listChanged();
+    }
+    if (error) {
+        return std::unexpected(*error);
+    }
+    return trashed;
 }
 
 void LibraryService::refresh(const QString& slug, bool flag_new) {

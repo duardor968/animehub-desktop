@@ -35,7 +35,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: 12
             Layout.rightMargin: 12
-            model: ["Todo", "Pendientes", "Favoritos", "Vistos", "Descargados"]
+            model: ["Todo", "Viendo", "Sin empezar", "Vistos", "Favoritos", "Descargados"]
             currentIndex: root.model.filter
             onActivated: index => root.model.filter = index
             Accessible.name: "Mostrar"

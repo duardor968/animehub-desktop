@@ -41,7 +41,6 @@ class AnimeView final : public QObject {
     Q_PROPERTY(QString genres READ genres NOTIFY changed)
     Q_PROPERTY(bool inLibrary READ inLibrary NOTIFY changed)
     Q_PROPERTY(bool favorite READ favorite NOTIFY changed)
-    Q_PROPERTY(bool pending READ pending NOTIFY changed)
     Q_PROPERTY(bool notify READ notify NOTIFY changed)
     Q_PROPERTY(bool autoDownload READ autoDownload NOTIFY changed)
     Q_PROPERTY(QString primaryText READ primaryText NOTIFY changed)
@@ -78,7 +77,6 @@ public:
     [[nodiscard]] QString genres() const;
     [[nodiscard]] bool inLibrary() const;
     [[nodiscard]] bool favorite() const;
-    [[nodiscard]] bool pending() const;
     [[nodiscard]] bool notify() const;
     [[nodiscard]] bool autoDownload() const;
     [[nodiscard]] QString primaryText() const;
@@ -115,7 +113,6 @@ public:
     Q_INVOKABLE void sendToJDownloader(double number);
     Q_INVOKABLE void setInLibrary(bool value);
     Q_INVOKABLE void setFavorite(bool value);
-    Q_INVOKABLE void setPending(bool value);
     Q_INVOKABLE void setNotify(bool value);
     Q_INVOKABLE void setAutoDownload(bool value);
     Q_INVOKABLE void reload();

@@ -30,7 +30,6 @@ struct AnimeRecord {
 
     bool inLibrary = false;
     bool favorite = false;
-    bool pending = false;
     bool notify = true;
     bool autoDownload = false;
     QDateTime addedAt;
@@ -43,6 +42,7 @@ struct LibraryEntry : AnimeRecord {
     int knownEpisodes = 0;
     int watchedEpisodes = 0;
     int downloadedEpisodes = 0;
+    qint64 downloadedBytes = 0; // what the episodes on disk take up
     int newEpisodes = 0;
     // Episode "Continuar" plays: the one in progress, else the first unwatched after the last
     // watched one.

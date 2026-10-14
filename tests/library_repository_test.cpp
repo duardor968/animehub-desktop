@@ -1,5 +1,11 @@
 #include "library/library_repository.h"
+#include "library/library_service.h"
 
+#include <QFile>
+#include <QNetworkAccessManager>
+#include <QSignalSpy>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -7,6 +13,88 @@ using namespace animehub;
 using namespace animehub::library;
 
 namespace {
+
+// The first schema as released, frozen here to check the migrations from it.
+constexpr auto kVersionOne = R"sql(
+CREATE TABLE anime (
+    slug              TEXT PRIMARY KEY,
+    title             TEXT NOT NULL,
+    alternative_title TEXT NOT NULL DEFAULT '',
+    synopsis          TEXT NOT NULL DEFAULT '',
+    poster_url        TEXT NOT NULL DEFAULT '',
+    backdrop_url      TEXT NOT NULL DEFAULT '',
+    category          TEXT NOT NULL DEFAULT '',
+    status            TEXT NOT NULL DEFAULT 'UNKNOWN',
+    episode_count     INTEGER,
+    genres            TEXT NOT NULL DEFAULT '',
+    start_year        INTEGER,
+    in_library        INTEGER NOT NULL DEFAULT 0,
+    added_at          INTEGER,
+    favorite          INTEGER NOT NULL DEFAULT 0,
+    pending           INTEGER NOT NULL DEFAULT 0,
+    notify            INTEGER NOT NULL DEFAULT 1,
+    auto_download     INTEGER NOT NULL DEFAULT 0,
+    last_activity_at  INTEGER,
+    refreshed_at      INTEGER,
+    episodes_synced_at INTEGER
+) STRICT;
+
+CREATE TABLE episode (
+    slug         TEXT NOT NULL REFERENCES anime(slug) ON DELETE CASCADE,
+    number       REAL NOT NULL,
+    title        TEXT NOT NULL DEFAULT '',
+    image_url    TEXT NOT NULL DEFAULT '',
+    published_at INTEGER,
+    known_at     INTEGER NOT NULL,
+    is_new       INTEGER NOT NULL DEFAULT 0,
+    state        INTEGER NOT NULL DEFAULT 0,
+    position_ms  INTEGER NOT NULL DEFAULT 0,
+    duration_ms  INTEGER NOT NULL DEFAULT 0,
+    state_at     INTEGER,
+    file_path    TEXT,
+    file_size    INTEGER,
+    PRIMARY KEY (slug, number)
+) STRICT;
+
+CREATE TABLE download (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug         TEXT NOT NULL,
+    number       REAL NOT NULL,
+    anime_title  TEXT NOT NULL,
+    audio        TEXT NOT NULL DEFAULT 'SUB',
+    origin       TEXT NOT NULL DEFAULT 'manual',
+    state        TEXT NOT NULL,
+    provider     TEXT,
+    source_id    TEXT,
+    target_path  TEXT NOT NULL,
+    bytes_done   INTEGER NOT NULL DEFAULT 0,
+    bytes_total  INTEGER NOT NULL DEFAULT 0,
+    error_code   TEXT,
+    error_detail TEXT,
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    retry_at     INTEGER,
+    queue_order  INTEGER NOT NULL,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    finished_at  INTEGER
+) STRICT;
+
+CREATE UNIQUE INDEX download_active_episode ON download(slug, number, audio)
+    WHERE state NOT IN ('completed', 'cancelled');
+CREATE UNIQUE INDEX download_active_target ON download(target_path COLLATE NOCASE)
+    WHERE state NOT IN ('completed', 'cancelled');
+CREATE INDEX episode_activity ON episode(slug, state, state_at);
+
+INSERT INTO anime (slug, title, in_library, added_at, favorite, pending, notify)
+    VALUES ('sousou-no-frieren', 'Sousou no Frieren', 1, 1000, 1, 1, 0);
+INSERT INTO episode (slug, number, known_at, state, file_path, file_size)
+    VALUES ('sousou-no-frieren', 1, 1000, 2, 'D:/Anime/Frieren - 01.mp4', 5000);
+INSERT INTO download (slug, number, anime_title, state, target_path, queue_order, created_at,
+                      updated_at)
+    VALUES ('sousou-no-frieren', 2, 'Sousou no Frieren', 'paused', 'D:/Anime/Frieren - 02', 1,
+            1000, 1000);
+PRAGMA user_version = 1;
+)sql";
 
 AnimeRecord frieren() {
     AnimeRecord record;
@@ -57,7 +145,54 @@ private slots:
     }
 
     void migratesToTheCurrentSchema() {
-        QCOMPARE(database_->schemaVersion(), 1);
+        QCOMPARE(database_->schemaVersion(), 2);
+    }
+
+    void migratesAVersionOneLibrary() {
+        QTemporaryDir dir;
+        const auto path = dir.filePath(QStringLiteral("library.sqlite3"));
+        {
+            auto raw = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("v1"));
+            raw.setDatabaseName(path);
+            QVERIFY(raw.open());
+            {
+                QSqlQuery query(raw);
+                for (const auto& statement :
+                     QString::fromUtf8(kVersionOne).split(u';', Qt::SkipEmptyParts)) {
+                    if (!statement.trimmed().isEmpty()) {
+                        QVERIFY2(query.exec(statement), qPrintable(query.lastError().text()));
+                    }
+                }
+            }
+            raw.close();
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("v1"));
+
+        auto opened = storage::Database::open(path);
+        QVERIFY2(opened, qPrintable(opened ? QString() : opened.error().message));
+        const auto& database = **opened;
+        QCOMPARE(database.schemaVersion(), 2);
+        auto columns = database.run(QStringLiteral("SELECT name FROM pragma_table_info('anime')"));
+        QVERIFY(columns);
+        QStringList names;
+        while (columns->next()) {
+            names.append(columns->value(0).toString());
+        }
+        QVERIFY(!names.contains(QStringLiteral("pending")));
+        QVERIFY(names.contains(QStringLiteral("favorite")));
+
+        // Everything else stays: flags, progress, files and the download queue.
+        const LibraryRepository repository(**opened);
+        const auto entry = repository.entry(QStringLiteral("sousou-no-frieren"));
+        QVERIFY(entry && *entry);
+        QVERIFY((*entry)->inLibrary);
+        QVERIFY((*entry)->favorite);
+        QVERIFY(!(*entry)->notify);
+        QCOMPARE((*entry)->watchedEpisodes, 1);
+        QCOMPARE((*entry)->downloadedBytes, 5000);
+        auto queue = database.run(QStringLiteral("SELECT COUNT(*) FROM download"));
+        QVERIFY(queue && queue->next());
+        QCOMPARE(queue->value(0).toInt(), 1);
     }
 
     void refusesALibraryFromANewerVersion() {
@@ -176,11 +311,72 @@ private slots:
         QVERIFY(repository_->setInLibrary(slug, true));
         QVERIFY(repository_->setEpisodeFile(slug, 2, QStringLiteral("D:/Anime/Frieren - 02.mp4"),
                                             1234));
-        QCOMPARE((*repository_->entry(slug))->downloadedEpisodes, 1);
+        QVERIFY(repository_->setEpisodeFile(slug, 3, QStringLiteral("D:/Anime/Frieren - 03.mp4"),
+                                            1000));
+        QCOMPARE((*repository_->entry(slug))->downloadedEpisodes, 2);
+        QCOMPARE((*repository_->entry(slug))->downloadedBytes, 2234);
         const auto files = repository_->episodeFiles();
-        QCOMPARE(files->size(), 1);
+        QCOMPARE(files->size(), 2);
         QVERIFY(repository_->clearEpisodeFile(slug, 2));
-        QCOMPARE((*repository_->entry(slug))->downloadedEpisodes, 0);
+        QCOMPARE((*repository_->entry(slug))->downloadedEpisodes, 1);
+        QCOMPARE((*repository_->entry(slug))->downloadedBytes, 1000);
+    }
+
+    void movesFilesToTheRecycleBin() {
+        const auto slug = QStringLiteral("sousou-no-frieren");
+        QVERIFY(repository_->setInLibrary(slug, true));
+        QVERIFY(repository_->syncEpisodes(slug, episodes(4), false));
+        QTemporaryDir dir;
+        QStringList paths;
+        for (int number = 1; number <= 4; ++number) {
+            paths.append(dir.filePath(QStringLiteral("Frieren - %1.mp4").arg(number)));
+            QFile file(paths.last());
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(QByteArray(number * 100, 'x'));
+            file.close();
+            QVERIFY(repository_->setEpisodeFile(slug, number, paths.last(), number * 100));
+        }
+        QVERIFY(repository_->setWatchedThrough(slug, 2));
+
+        // The real Recycle Bin stays out of the tests: "moving" deletes, and episode 3 is in use.
+        QNetworkAccessManager network;
+        api::ApiClient api(network, {.baseUrl = QUrl(QStringLiteral("http://127.0.0.1:9/"))});
+        QStringList moved;
+        LibraryService service(*repository_, api, nullptr, [&](const QString& path) {
+            if (path == paths[2]) {
+                return false;
+            }
+            moved.append(path);
+            return QFile::remove(path);
+        });
+        QSignalSpy changed(&service, &LibraryService::animeChanged);
+
+        const auto watched = service.trashWatched(slug);
+        QVERIFY2(watched, why(watched));
+        QCOMPARE(watched->count, 2);
+        QCOMPARE(watched->bytes, 300);
+        QCOMPARE(watched->failed, 0);
+        QCOMPARE(moved, (QStringList{paths[0], paths[1]}));
+        QVERIFY((*repository_->episode(slug, 1))->filePath.isEmpty());
+        QVERIFY((*repository_->episode(slug, 2))->filePath.isEmpty());
+        QCOMPARE((*repository_->entry(slug))->downloadedBytes, 700);
+        QCOMPARE(changed.size(), 1);
+
+        // Episode 4 was deleted outside AnimeHub: it only loses its path.
+        QVERIFY(QFile::remove(paths[3]));
+        const auto chosen = service.trashFiles(slug, {3, 4, 9});
+        QVERIFY2(chosen, why(chosen));
+        QCOMPARE(chosen->count, 0);
+        QCOMPARE(chosen->bytes, 0);
+        QCOMPARE(chosen->failed, 1);
+        QCOMPARE((*repository_->episode(slug, 3))->filePath, paths[2]);
+        QVERIFY((*repository_->episode(slug, 4))->filePath.isEmpty());
+        QCOMPARE(moved.size(), 2);
+
+        // Nothing left to move: nothing changes.
+        const auto again = service.trashWatched(slug);
+        QCOMPARE(again->count, 0);
+        QCOMPARE(changed.size(), 2);
     }
 
     void listsOnlyTheLibrary() {

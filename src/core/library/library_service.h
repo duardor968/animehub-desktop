@@ -8,7 +8,16 @@
 #include <QSet>
 #include <QTimer>
 
+#include <functional>
+
 namespace animehub::library {
+
+// Files moved to the Recycle Bin. `failed` ones are still on disk (in use, no permission).
+struct Trashed {
+    int count = 0;
+    qint64 bytes = 0;
+    int failed = 0;
+};
 
 // The library's rules on top of its storage: keeping snapshots and episode lists in sync with
 // the API, manual watch-state edits, and noticing episodes that appear while AnimeHub runs.
@@ -16,7 +25,11 @@ class LibraryService final : public QObject {
     Q_OBJECT
 
 public:
-    LibraryService(LibraryRepository& repository, api::ApiClient& api, QObject* parent = nullptr);
+    // Moves a file to the Recycle Bin; tests put something harmless in its place.
+    using MoveToTrash = std::function<bool(const QString& path)>;
+
+    LibraryService(LibraryRepository& repository, api::ApiClient& api, QObject* parent = nullptr,
+                   MoveToTrash move_to_trash = {});
 
     [[nodiscard]] LibraryRepository& repository() const {
         return repository_;
@@ -34,6 +47,11 @@ public:
     Stored<void> markWatchedThrough(const QString& slug, double number);
     Stored<void> markAllUnwatched(const QString& slug);
     Stored<void> seen(const QString& slug); // the user looked at its new episodes
+
+    // Moves the files of the watched episodes, or of `numbers`, to the Recycle Bin; their
+    // episodes no longer have a file. Files already gone only lose their path.
+    Stored<Trashed> trashWatched(const QString& slug);
+    Stored<Trashed> trashFiles(const QString& slug, const QList<double>& numbers);
 
     // Refreshes metadata and episodes from the API. With `flag_new`, episodes unknown so far are
     // new arrivals (the watcher); otherwise they are simply stored (first sync, browsing).
@@ -62,9 +80,12 @@ private:
     void finishRefresh(const QString& slug, bool flag_new, const QList<double>& added);
     void sweep();
     Stored<void> changed(Stored<void> result, const QString& slug, bool list = false);
+    Stored<Trashed> trash(const QString& slug,
+                          const std::function<bool(const EpisodeRecord&)>& chosen);
 
     LibraryRepository& repository_;
     api::ApiClient& api_;
+    MoveToTrash move_to_trash_;
     QSet<QString> refreshing_;
     QTimer recent_timer_;
     QTimer sweep_timer_;

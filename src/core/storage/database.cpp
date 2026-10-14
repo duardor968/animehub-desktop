@@ -81,6 +81,10 @@ CREATE UNIQUE INDEX download_active_target ON download(target_path COLLATE NOCAS
     WHERE state NOT IN ('completed', 'cancelled');
 CREATE INDEX episode_activity ON episode(slug, state, state_at);
 )sql",
+    // An anime not started yet is already "pending": the flag goes.
+    R"sql(
+ALTER TABLE anime DROP COLUMN pending;
+)sql",
 };
 
 QString errorText(const QSqlError& error) {

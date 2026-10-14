@@ -29,8 +29,8 @@ std::optional<int> optionalInt(const QVariant& value) {
 
 constexpr auto kAnimeColumns =
     "slug, title, alternative_title, synopsis, poster_url, backdrop_url, category, status, "
-    "episode_count, genres, start_year, in_library, added_at, favorite, pending, notify, "
-    "auto_download, last_activity_at, episodes_synced_at";
+    "episode_count, genres, start_year, in_library, added_at, favorite, notify, auto_download, "
+    "last_activity_at, episodes_synced_at";
 
 AnimeRecord readAnime(const QSqlQuery& query) {
     AnimeRecord record;
@@ -48,11 +48,10 @@ AnimeRecord readAnime(const QSqlQuery& query) {
     record.inLibrary = query.value(11).toBool();
     record.addedAt = timeAt(query.value(12));
     record.favorite = query.value(13).toBool();
-    record.pending = query.value(14).toBool();
-    record.notify = query.value(15).toBool();
-    record.autoDownload = query.value(16).toBool();
-    record.lastActivityAt = timeAt(query.value(17));
-    record.episodesSyncedAt = timeAt(query.value(18));
+    record.notify = query.value(14).toBool();
+    record.autoDownload = query.value(15).toBool();
+    record.lastActivityAt = timeAt(query.value(16));
+    record.episodesSyncedAt = timeAt(query.value(17));
     return record;
 }
 
@@ -79,8 +78,6 @@ QString columnFor(Flag flag) {
     switch (flag) {
     case Flag::Favorite:
         return QStringLiteral("favorite");
-    case Flag::Pending:
-        return QStringLiteral("pending");
     case Flag::Notify:
         return QStringLiteral("notify");
     case Flag::AutoDownload:
@@ -173,7 +170,8 @@ SELECT COUNT(*),
        COALESCE(SUM(state = 2), 0),
        COALESCE(SUM(file_path IS NOT NULL), 0),
        COALESCE(SUM(is_new), 0),
-       MAX(CASE WHEN state = 2 THEN number END)
+       MAX(CASE WHEN state = 2 THEN number END),
+       COALESCE(SUM(CASE WHEN file_path IS NOT NULL THEN file_size END), 0)
 FROM episode WHERE slug = ?
 )sql"),
                                 {entry.slug});
@@ -186,6 +184,7 @@ FROM episode WHERE slug = ?
     entry.downloadedEpisodes = counts->value(2).toInt();
     entry.newEpisodes = counts->value(3).toInt();
     const auto last_watched = counts->value(4);
+    entry.downloadedBytes = counts->value(5).toLongLong();
 
     auto watching = database_.run(QStringLiteral("SELECT number, position_ms, duration_ms FROM "
                                                  "episode WHERE slug = ? AND state = 1 "
