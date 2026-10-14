@@ -55,6 +55,10 @@ public:
     [[nodiscard]] QString jdownloaderDevice() const;
     void setJdownloaderDevice(const QString& id);
 
+    // Whether Windows already said, once, that the window went on running in the tray.
+    [[nodiscard]] bool trayNoticeShown() const;
+    void setTrayNoticeShown();
+
     [[nodiscard]] downloads::DownloadSettings downloads() const;
     [[nodiscard]] QList<api::Provider> providers() const;
 

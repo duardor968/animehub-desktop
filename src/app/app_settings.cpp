@@ -12,6 +12,7 @@ const auto kConcurrent = QStringLiteral("downloads/concurrent");
 const auto kSystemPlayer = QStringLiteral("playback/systemPlayer");
 const auto kNotifications = QStringLiteral("notifications/enabled");
 const auto kCloseAction = QStringLiteral("window/closeAction");
+const auto kTrayNoticeShown = QStringLiteral("window/trayNoticeShown");
 const auto kJDownloader = QStringLiteral("jdownloader/mode");
 const auto kJDownloaderDevice = QStringLiteral("jdownloader/device");
 
@@ -109,6 +110,14 @@ void AppSettings::setCloseAction(CloseAction action) {
     write(kCloseAction, action == CloseAction::Tray   ? QStringLiteral("tray")
                         : action == CloseAction::Quit ? QStringLiteral("quit")
                                                       : QStringLiteral("ask"));
+}
+
+bool AppSettings::trayNoticeShown() const {
+    return settings_.value(kTrayNoticeShown, false).toBool();
+}
+
+void AppSettings::setTrayNoticeShown() {
+    write(kTrayNoticeShown, true);
 }
 
 AppSettings::JDownloader AppSettings::jdownloader() const {

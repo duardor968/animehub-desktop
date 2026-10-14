@@ -158,7 +158,8 @@ void AppController::setupTray() {
         return;
     }
     tray_menu_ = std::make_unique<QMenu>();
-    tray_menu_->addAction(QStringLiteral("Abrir AnimeHub"), this, &AppController::showRequested);
+    tray_menu_->setDefaultAction(tray_menu_->addAction(QStringLiteral("Abrir AnimeHub"), this,
+                                                       &AppController::showRequested));
     auto* pause = tray_menu_->addAction(QStringLiteral("Pausar las descargas"));
     connect(pause, &QAction::triggered, this, [this] {
         if (downloads_view_->anyPaused()) {
@@ -266,11 +267,13 @@ void AppController::hideToTray() {
         return;
     }
     emit hideRequested();
-    if (!settings_->value(QStringLiteral("trayHintShown")).toBool()) {
-        settings_->setValue(QStringLiteral("trayHintShown"), true);
-        tray_->showMessage(QStringLiteral("AnimeHub sigue abierto"),
-                           QStringLiteral("Las descargas y los avisos continúan desde aquí."),
-                           appIcon(), 6000);
+    // Once the choice is saved the dialog no longer says where the window went: Windows does,
+    // the first time.
+    if (settings_->closeAction() == AppSettings::CloseAction::Tray &&
+        !settings_->trayNoticeShown()) {
+        settings_->setTrayNoticeShown();
+        tray_->showMessage(QStringLiteral("AnimeHub sigue en la bandeja"),
+                           QStringLiteral("Puedes cambiarlo en Ajustes"), appIcon(), 6000);
     }
 }
 
