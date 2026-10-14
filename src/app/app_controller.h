@@ -89,6 +89,8 @@ public:
 
     Q_INVOKABLE void openLibraryAnime(const QString& slug);
     Q_INVOKABLE void openCatalogAnime(const QString& slug);
+    // Plays the episode the anime resumes at if it is on disk; otherwise downloads it.
+    Q_INVOKABLE void continueWatching(const QString& slug);
     Q_INVOKABLE void requestClose();
     Q_INVOKABLE void closeTo(AppSettings::CloseAction action, bool remember);
     Q_INVOKABLE void quit();
@@ -104,6 +106,7 @@ signals:
     // A notification was clicked: the window shows this anime in the library.
     void animeRequested(const QString& slug);
     void problemChanged();
+    void message(const QString& text, bool problem);
 
 private:
     void setupTray();

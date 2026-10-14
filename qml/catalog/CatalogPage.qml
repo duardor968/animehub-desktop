@@ -16,12 +16,26 @@ StackView {
     onActiveChanged: if (active) catalog.start()
 
     // Back to the catalog itself, from any anime opened in it.
-    function home() { pop(null) }
+    function home() {
+        if (depth > 1)
+            pop(null)
+    }
 
     function openAnime(slug) {
         app.openCatalogAnime(slug)
         if (depth === 1)
             push(animePage)
+    }
+
+    // The whole catalog searched for `text` (from the library's search).
+    function search(text) {
+        home()
+        catalog.searchFor(text)
+    }
+
+    function focusSearch() {
+        home()
+        browse.focusSearch()
     }
 
     Component {
@@ -37,6 +51,8 @@ StackView {
     initialItem: Item {
         id: browse
 
+        function focusSearch() { search.forceActiveFocus() }
+
         RowLayout {
             id: toolbar
             anchors.left: parent.left
@@ -46,15 +62,14 @@ StackView {
             anchors.leftMargin: 32
             spacing: 8
 
-            TextField {
+            SearchBox {
                 id: search
                 Layout.fillWidth: true
                 Layout.minimumWidth: 160
                 Layout.maximumWidth: 360
                 placeholderText: "Buscar en el catálogo"
                 text: stack.catalog.search
-                onTextEdited: stack.catalog.search = text
-                Accessible.name: "Buscar en el catálogo"
+                onTextChanged: stack.catalog.search = text
             }
 
             ComboBox {
@@ -161,7 +176,8 @@ StackView {
 
                 Label {
                     text: stack.catalog.browsing
-                          ? (stack.catalog.loading && grid.count === 0 ? "Buscando…"
+                          ? (stack.catalog.refreshing || (stack.catalog.loading && grid.count === 0)
+                             ? "Buscando…"
                              : stack.catalog.capped ? "Más de " + stack.catalog.total + " resultados"
                              : stack.catalog.total === 1 ? "1 resultado"
                              : stack.catalog.total + " resultados")
@@ -176,6 +192,9 @@ StackView {
                 required property var model
                 width: grid.cellWidth
                 height: grid.cellHeight
+                // The previous results stay, dimmed, until the new ones arrive.
+                opacity: stack.catalog.refreshing ? 0.5 : 1
+                Behavior on opacity { NumberAnimation { duration: 150 } }
 
                 PosterCard {
                     width: parent.width - Theme.posterGap
@@ -223,11 +242,6 @@ StackView {
             }
         }
 
-        Shortcut {
-            sequences: [StandardKey.Find]
-            enabled: stack.active && stack.depth === 1
-            onActivated: search.forceActiveFocus()
-        }
     }
 
     Shortcut {

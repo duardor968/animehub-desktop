@@ -4,6 +4,7 @@
 #include "api/api_client.h"
 #include "card_model.h"
 #include "library/library_types.h"
+#include "library_model.h"
 
 #include <QObject>
 #include <QTimer>
@@ -25,6 +26,8 @@ class CatalogView final : public QObject {
     Q_PROPERTY(bool browsing READ browsing NOTIFY queryChanged)
     Q_PROPERTY(QVariantList genres READ genres NOTIFY genresChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY stateChanged)
+    // A new search or filter is on its way; the results on view are the previous ones.
+    Q_PROPERTY(bool refreshing READ refreshing NOTIFY stateChanged)
     Q_PROPERTY(bool hasMore READ hasMore NOTIFY stateChanged)
     Q_PROPERTY(int total READ total NOTIFY stateChanged)
     // The source stops counting at 1000 matches: `total` is then a lower bound.
@@ -35,7 +38,8 @@ class CatalogView final : public QObject {
     Q_PROPERTY(CardModel* recentAnime READ recentAnime CONSTANT)
 
 public:
-    explicit CatalogView(api::ApiClient& api, QObject* parent = nullptr);
+    // `library` marks the cards of anime already in it.
+    CatalogView(api::ApiClient& api, const LibraryModel& library, QObject* parent = nullptr);
 
     [[nodiscard]] QString search() const {
         return query_.search;
@@ -55,6 +59,9 @@ public:
     }
     [[nodiscard]] bool loading() const {
         return loading_;
+    }
+    [[nodiscard]] bool refreshing() const {
+        return refreshing_;
     }
     [[nodiscard]] bool hasMore() const {
         return page_ < total_pages_;
@@ -85,6 +92,8 @@ public:
     Q_INVOKABLE void loadMore();
     Q_INVOKABLE void reload();
     Q_INVOKABLE void clearFilters();
+    // The whole catalog searched for `text`, without the filters.
+    Q_INVOKABLE void searchFor(const QString& text);
 
 signals:
     void queryChanged();
@@ -94,9 +103,11 @@ signals:
 private:
     void fetch(int page);
     void remember(const api::AnimeSummary& anime);
-    [[nodiscard]] static QString captionOf(const api::AnimeSummary& anime);
+    void recaption(CardModel& model) const;
+    [[nodiscard]] QString captionOf(const api::AnimeSummary& anime, double episode = -1) const;
 
     api::ApiClient& api_;
+    const LibraryModel& library_;
     api::CatalogQuery query_;
     QVariantList genres_;
     CardModel results_;
@@ -109,6 +120,7 @@ private:
     int total_ = 0;
     bool capped_ = false;
     bool loading_ = false;
+    bool refreshing_ = false;
     bool started_ = false;
     QString problem_;
     quint64 generation_ = 0;

@@ -11,14 +11,30 @@ constexpr auto kDefaultOrder = api::CatalogOrder::LatestAdded;
 
 } // namespace
 
-CatalogView::CatalogView(api::ApiClient& api, QObject* parent) : QObject(parent), api_(api) {
+CatalogView::CatalogView(api::ApiClient& api, const LibraryModel& library, QObject* parent)
+    : QObject(parent), api_(api), library_(library) {
     query_.order = kDefaultOrder;
     debounce_.setSingleShot(true);
     debounce_.setInterval(350);
     connect(&debounce_, &QTimer::timeout, this, &CatalogView::reload);
+    connect(&library_, &LibraryModel::membershipChanged, this, [this] {
+        recaption(results_);
+        recaption(recent_episodes_);
+        recaption(recent_anime_);
+    });
 }
 
-QString CatalogView::captionOf(const api::AnimeSummary& anime) {
+// "TV Anime · 2023", or "En la biblioteca" for an anime the user has; a recent episode says
+// which one: "Ep. 12", "Ep. 12 · En la biblioteca".
+QString CatalogView::captionOf(const api::AnimeSummary& anime, double episode) const {
+    const bool owned = library_.contains(anime.slug);
+    if (episode >= 0) {
+        auto caption = QStringLiteral("Ep. ") + display::episodeNumber(episode);
+        return owned ? caption + QStringLiteral(" · En la biblioteca") : caption;
+    }
+    if (owned) {
+        return QStringLiteral("En la biblioteca");
+    }
     QStringList parts;
     if (anime.category) {
         parts.append(anime.category->name);
@@ -27,6 +43,16 @@ QString CatalogView::captionOf(const api::AnimeSummary& anime) {
         parts.append(QString::number(anime.startDate.year()));
     }
     return parts.join(QStringLiteral(" · "));
+}
+
+void CatalogView::recaption(CardModel& model) const {
+    auto cards = model.cards();
+    for (auto& card : cards) {
+        if (const auto it = known_.find(card.slug); it != known_.end()) {
+            card.caption = captionOf(*it, card.episode);
+        }
+    }
+    model.setCards(std::move(cards));
 }
 
 void CatalogView::remember(const api::AnimeSummary& anime) {
@@ -62,7 +88,7 @@ void CatalogView::start() {
             episodes.append({.slug = recent.anime.slug,
                              .title = recent.anime.title,
                              .posterUrl = recent.anime.posterUrl,
-                             .caption = display::episode(recent.episode.number),
+                             .caption = captionOf(recent.anime, recent.episode.number),
                              .episode = recent.episode.number});
         }
         recent_episodes_.setCards(std::move(episodes));
@@ -86,8 +112,19 @@ void CatalogView::setSearch(const QString& search) {
         return;
     }
     query_.search = search;
+    refreshing_ = true;
     emit queryChanged();
+    emit stateChanged();
     debounce_.start();
+}
+
+void CatalogView::searchFor(const QString& text) {
+    query_.search = text;
+    query_.status.reset();
+    query_.genres.clear();
+    query_.order = kDefaultOrder;
+    emit queryChanged();
+    reload();
 }
 
 int CatalogView::status() const {
@@ -161,14 +198,13 @@ void CatalogView::clearFilters() {
     reload();
 }
 
+// The results on view stay until the new ones arrive, with their count.
 void CatalogView::reload() {
     debounce_.stop();
     ++generation_;
     page_ = 0;
     total_pages_ = 0;
-    total_ = 0;
-    capped_ = false;
-    results_.setCards({});
+    refreshing_ = true;
     fetch(1);
 }
 
@@ -191,11 +227,20 @@ void CatalogView::fetch(int page) {
                 return;
             }
             loading_ = false;
+            if (page == 1) {
+                refreshing_ = false;
+            }
             if (!result) {
                 problem_ =
                     result.error().kind == api::ApiError::Kind::RateLimited
                         ? QStringLiteral("Demasiadas búsquedas seguidas. Espera un momento.")
                         : QStringLiteral("No se pudo cargar el catálogo. Revisa la conexión.");
+                if (page == 1) {
+                    // What is on view answered another search.
+                    results_.setCards({});
+                    total_ = 0;
+                    capped_ = false;
+                }
                 emit stateChanged();
                 return;
             }

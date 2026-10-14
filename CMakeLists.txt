@@ -120,9 +120,11 @@ qt_add_qml_module(animehub-desktop
     qml/components/Toast.qml
     qml/downloads/DownloadBar.qml
     qml/downloads/DownloadsPage.qml
+    qml/library/FeaturedAnime.qml
     qml/library/LibraryHome.qml
     qml/library/LibraryList.qml
     qml/library/LibraryPage.qml
+    qml/library/SearchBox.qml
   RESOURCES
     assets/animehub.png
 )

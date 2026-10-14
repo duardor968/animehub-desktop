@@ -12,12 +12,21 @@ Item {
     property string selected
 
     signal browseCatalog()
+    signal searchCatalog(string text)
+
+    // Why the list filter leaves nothing, by filter.
+    readonly property string emptyText: ["", "No estás viendo ningún anime",
+                                         "Ningún anime sin empezar", "Ningún anime visto",
+                                         "Ningún favorito",
+                                         "Ningún anime descargado"][app.library.filter]
 
     function select(slug) {
         selected = slug
         if (slug)
             app.openLibraryAnime(slug)
     }
+
+    function focusSearch() { list.focusSearch() }
 
     SplitView {
         id: split
@@ -37,12 +46,16 @@ Item {
         }
 
         LibraryList {
+            id: list
             SplitView.preferredWidth: page.app.settings.value("library/listWidth", 300)
             SplitView.minimumWidth: 240
             SplitView.maximumWidth: 480
             model: page.app.library
             selectedSlug: page.selected
+            homeVisible: !page.selected
+            emptyText: page.emptyText
             onActivated: slug => page.select(slug)
+            onSearchCatalog: text => page.searchCatalog(text)
             onWidthChanged: if (width > 0) page.app.settings.setValue("library/listWidth", Math.round(width))
         }
 
@@ -54,7 +67,8 @@ Item {
             currentIndex: page.selected ? 1 : 0
 
             LibraryHome {
-                library: page.app.library
+                app: page.app
+                emptyText: page.emptyText
                 onActivated: slug => page.select(slug)
                 onBrowseCatalog: page.browseCatalog()
             }

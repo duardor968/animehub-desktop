@@ -7,6 +7,7 @@
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDir>
+#include <QFile>
 #include <QLocalSocket>
 #include <QMenu>
 
@@ -86,8 +87,8 @@ AppController::AppController(AppPaths paths, QObject* parent)
 
     const Services services{*api_,    *library_, *downloads_, *jdownloader_view_,
                             *player_, *settings_};
-    library_model_ = std::make_unique<LibraryModel>(*library_);
-    catalog_view_ = std::make_unique<CatalogView>(*api_);
+    library_model_ = std::make_unique<LibraryModel>(*library_, *downloads_, *api_);
+    catalog_view_ = std::make_unique<CatalogView>(*api_, *library_model_);
     downloads_view_ = std::make_unique<DownloadsView>(*downloads_, *library_repository_, *player_);
     library_anime_ = std::make_unique<AnimeView>(services);
     catalog_anime_ = std::make_unique<AnimeView>(services);
@@ -124,6 +125,7 @@ void AppController::start() {
     library_->startWatching();
     downloads_->start();
     jdownloader_view_->start();
+    library_model_->start();
     setupTray();
 }
 
@@ -230,6 +232,38 @@ void AppController::openLibraryAnime(const QString& slug) {
 
 void AppController::openCatalogAnime(const QString& slug) {
     catalog_anime_->open(slug, catalog_view_->hint(slug));
+}
+
+void AppController::continueWatching(const QString& slug) {
+    const auto entry = library_repository_->entry(slug);
+    if (!entry || !*entry || !(*entry)->resumeNumber) {
+        return;
+    }
+    const auto& anime = **entry;
+    const auto number = *anime.resumeNumber;
+    const auto episode = library_repository_->episode(slug, number);
+    if (episode && *episode && !(*episode)->filePath.isEmpty()) {
+        const auto& file = **episode;
+        const auto started = player_->play(
+            {.slug = slug,
+             .number = number,
+             .filePath = file.filePath,
+             .title = anime.title + QStringLiteral(" · ") + display::episode(number),
+             .startMs = file.state == library::WatchState::Watching ? file.positionMs : 0});
+        if (!started) {
+            if (!QFile::exists(file.filePath) &&
+                library_repository_->clearEpisodeFile(slug, number)) {
+                library_->announce(slug);
+            }
+            emit message(started.error(), true);
+        }
+        return;
+    }
+    if (const auto queued =
+            downloads_->enqueue(slug, number, anime.title, downloads::TaskOrigin::Manual);
+        !queued) {
+        emit message(queued.error(), true);
+    }
 }
 
 void AppController::requestClose() {

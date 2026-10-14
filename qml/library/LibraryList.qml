@@ -9,8 +9,16 @@ Rectangle {
 
     required property LibraryModel model
     property string selectedSlug
+    // The home beside the list explains an empty library or filter; the list does when an anime
+    // is open instead.
+    property bool homeVisible: true
+    // Why the filter leaves nothing to list.
+    property string emptyText
 
     signal activated(string slug)
+    signal searchCatalog(string text)
+
+    function focusSearch() { search.forceActiveFocus() }
 
     color: Theme.pane
 
@@ -19,16 +27,15 @@ Rectangle {
         anchors.topMargin: 12
         spacing: 8
 
-        TextField {
+        SearchBox {
             id: search
             Layout.fillWidth: true
             Layout.leftMargin: 12
             Layout.rightMargin: 12
             placeholderText: "Buscar en la biblioteca"
             text: root.model.search
-            onTextEdited: root.model.search = text
+            onTextChanged: root.model.search = text
             Keys.onDownPressed: list.forceActiveFocus()
-            Accessible.name: "Buscar en la biblioteca"
         }
 
         ComboBox {
@@ -135,22 +142,36 @@ Rectangle {
                 }
             }
 
-            Label {
-                anchors.centerIn: parent
-                width: parent.width - 32
-                visible: list.count === 0
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.Wrap
-                color: Theme.muted
-                text: root.model.total === 0 ? "Tu biblioteca está vacía"
-                                             : "Nada coincide con la búsqueda"
+            // Nothing to list: why, and the way out.
+            ColumnLayout {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 24
+                width: parent.width - 2 * Theme.pad
+                spacing: 12
+                visible: list.count === 0 && (searching || (!root.homeVisible && root.model.total > 0))
+
+                readonly property bool searching: root.model.search !== ""
+
+                Label {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                    color: Theme.muted
+                    text: parent.searching ? "Nada coincide con «" + root.model.search + "»"
+                                           : root.emptyText
+                }
+
+                Button {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: parent.searching ? "Buscar en el catálogo" : "Mostrar todo"
+                    onClicked: {
+                        if (parent.searching)
+                            root.searchCatalog(root.model.search)
+                        else
+                            root.model.filter = LibraryModel.All
+                    }
+                }
             }
         }
-    }
-
-    Shortcut {
-        sequences: [StandardKey.Find]
-        enabled: root.visible
-        onActivated: search.forceActiveFocus()
     }
 }

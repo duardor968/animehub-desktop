@@ -12,6 +12,31 @@ ApplicationWindow {
         tabs.currentIndex = index
     }
 
+    // An anime's page: in the library if it is there, otherwise in the catalog.
+    function openAnime(slug) {
+        if (app.library.contains(slug)) {
+            showPage(0)
+            libraryPage.select(slug)
+        } else {
+            showPage(1)
+            catalogPage.openAnime(slug)
+        }
+    }
+
+    function searchCatalog(text) {
+        showPage(1)
+        catalogPage.search(text)
+    }
+
+    function focusSearch() {
+        if (tabs.currentIndex === 1) {
+            catalogPage.focusSearch()
+        } else {
+            showPage(0)
+            libraryPage.focusSearch()
+        }
+    }
+
     width: app.settings.value("window/width", 1280)
     height: app.settings.value("window/height", 820)
     minimumWidth: 820
@@ -124,6 +149,7 @@ ApplicationWindow {
             id: libraryPage
             app: window.app
             onBrowseCatalog: window.showPage(1)
+            onSearchCatalog: text => window.searchCatalog(text)
         }
 
         CatalogPage {
@@ -135,16 +161,15 @@ ApplicationWindow {
         DownloadsPage {
             app: window.app
             onBrowseCatalog: window.showPage(1)
-            onOpenAnime: slug => {
-                window.showPage(0)
-                libraryPage.select(slug)
-            }
+            onOpenAnime: slug => window.openAnime(slug)
         }
     }
 
     footer: DownloadBar {
         downloads: window.app.downloads
-        visible: window.app.downloads.activeCount > 0 && tabs.currentIndex !== 2
+        // `barVisible` comes with the new Downloads page; until then, what is running.
+        visible: (window.app.downloads.barVisible ?? window.app.downloads.activeCount > 0)
+                 && tabs.currentIndex !== 2
         onClicked: window.showPage(2)
     }
 
@@ -156,6 +181,10 @@ ApplicationWindow {
         z: 10
     }
 
+    Connections {
+        target: window.app
+        function onMessage(text, problem) { toast.show(text, problem) }
+    }
     Connections {
         target: window.app.libraryAnime
         function onMessage(text, problem) { toast.show(text, problem) }
@@ -182,6 +211,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+1"; onActivated: window.showPage(0) }
     Shortcut { sequence: "Ctrl+2"; onActivated: window.showPage(1) }
     Shortcut { sequence: "Ctrl+3"; onActivated: window.showPage(2) }
+    Shortcut { sequences: [StandardKey.Find]; onActivated: window.focusSearch() }
     Shortcut { sequence: "Ctrl+,"; onActivated: settingsDialog.open() }
     Shortcut { sequence: "Ctrl+Q"; onActivated: window.app.quit() }
 }
