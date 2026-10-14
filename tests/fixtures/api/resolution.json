@@ -1,0 +1,5 @@
+{"data":{"packageName":"Frieren","episodes":[
+  {"episodeNumber":1,"audio":"SUB","errorCode":null,"links":[
+    {"provider":"MEGA","url":"https://mega.nz/file/abc#key"},
+    {"provider":"NEWHOST","url":"https://new.example/x"}]},
+  {"episodeNumber":2.5,"audio":"DUB","errorCode":"NO_LINKS","links":[]}]}}
