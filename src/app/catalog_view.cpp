@@ -5,9 +5,14 @@
 #include <QVariantMap>
 
 namespace animehub::app {
+namespace {
+
+constexpr auto kDefaultOrder = api::CatalogOrder::LatestAdded;
+
+} // namespace
 
 CatalogView::CatalogView(api::ApiClient& api, QObject* parent) : QObject(parent), api_(api) {
-    query_.order = api::CatalogOrder::LatestAdded;
+    query_.order = kDefaultOrder;
     debounce_.setSingleShot(true);
     debounce_.setInterval(350);
     connect(&debounce_, &QTimer::timeout, this, &CatalogView::reload);
@@ -140,15 +145,18 @@ void CatalogView::setOrder(int order) {
     reload();
 }
 
+// Any search, filter or other order shows the matching catalog instead of the news shelves,
+// which only follow the default order.
 bool CatalogView::browsing() const {
     return !query_.search.simplified().isEmpty() || query_.status.has_value() ||
-           !query_.genres.isEmpty();
+           !query_.genres.isEmpty() || query_.order != kDefaultOrder;
 }
 
 void CatalogView::clearFilters() {
     query_.search.clear();
     query_.status.reset();
     query_.genres.clear();
+    query_.order = kDefaultOrder;
     emit queryChanged();
     reload();
 }

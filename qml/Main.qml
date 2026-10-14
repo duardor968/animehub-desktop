@@ -23,7 +23,22 @@ ApplicationWindow {
     palette.highlight: Theme.accent
     palette.window: Theme.canvas
 
+    // Open modal dialogs. Their dimming covers the content, not the native title bar, which
+    // is darkened by the same amount (Fluent dims with 30 % black per dialog).
+    property int modalLayers: 0
+    onModalLayersChanged: tintTitleBar()
+    function tintTitleBar() {
+        let caption = Theme.pane
+        let text = Theme.ink
+        for (let i = 0; i < modalLayers; ++i) {
+            caption = Qt.tint(caption, Qt.rgba(0, 0, 0, 0.3))
+            text = Qt.tint(text, Qt.rgba(0, 0, 0, 0.3))
+        }
+        app.tintTitleBar(window, caption, text)
+    }
+
     Component.onCompleted: {
+        tintTitleBar()
         // INI settings come back as text.
         if (String(app.settings.value("window/maximized", false)) === "true")
             showMaximized()
@@ -68,8 +83,15 @@ ApplicationWindow {
                 id: tabs
                 Layout.alignment: Qt.AlignBottom
                 background: null
-                PageTab { text: "Biblioteca" }
-                PageTab { text: "Catálogo" }
+                // The tab of the page on view takes that page back to its start, as in Steam.
+                PageTab {
+                    text: "Biblioteca"
+                    onReselected: libraryPage.select("")
+                }
+                PageTab {
+                    text: "Catálogo"
+                    onReselected: catalogPage.home()
+                }
                 PageTab { text: "Descargas" }
             }
 
@@ -105,6 +127,7 @@ ApplicationWindow {
         }
 
         CatalogPage {
+            id: catalogPage
             app: window.app
             active: StackLayout.isCurrentItem
         }

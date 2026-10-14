@@ -25,12 +25,21 @@ Item {
         keyNavigationEnabled: true
         Accessible.name: "Toda la biblioteca"
 
-        readonly property int columns: Math.max(2, Math.floor((width - 16) / 176))
-        cellWidth: Math.floor((width - 16) / columns)
-        cellHeight: Math.round((cellWidth - 20) * 1.42) + 78
+        // The shelves above resize with the window: whoever was at the top stays at the top.
+        property real lastOriginY: 0
+        onOriginYChanged: {
+            if (contentY <= lastOriginY + 1)
+                positionViewAtBeginning()
+            lastOriginY = originY
+        }
+
+        // The same posters as the shelves: their width, their gap, left of the scroll bar.
+        readonly property real span: width - 16
+        cellWidth: (span + Theme.posterGap) / Theme.posterColumns(span)
+        cellHeight: Theme.posterCardHeight(cellWidth - Theme.posterGap)
 
         header: Column {
-            width: grid.width - 16
+            width: grid.span
             topPadding: 28
             spacing: 32
             bottomPadding: 16
@@ -63,7 +72,7 @@ Item {
             height: grid.cellHeight
 
             PosterCard {
-                width: parent.width - 20
+                width: parent.width - Theme.posterGap
                 text: model.title
                 posterUrl: model.posterUrl
                 caption: model.caption

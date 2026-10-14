@@ -137,32 +137,8 @@ QVariant EpisodeModel::data(const QModelIndex& index, int role) const {
         return has_task && task->bytesTotal > 0
                    ? static_cast<double>(task->bytesDone) / static_cast<double>(task->bytesTotal)
                    : 0.0;
-    case DownloadTextRole: {
-        if (!has_task) {
-            return QString();
-        }
-        const int percent =
-            task->bytesTotal > 0 ? static_cast<int>(100 * task->bytesDone / task->bytesTotal) : 0;
-        switch (task->state) {
-        case TaskState::Queued:
-            return QStringLiteral("En cola");
-        case TaskState::Resolving:
-            return QStringLiteral("Preparando…");
-        case TaskState::Downloading:
-            return QStringLiteral("%1 % · %2")
-                .arg(percent)
-                .arg(display::speed(task->bytesPerSecond));
-        case TaskState::Verifying:
-            return QStringLiteral("Comprobando %1 %").arg(percent);
-        case TaskState::Paused:
-            return QStringLiteral("En pausa · %1 %").arg(percent);
-        case TaskState::Waiting:
-        case TaskState::Failed:
-            return display::issue(task->issue);
-        default:
-            return QString();
-        }
-    }
+    case DownloadTextRole:
+        return has_task ? display::download(*task) : QString();
     default:
         return {};
     }

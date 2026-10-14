@@ -4,15 +4,12 @@ import QtQuick.Layouts
 import AnimeHub
 
 // Asked the first times the window closes: keep running in the tray, or quit.
-Dialog {
+ModalDialog {
     id: dialog
 
     required property AppController app
 
-    parent: Overlay.overlay
-    anchors.centerIn: parent
     width: Math.min(460, parent.width - 48)
-    modal: true
     title: "¿Seguir en la bandeja?"
 
     ColumnLayout {

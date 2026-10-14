@@ -5,6 +5,13 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QUrl>
+#include <QWindow>
+
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+
+#include <dwmapi.h>
+#endif
 
 namespace animehub::app::shell {
 
@@ -24,6 +31,26 @@ void reveal(const QString& path) {
     }
 #endif
     open(QFileInfo(path).absolutePath());
+}
+
+void tintTitleBar(QWindow* window, const QColor& background, const QColor& text) {
+#ifdef Q_OS_WIN
+    if (window == nullptr) {
+        return;
+    }
+    const auto hwnd = reinterpret_cast<HWND>(window->winId());
+    // Attributes of Windows 11 (build 22000+); older systems ignore them.
+    constexpr DWORD kCaptionColor = 35;
+    constexpr DWORD kTextColor = 36;
+    const COLORREF caption = RGB(background.red(), background.green(), background.blue());
+    const COLORREF title = RGB(text.red(), text.green(), text.blue());
+    DwmSetWindowAttribute(hwnd, kCaptionColor, &caption, sizeof(caption));
+    DwmSetWindowAttribute(hwnd, kTextColor, &title, sizeof(title));
+#else
+    Q_UNUSED(window);
+    Q_UNUSED(background);
+    Q_UNUSED(text);
+#endif
 }
 
 } // namespace animehub::app::shell

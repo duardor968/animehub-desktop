@@ -57,8 +57,11 @@ ItemDelegate {
             }
         }
 
+        // Takes what the download status leaves; never narrower than "Episodio 12 Nuevo".
         ColumnLayout {
             Layout.fillWidth: true
+            Layout.minimumWidth: 120
+            Layout.preferredWidth: 120
             spacing: 4
 
             RowLayout {
@@ -113,11 +116,14 @@ ItemDelegate {
             }
         }
 
+        // As wide as its text (up to a limit), narrower and elided when the row is short:
+        // the actions on the right keep their place.
         ColumnLayout {
             visible: row.downloadState !== ""
-            // A nested layout inherits fillWidth from its children; this one keeps its size.
-            Layout.fillWidth: false
-            Layout.preferredWidth: 200
+            Layout.fillWidth: true
+            Layout.minimumWidth: 60
+            Layout.preferredWidth: Layout.maximumWidth
+            Layout.maximumWidth: Math.max(160, Math.min(downloadLabel.implicitWidth, 360))
             spacing: 4
 
             ProgressLine {
@@ -127,6 +133,7 @@ ItemDelegate {
             }
 
             Label {
+                id: downloadLabel
                 Layout.fillWidth: true
                 text: row.downloadText
                 color: row.downloadState === "failed" ? Theme.danger : Theme.muted
@@ -168,7 +175,8 @@ ItemDelegate {
 
         ToolButton {
             visible: row.downloadState === "paused"
-            icon.source: Theme.source(Theme.icon.play)
+            // Play is for watching: resuming a download keeps the download glyph.
+            icon.source: Theme.source(Theme.icon.download)
             display: AbstractButton.IconOnly
             text: "Reanudar la descarga"
             ToolTip.visible: hovered

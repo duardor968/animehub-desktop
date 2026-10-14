@@ -1,6 +1,7 @@
 #include "display.h"
 
 #include <QLocale>
+#include <QStringList>
 
 #include <cmath>
 
@@ -8,8 +9,8 @@ namespace animehub::app::display {
 namespace {
 
 const QLocale& spanish() {
-    static const QLocale locale(QLocale::Spanish, QLocale::Spain);
-    return locale;
+    static const QLocale kSpanish(QLocale::Spanish, QLocale::Spain);
+    return kSpanish;
 }
 
 } // namespace
@@ -108,6 +109,52 @@ QString issue(downloads::TaskIssue issue) {
         return QStringLiteral("El archivo llegó dañado varias veces.");
     case TaskIssue::Engine:
         return QStringLiteral("El motor de descargas se detuvo.");
+    }
+    return {};
+}
+
+QString download(const downloads::Task& task) {
+    using downloads::TaskState;
+    const auto size = task.bytesTotal > 0
+                          ? bytes(task.bytesDone) + QStringLiteral(" de ") + bytes(task.bytesTotal)
+                          : QString();
+    switch (task.state) {
+    case TaskState::Queued:
+        return QStringLiteral("En cola");
+    case TaskState::Resolving:
+        return QStringLiteral("Buscando el archivo…");
+    case TaskState::Downloading: {
+        QStringList parts;
+        if (!size.isEmpty()) {
+            parts.append(size);
+        }
+        parts.append(speed(task.bytesPerSecond));
+        if (task.bytesPerSecond > 0 && task.bytesTotal > task.bytesDone) {
+            parts.append(QStringLiteral("quedan ") +
+                         remaining((task.bytesTotal - task.bytesDone) / task.bytesPerSecond));
+        }
+        return parts.join(QStringLiteral(" · "));
+    }
+    case TaskState::Verifying:
+        return QStringLiteral("Comprobando el archivo · %1 %")
+            .arg(task.bytesTotal > 0 ? 100 * task.bytesDone / task.bytesTotal : 0);
+    case TaskState::Paused:
+        return size.isEmpty() ? QStringLiteral("En pausa") : QStringLiteral("En pausa · ") + size;
+    case TaskState::Waiting:
+        return issue(task.issue) + QStringLiteral(" Se reintenta a las ") +
+               spanish().toString(task.retryAt.toLocalTime().time(), QStringLiteral("HH:mm")) +
+               QLatin1Char('.');
+    case TaskState::Completed: {
+        QStringList parts{bytes(task.bytesTotal)};
+        if (task.provider) {
+            parts.append(provider(*task.provider));
+        }
+        return parts.join(QStringLiteral(" · "));
+    }
+    case TaskState::Failed:
+        return issue(task.issue);
+    case TaskState::Cancelled:
+        return QStringLiteral("Cancelada");
     }
     return {};
 }

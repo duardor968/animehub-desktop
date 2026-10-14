@@ -73,7 +73,6 @@ signals:
 private:
     void reload();
     void update(qint64 id);
-    [[nodiscard]] QString detailOf(const downloads::Task& task) const;
     [[nodiscard]] const downloads::Task* current() const;
 
     downloads::DownloadManager& manager_;

@@ -54,29 +54,6 @@ Rectangle {
             ScrollBar.vertical: ScrollBar {}
             Accessible.name: "Biblioteca"
 
-            readonly property bool grouped: root.model.filter === LibraryModel.All
-                                            && root.model.search === ""
-                                            && root.model.continueShelf.count > 0
-
-            section.property: "section"
-            // ListView controls the visibility of section delegates; the label hides itself.
-            section.delegate: Item {
-                required property string section
-                width: ListView.view.width
-                height: list.grouped ? 34 : 0
-
-                Label {
-                    visible: list.grouped
-                    x: 16
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 6
-                    text: parent.section
-                    color: Theme.muted
-                    font.pixelSize: Theme.caption
-                    font.weight: Font.DemiBold
-                }
-            }
-
             Keys.onReturnPressed: root.activated(root.model.slugAt(currentIndex))
             Keys.onEnterPressed: root.activated(root.model.slugAt(currentIndex))
             onCurrentIndexChanged: {
@@ -125,7 +102,6 @@ Rectangle {
                             elide: Text.ElideRight
                             color: Theme.ink
                             font.pixelSize: Theme.body
-                            font.weight: row.highlighted ? Font.DemiBold : Font.Normal
                         }
 
                         RowLayout {

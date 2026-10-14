@@ -23,6 +23,15 @@ QtObject {
     readonly property int section: 32
     readonly property int radius: 6
 
+    // Posters keep near one width in every row and grid: the columns change, not the size.
+    readonly property int posterWidth: 150
+    readonly property int posterGap: 16
+    function posterColumns(width) {
+        return Math.max(1, Math.round((width + posterGap) / (posterWidth + posterGap)))
+    }
+    // A poster card: the cover, two title lines, a caption and the gap under them.
+    function posterCardHeight(cardWidth) { return Math.round(cardWidth * 1.42) + 92 }
+
     readonly property int caption: 12
     readonly property int body: 14
     readonly property int subtitle: 18

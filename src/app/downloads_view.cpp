@@ -4,7 +4,6 @@
 #include "shell.h"
 
 #include <QFileInfo>
-#include <QLocale>
 
 namespace animehub::app {
 namespace {
@@ -22,17 +21,11 @@ int rank(TaskState state) {
     case TaskState::Paused:
     case TaskState::Waiting:
         return 1;
-    default:
+    case TaskState::Failed:
         return 2;
+    default:
+        return 3;
     }
-}
-
-QString sizeOf(const Task& task) {
-    if (task.bytesTotal <= 0) {
-        return {};
-    }
-    return display::bytes(task.bytesDone) + QStringLiteral(" de ") +
-           display::bytes(task.bytesTotal);
 }
 
 } // namespace
@@ -85,13 +78,17 @@ const Task* DownloadsView::current() const {
     return it == tasks_.end() ? nullptr : &*it;
 }
 
+// Running, queued or due to retry: what goes on by itself. Paused ones wait for the user.
 int DownloadsView::activeCount() const {
-    return static_cast<int>(
-        std::ranges::count_if(tasks_, [](const Task& task) { return rank(task.state) < 2; }));
+    return static_cast<int>(std::ranges::count_if(tasks_, [](const Task& task) {
+        return rank(task.state) < 2 && task.state != TaskState::Paused;
+    }));
 }
 
+// Completed and cancelled: what "Quitar terminadas de la lista" removes. Failed ones stay.
 int DownloadsView::finishedCount() const {
-    return static_cast<int>(tasks_.size()) - activeCount();
+    return static_cast<int>(
+        std::ranges::count_if(tasks_, [](const Task& task) { return rank(task.state) == 3; }));
 }
 
 bool DownloadsView::anyPaused() const {
@@ -107,19 +104,7 @@ QString DownloadsView::currentTitle() const {
 
 QString DownloadsView::currentDetail() const {
     const auto* task = current();
-    if (!task) {
-        return {};
-    }
-    const int percent =
-        task->bytesTotal > 0 ? static_cast<int>(100 * task->bytesDone / task->bytesTotal) : 0;
-    switch (task->state) {
-    case TaskState::Resolving:
-        return QStringLiteral("Preparando…");
-    case TaskState::Verifying:
-        return QStringLiteral("Comprobando · %1 %").arg(percent);
-    default:
-        return QStringLiteral("%1 % · %2").arg(percent).arg(display::speed(task->bytesPerSecond));
-    }
+    return task ? display::download(*task) : QString();
 }
 
 double DownloadsView::currentProgress() const {
@@ -130,56 +115,10 @@ double DownloadsView::currentProgress() const {
 }
 
 QString DownloadsView::queueText() const {
-    const auto waiting =
-        std::ranges::count_if(tasks_, [](const Task& task) { return rank(task.state) == 1; });
+    const auto waiting = std::ranges::count_if(tasks_, [](const Task& task) {
+        return task.state == TaskState::Queued || task.state == TaskState::Waiting;
+    });
     return waiting == 0 ? QString() : QStringLiteral("%1 en cola").arg(waiting);
-}
-
-QString DownloadsView::detailOf(const Task& task) const {
-    switch (task.state) {
-    case TaskState::Queued:
-        return QStringLiteral("En cola");
-    case TaskState::Resolving:
-        return QStringLiteral("Buscando el archivo…");
-    case TaskState::Downloading: {
-        QStringList parts;
-        if (const auto size = sizeOf(task); !size.isEmpty()) {
-            parts.append(size);
-        }
-        parts.append(display::speed(task.bytesPerSecond));
-        if (task.bytesPerSecond > 0 && task.bytesTotal > task.bytesDone) {
-            parts.append(
-                QStringLiteral("quedan ") +
-                display::remaining((task.bytesTotal - task.bytesDone) / task.bytesPerSecond));
-        }
-        return parts.join(QStringLiteral(" · "));
-    }
-    case TaskState::Verifying:
-        return QStringLiteral("Comprobando el archivo · %1 %")
-            .arg(task.bytesTotal > 0 ? 100 * task.bytesDone / task.bytesTotal : 0);
-    case TaskState::Paused: {
-        const auto size = sizeOf(task);
-        return size.isEmpty() ? QStringLiteral("En pausa") : QStringLiteral("En pausa · ") + size;
-    }
-    case TaskState::Waiting: {
-        const auto at = QLocale(QLocale::Spanish)
-                            .toString(task.retryAt.toLocalTime().time(), QStringLiteral("HH:mm"));
-        return display::issue(task.issue) + QStringLiteral(" Se reintenta a las ") + at +
-               QLatin1Char('.');
-    }
-    case TaskState::Completed: {
-        QStringList parts{display::bytes(task.bytesTotal)};
-        if (task.provider) {
-            parts.append(display::provider(*task.provider));
-        }
-        return parts.join(QStringLiteral(" · "));
-    }
-    case TaskState::Failed:
-        return display::issue(task.issue);
-    case TaskState::Cancelled:
-        return QStringLiteral("Cancelada");
-    }
-    return {};
 }
 
 void DownloadsView::pause(qint64 id) {
@@ -273,7 +212,9 @@ QVariant DownloadsView::data(const QModelIndex& index, int role) const {
         case 0:
             return QStringLiteral("Descargando");
         case 1:
-            return QStringLiteral("En cola");
+            return QStringLiteral("Pendientes");
+        case 2:
+            return QStringLiteral("Fallidas");
         default:
             return QStringLiteral("Terminadas");
         }
@@ -282,7 +223,7 @@ QVariant DownloadsView::data(const QModelIndex& index, int role) const {
                    ? static_cast<double>(task.bytesDone) / static_cast<double>(task.bytesTotal)
                    : 0.0;
     case DetailRole:
-        return detailOf(task);
+        return display::download(task);
     case ProblemRole:
         return task.state == TaskState::Failed;
     default:

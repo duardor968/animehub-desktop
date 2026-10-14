@@ -20,18 +20,19 @@ Item {
     }
 
     SplitView {
+        id: split
         anchors.fill: parent
         orientation: Qt.Horizontal
 
-        // A hairline that is easy to grab.
-        handle: Item {
-            implicitWidth: 6
-
-            Rectangle {
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: 1
-                height: parent.height
-                color: SplitHandle.hovered || SplitHandle.pressed ? Theme.accent : Theme.stroke
+        // A hairline between the panes, with no gap beside it; the pointer grabs it 4 px away.
+        handle: Rectangle {
+            id: hairline
+            implicitWidth: 1
+            color: SplitHandle.hovered || SplitHandle.pressed ? Theme.accent : Theme.stroke
+            containmentMask: Item {
+                x: (hairline.width - width) / 2
+                width: 9
+                height: split.height
             }
         }
 
@@ -60,7 +61,7 @@ Item {
 
             AnimePage {
                 view: page.app.libraryAnime
-                backText: "Biblioteca"
+                backText: "Inicio"
                 onBack: page.select("")
             }
         }

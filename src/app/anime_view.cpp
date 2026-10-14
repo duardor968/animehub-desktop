@@ -63,8 +63,8 @@ void AnimeView::open(const QString& slug, const library::AnimeRecord& hint) {
     hint_ = hint;
     problem_.clear();
     record_.reset();
-    episodes_.setEpisodes({});
     emit slugChanged();
+    // Straight to the new list: an empty one in between cancels the rows being built.
     readLibrary();
     reload();
 }
@@ -84,9 +84,7 @@ void AnimeView::readLibrary() {
         record_ = **entry;
     }
     auto list = services_.library.repository().episodes(slug_);
-    if (list) {
-        episodes_.setEpisodes(std::move(*list));
-    }
+    episodes_.setEpisodes(list ? std::move(*list) : QList<library::EpisodeRecord>());
     QList<downloads::Task> mine;
     for (const auto& task : services_.downloads.tasks()) {
         if (task.slug == slug_) {
@@ -207,8 +205,10 @@ AnimeView::PrimaryAction AnimeView::primaryAction() const {
     if (episode && !episode->filePath.isEmpty()) {
         return PrimaryAction::Play;
     }
+    // Failed and paused downloads are downloaded again from where they stopped.
     const auto task = episodes_.task(*number);
-    if (task && task->state != downloads::TaskState::Failed) {
+    if (task && task->state != downloads::TaskState::Failed &&
+        task->state != downloads::TaskState::Paused) {
         return PrimaryAction::Wait;
     }
     return PrimaryAction::Download;
@@ -231,6 +231,12 @@ QString AnimeView::primaryText() const {
     case PrimaryAction::Wait:
         return QStringLiteral("Descargando ") + label.toLower();
     case PrimaryAction::Download:
+        if (const auto task = episodes_.task(*number)) {
+            return (task->state == downloads::TaskState::Paused
+                        ? QStringLiteral("Reanudar la descarga del ")
+                        : QStringLiteral("Reintentar la descarga del ")) +
+                   label.toLower();
+        }
         return QStringLiteral("Descargar ") + label.toLower();
     case PrimaryAction::None:
         break;
@@ -248,7 +254,7 @@ double AnimeView::resumeProgress() const {
 }
 
 QString AnimeView::resumeText() const {
-    if (resumeProgress() < 0) {
+    if (!record_ || resumeProgress() < 0) {
         return {};
     }
     return display::clock(record_->resumePositionMs) + QStringLiteral(" / ") +

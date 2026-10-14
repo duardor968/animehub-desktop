@@ -35,7 +35,6 @@ public:
         PosterRole,
         CaptionRole,
         ProgressRole,
-        SectionRole,
         FreshRole,
         FavoriteRole,
     };
@@ -84,8 +83,7 @@ private:
 
     library::LibraryService& library_;
     QList<library::LibraryEntry> entries_;
-    QList<int> rows_;              // indices into entries_, in display order
-    QList<bool> continue_section_; // per row
+    QList<int> rows_; // indices into entries_, in display order
     Filter filter_ = Filter::All;
     QString search_;
     CardModel continue_shelf_;

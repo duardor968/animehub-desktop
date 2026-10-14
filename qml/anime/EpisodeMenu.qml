@@ -23,59 +23,52 @@ Item {
         menu.popup(anchor, 0, anchor.height)
     }
 
-    Menu {
+    ActionMenu {
         id: menu
 
-        MenuItem {
+        MenuEntry {
             text: root.watched ? "Marcar como no visto" : "Marcar como visto"
             onTriggered: root.watched ? root.view.markUnwatched(root.number)
                                       : root.view.markWatched(root.number)
         }
-        MenuItem {
+        MenuEntry {
             text: "Marcar como visto hasta aquí"
             onTriggered: root.view.markWatchedThrough(root.number)
         }
-        MenuItem {
+        MenuEntry {
             text: "Continuar desde…"
-            icon.source: Theme.source(Theme.icon.clock)
+            glyph: Theme.icon.clock
             onTriggered: continueDialog.open()
         }
         MenuSeparator {}
-        MenuItem {
+        MenuEntry {
             text: "Cancelar la descarga"
             visible: root.downloadState !== ""
-            height: visible ? implicitHeight : 0
-            icon.source: Theme.source(Theme.icon.cancel)
+            glyph: Theme.icon.cancel
             onTriggered: root.view.cancelDownload(root.number)
         }
-        MenuItem {
+        MenuEntry {
             text: "Mostrar en la carpeta"
             visible: root.hasFile
-            height: visible ? implicitHeight : 0
-            icon.source: Theme.source(Theme.icon.folder)
+            glyph: Theme.icon.folder
             onTriggered: root.view.showFile(root.number)
         }
-        MenuItem {
+        MenuEntry {
             text: "Mover el archivo a la papelera"
             visible: root.hasFile
-            height: visible ? implicitHeight : 0
-            icon.source: Theme.source(Theme.icon.trash)
+            glyph: Theme.icon.trash
             onTriggered: root.view.trashFile(root.number)
         }
-        MenuItem {
+        MenuEntry {
             text: "Enviar a JDownloader"
             visible: root.view.canSendToJDownloader
-            height: visible ? implicitHeight : 0
-            icon.source: Theme.source(Theme.icon.send)
+            glyph: Theme.icon.send
             onTriggered: root.view.sendToJDownloader(root.number)
         }
     }
 
-    Dialog {
+    ModalDialog {
         id: continueDialog
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        modal: true
         title: "Continuar el " + root.label.toLowerCase() + " desde"
 
         footer: DialogButtonBox {

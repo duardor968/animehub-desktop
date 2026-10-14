@@ -37,19 +37,6 @@ AbstractButton {
             }
 
             Rectangle {
-                visible: root.fresh
-                width: 10
-                height: 10
-                radius: 5
-                color: Theme.accent
-                border.color: Theme.canvas
-                border.width: 2
-                anchors.top: parent.top
-                anchors.right: parent.right
-                anchors.margins: 6
-            }
-
-            Rectangle {
                 anchors.fill: parent
                 radius: Theme.radius
                 color: "transparent"
@@ -73,15 +60,31 @@ AbstractButton {
             wrapMode: Text.Wrap
         }
 
-        Label {
-            id: captionLabel
+        // New episodes read as in the library list: a dot and the accent colour.
+        Row {
+            id: captionRow
             anchors.top: titleLabel.bottom
             anchors.topMargin: 2
             width: parent.width
-            text: root.caption
-            color: Theme.muted
-            font.pixelSize: Theme.caption
-            elide: Text.ElideRight
+            spacing: 6
+
+            Rectangle {
+                visible: root.fresh
+                anchors.verticalCenter: parent.verticalCenter
+                width: 6
+                height: 6
+                radius: 3
+                color: Theme.accent
+            }
+
+            Label {
+                id: captionLabel
+                width: parent.width - (root.fresh ? 12 : 0)
+                text: root.caption
+                color: root.fresh ? Theme.accent : Theme.muted
+                font.pixelSize: Theme.caption
+                elide: Text.ElideRight
+            }
         }
     }
 }

@@ -4,17 +4,14 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import AnimeHub
 
-Dialog {
+ModalDialog {
     id: dialog
 
     required property AppController app
     readonly property AppSettings settings: app.settings
 
-    parent: Overlay.overlay
-    anchors.centerIn: parent
     width: Math.min(620, parent.width - 48)
     height: Math.min(implicitHeight, parent.height - 48)
-    modal: true
     title: "Ajustes"
 
     footer: DialogButtonBox {
@@ -38,10 +35,33 @@ Dialog {
         Layout.alignment: Qt.AlignVCenter
     }
 
+    // A label whose ⓘ explains a consequence the control alone cannot show.
+    component InfoLabel: RowLayout {
+        property alias text: label.text
+        property string info
+        spacing: 6
+        Layout.alignment: Qt.AlignVCenter
+
+        Label {
+            id: label
+            color: Theme.muted
+        }
+        Glyph {
+            glyph: Theme.icon.info
+            color: Theme.muted
+            HoverHandler { id: hover }
+            ToolTip.visible: hover.hovered
+            ToolTip.text: parent.info
+        }
+    }
+
     ScrollView {
         anchors.fill: parent
         contentWidth: availableWidth
         clip: true
+        // When the window is too short for every setting, the bar shows there is more below.
+        ScrollBar.vertical.policy: contentHeight > height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+        rightPadding: ScrollBar.vertical.policy === ScrollBar.AlwaysOn ? ScrollBar.vertical.width + 8 : 0
 
         GridLayout {
             width: parent.width
@@ -101,32 +121,24 @@ Dialog {
 
             SectionTitle { text: "Reproducción" }
 
-            FieldLabel { text: "Reproductor" }
-            RowLayout {
+            InfoLabel {
+                text: "Reproductor"
+                info: "El reproductor incluido guarda el minuto en el que te quedas. Con la "
+                      + "aplicación de Windows, abrir un episodio lo marca como visto."
+            }
+            ComboBox {
                 Layout.fillWidth: true
-
-                ComboBox {
-                    Layout.fillWidth: true
-                    model: ["Incluido (mpv)", "Aplicación predeterminada de Windows"]
-                    currentIndex: dialog.settings.systemPlayer ? 1 : 0
-                    onActivated: index => dialog.settings.systemPlayer = index === 1
-                    Accessible.name: "Reproductor"
-                }
-
-                Glyph {
-                    glyph: Theme.icon.info
-                    color: Theme.muted
-                    HoverHandler { id: playerInfo }
-                    ToolTip.visible: playerInfo.hovered
-                    ToolTip.text: "El reproductor incluido guarda el minuto en el que te quedas. "
-                                  + "Con la aplicación de Windows, abrir un episodio lo marca como visto."
-                }
+                model: ["Incluido (mpv)", "Aplicación predeterminada de Windows"]
+                currentIndex: dialog.settings.systemPlayer ? 1 : 0
+                onActivated: index => dialog.settings.systemPlayer = index === 1
+                Accessible.name: "Reproductor"
             }
 
             SectionTitle { text: "General" }
 
             FieldLabel { text: "Avisos" }
             Switch {
+                leftPadding: 0 // its knob lines up with the controls above
                 text: "Episodios nuevos de la biblioteca"
                 checked: dialog.settings.notifications
                 onToggled: dialog.settings.notifications = checked
@@ -143,26 +155,17 @@ Dialog {
 
             SectionTitle { text: "JDownloader" }
 
-            FieldLabel { text: "Enviar enlaces a" }
-            RowLayout {
+            InfoLabel {
+                text: "Enviar enlaces a"
+                info: "Añade «Enviar a JDownloader» a cada episodio, con los enlaces de todos los "
+                      + "servidores, también MP4Upload y 1Fichier."
+            }
+            ComboBox {
                 Layout.fillWidth: true
-
-                ComboBox {
-                    Layout.fillWidth: true
-                    model: ["No enviar", "JDownloader en este equipo", "MyJDownloader"]
-                    currentIndex: dialog.settings.jdownloader
-                    onActivated: index => dialog.settings.jdownloader = index
-                    Accessible.name: "Enviar enlaces a"
-                }
-
-                Glyph {
-                    glyph: Theme.icon.info
-                    color: Theme.muted
-                    HoverHandler { id: jdInfo }
-                    ToolTip.visible: jdInfo.hovered
-                    ToolTip.text: "Añade «Enviar a JDownloader» a cada episodio, con los enlaces de "
-                                  + "todos los servidores, también MP4Upload y 1Fichier."
-                }
+                model: ["No enviar", "JDownloader en este equipo", "MyJDownloader"]
+                currentIndex: dialog.settings.jdownloader
+                onActivated: index => dialog.settings.jdownloader = index
+                Accessible.name: "Enviar enlaces a"
             }
 
             FieldLabel {
@@ -232,12 +235,9 @@ Dialog {
         }
     }
 
-    Dialog {
+    ModalDialog {
         id: accountDialog
-        parent: Overlay.overlay
-        anchors.centerIn: parent
         width: 420
-        modal: true
         title: "Conectar MyJDownloader"
         onOpened: {
             password.text = ""

@@ -12,6 +12,7 @@
 #include <QNetworkAccessManager>
 #include <QObject>
 #include <QSystemTrayIcon>
+#include <QWindow>
 #include <QtQmlIntegration>
 
 #include <memory>
@@ -94,6 +95,7 @@ public:
     Q_INVOKABLE void openDownloadFolder();
     Q_INVOKABLE void openUrl(const QUrl& url);
     Q_INVOKABLE QString localPath(const QUrl& url) const;
+    Q_INVOKABLE void tintTitleBar(QWindow* window, const QColor& background, const QColor& text);
 
 signals:
     void showRequested();

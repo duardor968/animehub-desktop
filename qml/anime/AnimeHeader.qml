@@ -45,6 +45,9 @@ Item {
         x: 20
         y: 14
         flat: true
+        // Sized to its content: Fluent's minimum width would centre a short label and shift
+        // the arrow off the poster's edge.
+        implicitWidth: implicitContentWidth + leftPadding + rightPadding
         text: root.backText
         icon.source: Theme.source(Theme.icon.back)
         onClicked: root.back()
@@ -63,17 +66,19 @@ Item {
             spacing: 24
 
             Poster {
-                readonly property int side: Math.round(Math.min(150, Math.max(96, content.width * 0.2)))
-                Layout.preferredWidth: side
-                Layout.preferredHeight: Math.round(side * 1.42)
-                Layout.alignment: Qt.AlignBottom
+                id: poster
+                Layout.preferredWidth: 150
+                Layout.preferredHeight: 213
+                Layout.alignment: Qt.AlignTop
                 source: root.view.posterUrl
             }
 
             ColumnLayout {
+                id: titles
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
-                Layout.alignment: Qt.AlignBottom
+                // Level with the poster's bottom when it fits beside it; from its top otherwise.
+                Layout.alignment: implicitHeight > poster.height ? Qt.AlignTop : Qt.AlignBottom
                 spacing: 6
 
                 Label {
@@ -123,34 +128,35 @@ Item {
                     Layout.minimumWidth: 0
                     spacing: 8
 
-                    Button {
-                        id: primary
-                        visible: root.view.primaryAction !== AnimeView.None
-                        highlighted: root.view.primaryAction !== AnimeView.Wait
-                        enabled: root.view.primaryAction !== AnimeView.Wait
-                        text: root.view.primaryText
-                        icon.source: Theme.source(root.view.primaryAction === AnimeView.Download
-                                                  ? Theme.icon.download : Theme.icon.play)
-                        onClicked: root.view.primary()
-                    }
-
+                    // Where the episode was left goes with the button that resumes it.
                     Column {
-                        visible: root.view.resumeProgress >= 0
-                        height: primary.height
-                        topPadding: 8
-                        leftPadding: 4
-                        rightPadding: 4
-                        spacing: 4
+                        spacing: 8
 
-                        ProgressLine {
-                            width: 140
-                            value: root.view.resumeProgress
+                        Button {
+                            id: primary
+                            visible: root.view.primaryAction !== AnimeView.None
+                            highlighted: root.view.primaryAction !== AnimeView.Wait
+                            enabled: root.view.primaryAction !== AnimeView.Wait
+                            text: root.view.primaryText
+                            icon.source: Theme.source(root.view.primaryAction === AnimeView.Play
+                                                      ? Theme.icon.play : Theme.icon.download)
+                            onClicked: root.view.primary()
                         }
 
-                        Label {
-                            text: root.view.resumeText
-                            color: Theme.muted
-                            font.pixelSize: Theme.caption
+                        RowLayout {
+                            visible: root.view.resumeProgress >= 0
+                            spacing: 10
+
+                            ProgressLine {
+                                Layout.preferredWidth: 180
+                                value: root.view.resumeProgress
+                            }
+
+                            Label {
+                                text: root.view.resumeText
+                                color: Theme.muted
+                                font.pixelSize: Theme.caption
+                            }
                         }
                     }
 
@@ -161,28 +167,33 @@ Item {
                         onClicked: root.view.setInLibrary(true)
                     }
 
-                    ToolButton {
-                        visible: root.view.loaded
-                        icon.source: Theme.source(root.view.favorite ? Theme.icon.starFilled : Theme.icon.star)
-                        icon.color: root.view.favorite ? Theme.warning : Theme.ink
-                        display: AbstractButton.IconOnly
-                        text: root.view.favorite ? "Quitar de favoritos" : "Añadir a favoritos"
-                        Accessible.checkable: true
-                        Accessible.checked: root.view.favorite
-                        ToolTip.visible: hovered
-                        ToolTip.text: text
-                        onClicked: root.view.setFavorite(!root.view.favorite)
-                    }
+                    // The two icons wrap together, never one alone.
+                    Row {
+                        spacing: 4
 
-                    ToolButton {
-                        id: moreButton
-                        visible: root.view.loaded
-                        icon.source: Theme.source(Theme.icon.more)
-                        display: AbstractButton.IconOnly
-                        text: "Más opciones"
-                        ToolTip.visible: hovered
-                        ToolTip.text: text
-                        onClicked: moreMenu.popup(moreButton, 0, moreButton.height)
+                        ToolButton {
+                            visible: root.view.loaded
+                            icon.source: Theme.source(root.view.favorite ? Theme.icon.starFilled : Theme.icon.star)
+                            icon.color: root.view.favorite ? Theme.warning : Theme.ink
+                            display: AbstractButton.IconOnly
+                            text: root.view.favorite ? "Quitar de favoritos" : "Añadir a favoritos"
+                            Accessible.checkable: true
+                            Accessible.checked: root.view.favorite
+                            ToolTip.visible: hovered
+                            ToolTip.text: text
+                            onClicked: root.view.setFavorite(!root.view.favorite)
+                        }
+
+                        ToolButton {
+                            id: moreButton
+                            visible: root.view.loaded
+                            icon.source: Theme.source(Theme.icon.more)
+                            display: AbstractButton.IconOnly
+                            text: "Más opciones"
+                            ToolTip.visible: hovered
+                            ToolTip.text: text
+                            onClicked: moreMenu.popup(moreButton, 0, moreButton.height)
+                        }
                     }
                 }
             }
@@ -191,25 +202,31 @@ Item {
         Label {
             id: synopsis
             property bool expanded: false
+            // Collapsed, the first paragraph: it usually ends a sentence, so no "….".
+            readonly property var paragraphs: root.view.synopsis.split(/\n\s*\n/)
+            // Each anime opens collapsed.
+            onParagraphsChanged: expanded = false
             Layout.fillWidth: true
             Layout.maximumWidth: 900
             visible: text !== ""
-            text: root.view.synopsis
+            text: expanded ? root.view.synopsis : paragraphs[0]
             color: Theme.ink
             opacity: 0.88
             font.pixelSize: Theme.body
             lineHeight: 1.25
             wrapMode: Text.Wrap
-            maximumLineCount: expanded ? 1000 : 3
+            maximumLineCount: expanded ? 1000 : 4
             elide: Text.ElideRight
         }
 
         Button {
-            visible: synopsis.truncated || synopsis.expanded
+            id: more
+            visible: synopsis.expanded || synopsis.truncated || synopsis.paragraphs.length > 1
             flat: true
-            padding: 0
             text: synopsis.expanded ? "Mostrar menos" : "Mostrar más"
             onClicked: synopsis.expanded = !synopsis.expanded
+            // Its text in the synopsis column; the hover background may overhang, as in WinUI.
+            Layout.leftMargin: -leftPadding
             Layout.topMargin: -14
         }
 
@@ -255,23 +272,23 @@ Item {
         }
     }
 
-    Menu {
+    ActionMenu {
         id: moreMenu
 
-        MenuItem {
+        MenuEntry {
             text: "Pendiente"
             checkable: true
             checked: root.view.pending
             onTriggered: root.view.setPending(checked)
         }
-        MenuItem {
+        MenuEntry {
             text: "Avisar de episodios nuevos"
             checkable: true
             checked: root.view.notify
             enabled: root.view.inLibrary
             onTriggered: root.view.setNotify(checked)
         }
-        MenuItem {
+        MenuEntry {
             text: "Descargar episodios nuevos"
             checkable: true
             checked: root.view.autoDownload
@@ -285,41 +302,39 @@ Item {
             }
         }
         MenuSeparator {}
-        MenuItem {
+        MenuEntry {
             text: "Descargar los no vistos"
-            icon.source: Theme.source(Theme.icon.download)
+            glyph: Theme.icon.download
             onTriggered: root.view.downloadUnwatched()
         }
-        MenuItem {
+        MenuEntry {
             text: "Marcar todo como visto"
-            icon.source: Theme.source(Theme.icon.check)
             onTriggered: root.view.markAllWatched()
         }
-        MenuItem {
+        MenuEntry {
             text: "Marcar todo como no visto"
             onTriggered: root.view.markAllUnwatched()
         }
-        MenuItem {
+        MenuEntry {
             text: "Abrir la carpeta"
-            icon.source: Theme.source(Theme.icon.folder)
+            glyph: Theme.icon.folder
             onTriggered: root.view.openFolder()
         }
-        MenuSeparator { visible: root.view.inLibrary }
-        MenuItem {
-            text: "Quitar de la biblioteca"
-            icon.source: Theme.source(Theme.icon.remove)
+        MenuSeparator {
             visible: root.view.inLibrary
             height: visible ? implicitHeight : 0
+        }
+        MenuEntry {
+            text: "Quitar de la biblioteca"
+            glyph: Theme.icon.remove
+            visible: root.view.inLibrary
             onTriggered: root.view.setInLibrary(false)
         }
     }
 
-    Dialog {
+    ModalDialog {
         id: autoDownloadDialog
-        parent: Overlay.overlay
-        anchors.centerIn: parent
         width: 480
-        modal: true
         title: "Descargar episodios nuevos"
 
         // Fixed widths on both sides: Fluent's Dialog loops when its content follows it.

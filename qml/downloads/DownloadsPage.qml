@@ -24,9 +24,9 @@ Item {
         visible: page.downloads.count > 0
 
         Button {
-            visible: page.downloads.activeCount > 0
+            visible: page.downloads.activeCount > 0 || page.downloads.anyPaused
             text: page.downloads.anyPaused ? "Reanudar todo" : "Pausar todo"
-            icon.source: Theme.source(page.downloads.anyPaused ? Theme.icon.play : Theme.icon.pause)
+            icon.source: Theme.source(page.downloads.anyPaused ? Theme.icon.download : Theme.icon.pause)
             onClicked: page.downloads.anyPaused ? page.downloads.resumeAll() : page.downloads.pauseAll()
         }
 
@@ -41,7 +41,7 @@ Item {
         Button {
             visible: page.downloads.finishedCount > 0
             flat: true
-            text: "Quitar las terminadas"
+            text: "Quitar terminadas de la lista"
             onClicked: page.downloads.clearFinished()
         }
     }
@@ -167,7 +167,7 @@ Item {
                 }
                 ToolButton {
                     visible: row.state === "paused"
-                    icon.source: Theme.source(Theme.icon.play)
+                    icon.source: Theme.source(Theme.icon.download)
                     display: AbstractButton.IconOnly
                     text: "Reanudar"
                     ToolTip.visible: hovered

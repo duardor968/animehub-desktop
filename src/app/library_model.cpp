@@ -97,16 +97,14 @@ void LibraryModel::reload() {
     std::ranges::sort(active, [](const LibraryEntry* a, const LibraryEntry* b) {
         return a->lastActivityAt > b->lastActivityAt;
     });
+    // The same caption and the same bar (how much of the series) as in the list.
     QList<Card> continue_cards;
     for (const auto* entry : active | std::views::take(12)) {
         continue_cards.append({.slug = entry->slug,
                                .title = entry->title,
                                .posterUrl = entry->posterUrl,
-                               .caption = display::episode(*entry->resumeNumber),
-                               .progress = entry->resumeDurationMs > 0
-                                               ? static_cast<double>(entry->resumePositionMs) /
-                                                     static_cast<double>(entry->resumeDurationMs)
-                                               : 0.0,
+                               .caption = captionOf(*entry),
+                               .progress = progressOf(*entry),
                                .episode = *entry->resumeNumber});
     }
     continue_shelf_.setCards(std::move(continue_cards));
@@ -121,7 +119,13 @@ void LibraryModel::reload() {
                         .progress = progressOf(entry),
                         .fresh = entry.newEpisodes > 0};
         if (entry.newEpisodes > 0) {
-            fresh_cards.append(card);
+            // The shelf is titled "Episodios nuevos" already: just how many, no dot.
+            auto fresh = card;
+            fresh.caption = entry.newEpisodes == 1
+                                ? QStringLiteral("1 nuevo")
+                                : QStringLiteral("%1 nuevos").arg(entry.newEpisodes);
+            fresh.fresh = false;
+            fresh_cards.append(fresh);
         }
         all_cards.append(card);
     }
@@ -131,7 +135,6 @@ void LibraryModel::reload() {
 
 void LibraryModel::rebuildRows() {
     QList<int> rows;
-    QList<bool> sections;
     const auto matches = [this](const LibraryEntry& entry) {
         if (!search_.isEmpty() && !entry.title.contains(search_, Qt::CaseInsensitive) &&
             !entry.alternativeTitle.contains(search_, Qt::CaseInsensitive)) {
@@ -151,31 +154,13 @@ void LibraryModel::rebuildRows() {
         }
         return true;
     };
-    // Without filter or search, what is being watched goes first, most recent on top.
-    const bool grouped = filter_ == Filter::All && search_.isEmpty();
-    if (grouped) {
-        QList<int> active;
-        for (int i = 0; i < entries_.size(); ++i) {
-            if (continuing(entries_[i])) {
-                active.append(i);
-            }
-        }
-        std::ranges::sort(active, [this](int a, int b) {
-            return entries_[a].lastActivityAt > entries_[b].lastActivityAt;
-        });
-        rows = active;
-        sections.fill(true, active.size());
-    }
+    // One alphabetical list, like Steam's; what is being watched lives on the home shelves.
     for (int i = 0; i < entries_.size(); ++i) {
-        if (matches(entries_[i]) && !(grouped && continuing(entries_[i]))) {
+        if (matches(entries_[i])) {
             rows.append(i);
-            sections.append(false);
         }
     }
-    const bool same_rows = rows.size() == rows_.size() &&
-                           std::ranges::equal(rows, rows_, [this](int a, int b) { return a == b; });
-    if (same_rows && sections == continue_section_) {
-        rows_ = std::move(rows);
+    if (rows == rows_) {
         if (!rows_.isEmpty()) {
             emit dataChanged(index(0), index(static_cast<int>(rows_.size()) - 1));
         }
@@ -183,7 +168,6 @@ void LibraryModel::rebuildRows() {
     }
     beginResetModel();
     rows_ = std::move(rows);
-    continue_section_ = std::move(sections);
     endResetModel();
     emit countChanged();
 }
@@ -222,9 +206,6 @@ QVariant LibraryModel::data(const QModelIndex& index, int role) const {
         return captionOf(entry);
     case ProgressRole:
         return progressOf(entry);
-    case SectionRole:
-        return continue_section_[index.row()] ? QStringLiteral("Continuar viendo")
-                                              : QStringLiteral("Biblioteca");
     case FreshRole:
         return entry.newEpisodes > 0;
     case FavoriteRole:
@@ -235,9 +216,9 @@ QVariant LibraryModel::data(const QModelIndex& index, int role) const {
 }
 
 QHash<int, QByteArray> LibraryModel::roleNames() const {
-    return {{SlugRole, "slug"},       {TitleRole, "title"},       {PosterRole, "posterUrl"},
-            {CaptionRole, "caption"}, {ProgressRole, "progress"}, {SectionRole, "section"},
-            {FreshRole, "fresh"},     {FavoriteRole, "favorite"}};
+    return {{SlugRole, "slug"},        {TitleRole, "title"},       {PosterRole, "posterUrl"},
+            {CaptionRole, "caption"},  {ProgressRole, "progress"}, {FreshRole, "fresh"},
+            {FavoriteRole, "favorite"}};
 }
 
 } // namespace animehub::app

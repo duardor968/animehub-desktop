@@ -21,8 +21,8 @@ QString instanceName(const QString& data_directory) {
 }
 
 const QIcon& appIcon() {
-    static const QIcon icon(QStringLiteral(":/qt/qml/AnimeHub/assets/animehub.png"));
-    return icon;
+    static const QIcon kIcon(QStringLiteral(":/qt/qml/AnimeHub/assets/animehub.png"));
+    return kIcon;
 }
 
 } // namespace
@@ -170,7 +170,7 @@ void AppController::setupTray() {
     connect(tray_menu_.get(), &QMenu::aboutToShow, this, [this, pause] {
         pause->setText(downloads_view_->anyPaused() ? QStringLiteral("Reanudar las descargas")
                                                     : QStringLiteral("Pausar las descargas"));
-        pause->setEnabled(downloads_view_->activeCount() > 0);
+        pause->setEnabled(downloads_view_->activeCount() > 0 || downloads_view_->anyPaused());
     });
     tray_menu_->addSeparator();
     tray_menu_->addAction(QStringLiteral("Salir"), this, &AppController::quit);
@@ -298,6 +298,10 @@ void AppController::openDownloadFolder() {
 
 void AppController::openUrl(const QUrl& url) {
     QDesktopServices::openUrl(url);
+}
+
+void AppController::tintTitleBar(QWindow* window, const QColor& background, const QColor& text) {
+    shell::tintTitleBar(window, background, text);
 }
 
 QString AppController::localPath(const QUrl& url) const {

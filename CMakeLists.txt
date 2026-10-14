@@ -108,7 +108,10 @@ qt_add_qml_module(animehub-desktop
     qml/anime/EpisodeMenu.qml
     qml/anime/EpisodeRow.qml
     qml/catalog/CatalogPage.qml
+    qml/components/ActionMenu.qml
     qml/components/Glyph.qml
+    qml/components/MenuEntry.qml
+    qml/components/ModalDialog.qml
     qml/components/PageTab.qml
     qml/components/Poster.qml
     qml/components/PosterCard.qml
@@ -125,6 +128,9 @@ qt_add_qml_module(animehub-desktop
 )
 
 target_include_directories(animehub-desktop PRIVATE src/app)
+if(WIN32)
+  target_link_libraries(animehub-desktop PRIVATE dwmapi)
+endif()
 target_link_libraries(animehub-desktop
   PRIVATE
     animehub-core
