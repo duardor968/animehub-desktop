@@ -16,7 +16,10 @@ function(animehub_add_test name)
     ANIMEHUB_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
   )
   animehub_configure_target(${name})
-  add_test(NAME ${name} COMMAND ${name})
+  # qt_standard_project_setup makes every executable a GUI one, and QtTest's plain log does not
+  # reach a pipe: console tests with TAP output let ctest show why one failed.
+  set_target_properties(${name} PROPERTIES WIN32_EXECUTABLE FALSE)
+  add_test(NAME ${name} COMMAND ${name} -o -,tap)
   set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endfunction()
 
