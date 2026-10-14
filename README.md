@@ -1,73 +1,55 @@
 # AnimeHub Desktop
 
-AnimeHub Desktop será la aplicación nativa para mantener una biblioteca personal, reproducir mediante aplicaciones externas y administrar descargas. No replica la web: comparte su API pública, pero ofrece una interfaz y responsabilidades propias del escritorio.
+Aplicación nativa de Windows para seguir anime: una biblioteca personal, el catálogo de AnimeHub, descargas que se gestionan solas y reproducción con el minuto exacto donde te quedaste. Comparte la API pública de AnimeHub con la web, pero no la replica: la biblioteca y el progreso viven solo en tu equipo.
 
-> **Estado:** scaffold ejecutable para Windows. Solo existe una ventana Qt Quick, configuración CMake y una prueba de identidad; todavía no hay red, biblioteca, persistencia ni motores de descarga.
+## Qué hace
 
-## Relación con AnimeHub Web
+- **Biblioteca**, al estilo de la de Steam: la lista a la izquierda (buscar, filtrar por pendientes, favoritos, vistos o descargados) y, a la derecha, un inicio con portadas (*Continuar viendo*, *Episodios nuevos*, *Toda la biblioteca*) o la ficha del anime elegido.
+- **Catálogo**: episodios recientes, añadidos recientemente y todo el catálogo con búsqueda, estado, género y orden.
+- **Descargas nativas** de MEGA y Pixeldrain, con cola persistente, pausa y reanudación (también tras cerrar la app), reintentos y espera automática cuando se agota la cuota de MEGA. Los archivos de MEGA se descifran y se verifica su integridad antes de aparecer en la carpeta.
+- **Reproducción**: con el reproductor incluido (mpv) AnimeHub sabe en qué minuto te quedaste y marca el episodio como visto al terminarlo; con la aplicación predeterminada de Windows, abrirlo lo marca como visto. Cualquier episodio se puede marcar a mano como visto, no visto o en curso desde un minuto concreto.
+- **Episodios nuevos**: AnimeHub comprueba la biblioteca mientras está abierto (también en la bandeja), avisa y, si lo activas en un anime, los descarga solo.
+- **JDownloader** (opcional) para MP4Upload y 1Fichier: el de este equipo por Click'n'Load o cualquiera de tus equipos por MyJDownloader. De la cuenta solo se guardan las claves derivadas, en el Administrador de credenciales de Windows.
 
-- **AnimeHub Web** descubre catálogo públicamente, sin cuentas, y aloja el API y el scraper de AnimeAV1.
-- **AnimeHub Desktop** consume ese API, mantiene estado exclusivamente local y administra tareas de larga duración.
-- El proyecto anterior `Anime_downloader` es un antecedente conceptual. No se copia su código, historial ni interfaz.
+## Compilar
 
-## Stack
-
-- C++26 obligatorio, sin extensiones del compilador
-- Qt 6.11: Core, Gui, Qml, Quick, QuickControls2 y Qt Test
-- CMake 4.0+, Ninja y MSVC 2022 x64 (19.44 en el entorno inicial)
-- clang-format y clang-tidy
-- Windows como primera plataforma de CI; la estructura evita APIs de Windows innecesarias
-
-## Requisitos en Windows
-
-1. Visual Studio 2022 o Build Tools con **Desktop development with C++**.
-2. Qt 6.11.0, kit **MSVC 2022 64-bit**.
-3. CMake y Ninja. La instalación de Qt puede suministrar ambos.
-
-El script no modifica el `PATH` global. Localiza Visual Studio, activa MSVC x64 y añade Qt, CMake y Ninja únicamente a su propio proceso. Puedes usar otra ubicación de Qt definiendo `QT_ROOT` antes de invocarlo.
-
-## Compilar y probar
+Requisitos: Visual Studio 2022 (o Build Tools) con *Desktop development with C++*, Qt 6.11 para MSVC 2022 64-bit con el módulo **Qt Image Formats** (las portadas son WebP) y CMake 4.0 o posterior.
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\build.ps1
+.\scripts\build.ps1                         # Debug y pruebas
+.\scripts\build.ps1 -Configuration Release  # carpeta lista para usar
 ```
 
-Para Release:
+El script prepara MSVC, Qt y CMake solo para su proceso; no toca el `PATH` global. `-Fresh` reconfigura desde cero. Si Qt está en otra ruta, define `QT_ROOT`.
+
+La primera configuración descarga **aria2 1.37.0** y **mpv 0.41.0** desde sus versiones oficiales y comprueba su SHA-256 (fijado en [`cmake/Engines.cmake`](cmake/Engines.cmake)); quedan en `out/engine-cache` para las siguientes.
+
+## Instalación
+
+No hay instalador: la carpeta `out/build/windows-release` es la aplicación. Incluye `AnimeHub.exe`, las bibliotecas de Qt, el runtime de MSVC y los motores en `engines/`, así que funciona en un Windows sin Qt ni Visual C++ instalados. Se puede copiar a cualquier sitio.
+
+Los datos (biblioteca, ajustes y cachés) van en `%LOCALAPPDATA%\AnimeHub`; las descargas, por defecto, en `Descargas\AnimeHub`. Para probar sin tocar tu biblioteca:
 
 ```powershell
-.\scripts\build.ps1 -Configuration Release
+.\out\build\windows-release\AnimeHub.exe --data-dir "$env:TEMP\animehub-prueba"
 ```
 
-Equivalente dentro de una sesión que ya tenga MSVC y `QT_ROOT` configurados:
+## Pruebas
 
-```powershell
-cmake --preset windows-debug
-cmake --build --preset windows-debug
-ctest --preset windows-debug
-```
+`build.ps1` en Debug ejecuta `ctest`: lectura estricta del contrato de la API, caché sin conexión, base de datos, cifrado de MEGA contra vectores calculados con OpenSSL, protocolo de MyJDownloader contra la librería de la web, la cola completa con aria2 real contra un servidor local (pausa, cancelación, cuota, reanudación tras reiniciar, archivos dañados) y el reproductor con mpv real sin ventana.
 
-El ejecutable Debug queda bajo `out/build/windows-debug/AnimeHub.exe`.
+## Estructura
 
-## Arquitectura objetivo
+- `src/core`: dominio sin interfaz (API, biblioteca SQLite, descargas, reproducción y lo específico de Windows tras interfaces pequeñas).
+- `src/app`: modelos que ve QML, bandeja, avisos y arranque.
+- `qml`: la interfaz (Qt Quick con el estilo Fluent de Qt).
+- `tests`: Qt Test, con fixtures reales de la API.
 
-La aplicación consumirá REST/OpenAPI de AnimeHub Web y conservará una caché offline. El scraper seguirá siendo exclusivo del servidor: no se implementará una segunda versión en C++.
+## Relación con el resto de AnimeHub
 
-La biblioteca se almacenará localmente en SQLite y será reconstruible. Visto, pendiente, favorito y estados similares serán colecciones de datos, no carpetas físicas. La reproducción se delegará a la aplicación externa elegida por el usuario.
-
-Para v1, MEGA y Pixeldrain serán proveedores nativos. aria2 manejará descargas HTTP. JDownloader será una integración opcional para enviar trabajos a una instancia local o remota, no un requisito ni un backend embebido. Las notificaciones de nuevos episodios estarán activadas por defecto y la descarga automática será configurable por anime.
-
-## Roadmap
-
-1. Definir el cliente tipado para `/api/v1` y la estrategia de caché offline.
-2. Diseñar el esquema SQLite de biblioteca y colecciones personales.
-3. Integrar reproducción externa y selección segura de aplicaciones.
-4. Implementar proveedores nativos MEGA/Pixeldrain y aria2.
-5. Añadir JDownloader como salida opcional local/remota.
-6. Incorporar notificaciones y automatización granular por anime.
-
-No se integran todavía SQLite, red, bandeja del sistema, MEGA SDK, aria2, JDownloader, archivos ni módulos vacíos que simulen producto.
+- [AnimeHub API](https://github.com/duardor968/animehub-api): contrato REST/OpenAPI y procesamiento de AnimeAV1 (el escritorio no hace scraping).
+- [AnimeHub Frontend](https://github.com/duardor968/animehub-frontend): la web pública.
 
 ## Licencia
 
-AnimeHub Desktop se distribuye bajo [GNU GPL v3 o posterior](LICENSE).
+[GNU GPL v3 o posterior](LICENSE). aria2 (GPL-2.0-or-later) y mpv (GPL-2.0-or-later) se descargan en la compilación y se incluyen con sus licencias en `engines/`.

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 permissions:
@@ -23,13 +23,16 @@ jobs:
         with:
           version: 6.11.0
           arch: win64_msvc2022_64
+          modules: qtimageformats
           cache: true
           use-official: true
           email: ${{ secrets.QT_EMAIL }}
           pw: ${{ secrets.QT_PW }}
       - name: Check formatting
         shell: pwsh
-        run: clang-format --dry-run --Werror src/*.cpp src/*.h tests/*.cpp
+        run: |
+          $files = Get-ChildItem src, tests -Recurse -Include *.cpp, *.h | ForEach-Object FullName
+          clang-format --dry-run --Werror $files
       - name: Configure
         shell: pwsh
         run: |
