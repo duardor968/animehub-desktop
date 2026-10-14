@@ -16,10 +16,16 @@ class DownloadRepository {
 public:
     explicit DownloadRepository(storage::Database& database);
 
-    // Fails when the episode already has an active task.
+    // Fails when the episode already has an active task. A new task takes the place in the
+    // queue of its series when the series is still in line; otherwise it goes last.
     Stored<Task> create(const QString& slug, double number, const QString& anime_title,
                         api::Audio audio, TaskOrigin origin, const QString& target_path);
+    // Several episodes (number, target path) of one anime, all or none.
+    Stored<QList<Task>> createMany(const QString& slug,
+                                   const QList<std::pair<double, QString>>& episodes,
+                                   const QString& anime_title, api::Audio audio, TaskOrigin origin);
     Stored<void> save(const Task& task);
+    Stored<void> save(const QList<Task>& tasks); // in one transaction
     Stored<void> remove(qint64 id);
     // Active first in queue order, then finished ones, newest first.
     [[nodiscard]] Stored<QList<Task>> all() const;

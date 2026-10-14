@@ -19,6 +19,11 @@ using animehub::testing::HttpTestServer;
 namespace {
 
 constexpr int kTimeout = 30'000;
+const auto kFrieren = QStringLiteral("sousou-no-frieren");
+const auto kBebop = QStringLiteral("cowboy-bebop");
+const auto kDandadan = QStringLiteral("dandadan");
+
+using Episode = std::pair<QString, double>;
 
 QJsonObject vectors() {
     QFile file(QStringLiteral(ANIMEHUB_FIXTURES_DIR "/mega/vectors.json"));
@@ -74,6 +79,13 @@ QByteArray resolution(const QList<std::pair<const char*, QString>>& links) {
     return QJsonDocument(root).toJson(QJsonDocument::Compact);
 }
 
+QString titleOf(const QString& slug) {
+    if (slug == kBebop) {
+        return QStringLiteral("Cowboy Bebop");
+    }
+    return slug == kDandadan ? QStringLiteral("Dandadan") : QStringLiteral("Sousou no Frieren");
+}
+
 QStringList leftovers(const QString& directory) {
     QStringList found;
     QDirIterator it(directory, QDir::Files, QDirIterator::Subdirectories);
@@ -104,6 +116,7 @@ class DownloadManagerTest final : public QObject {
     std::unique_ptr<DownloadManager> manager_;
     QString downloads_;
     int mega_calls_ = 0;
+    int max_concurrent_ = 2;
 
     void serveMega(int bytes_per_tick = 0, int status = 200) {
         server_->route("POST", "/cs", [this](const HttpTestServer::Request&) {
@@ -124,11 +137,71 @@ class DownloadManagerTest final : public QObject {
         }
     }
 
-    void resolveTo(const QByteArray& body) {
-        server_->route("POST", "/api/v1/anime/sousou-no-frieren/downloads/resolve",
+    void resolveTo(const QByteArray& body, const QString& slug = kFrieren) {
+        server_->route("POST", "/api/v1/anime/" + slug.toLatin1() + "/downloads/resolve",
                        [body](const HttpTestServer::Request&) {
                            return HttpTestServer::Response{.body = body};
                        });
+    }
+
+    // Episodes in the order the manager asked the API for their sources.
+    QList<Episode> resolved() const {
+        QList<Episode> episodes;
+        for (const auto& request : server_->requests()) {
+            if (request.path.endsWith("/downloads/resolve")) {
+                const auto numbers = QJsonDocument::fromJson(request.body)
+                                         .object()
+                                         .value(u"episodeNumbers")
+                                         .toArray();
+                episodes.append({QString::fromLatin1(request.path.split('/').value(4)),
+                                 numbers.first().toDouble()});
+            }
+        }
+        return episodes;
+    }
+
+    QList<Episode> listed() const {
+        QList<Episode> episodes;
+        for (const auto& task : manager_->tasks()) {
+            episodes.append({task.slug, task.number});
+        }
+        return episodes;
+    }
+
+    std::optional<Task> taskFor(const QString& slug, double number) const {
+        for (const auto& task : manager_->tasks()) {
+            if (task.slug == slug && task.number == number) {
+                return task;
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::expected<Enqueued, QString> enqueueMany(const QString& slug,
+                                                 const QList<double>& numbers) {
+        return manager_->enqueueMany(slug, numbers, titleOf(slug), TaskOrigin::Manual);
+    }
+
+    void restart() {
+        bool stopped = false;
+        manager_->shutdown([&] { stopped = true; });
+        QTRY_VERIFY_WITH_TIMEOUT(stopped, 8000);
+        manager_.reset();
+        aria2_.reset();
+        makeManager();
+    }
+
+    // Resumed transfers continue past the bytes already on disk: the latest range start asked
+    // for `path` since request `since` (aria2 first probes the size with a plain GET).
+    qint64 resumedAt(const QByteArray& path, qsizetype since) const {
+        qint64 resumed_at = -1;
+        for (auto it = server_->requests().begin() + since; it != server_->requests().end(); ++it) {
+            const auto range = it->headers.value("range");
+            if (it->path == path && !range.isEmpty()) {
+                resumed_at = std::max(resumed_at, range.mid(6).split('-').first().toLongLong());
+            }
+        }
+        return resumed_at;
     }
 
     static QString megaUrl() {
@@ -142,7 +215,9 @@ class DownloadManagerTest final : public QObject {
         manager_ = std::make_unique<DownloadManager>(
             DownloadManager::Services{*api_, *aria2_, *mega_, *pixeldrain_, *repository_,
                                       *library_},
-            [this] { return DownloadSettings{.directory = downloads_}; });
+            [this] {
+                return DownloadSettings{.directory = downloads_, .maxConcurrent = max_concurrent_};
+            });
         manager_->start();
     }
 
@@ -162,10 +237,12 @@ private slots:
         database_ = std::move(*opened);
         library_ = std::make_unique<library::LibraryRepository>(*database_);
         repository_ = std::make_unique<DownloadRepository>(*database_);
-        library::AnimeRecord frieren;
-        frieren.slug = QStringLiteral("sousou-no-frieren");
-        frieren.title = QStringLiteral("Sousou no Frieren");
-        QVERIFY(library_->saveSnapshot(frieren));
+        for (const auto& slug : {kFrieren, kBebop, kDandadan}) {
+            library::AnimeRecord anime;
+            anime.slug = slug;
+            anime.title = titleOf(slug);
+            QVERIFY(library_->saveSnapshot(anime));
+        }
         api_ = std::make_unique<api::ApiClient>(
             *network_,
             api::ApiClient::Options{.baseUrl = server_->url(QStringLiteral("/api/v1/"))});
@@ -173,6 +250,7 @@ private slots:
             std::make_unique<mega::Api>(*network_, nullptr, server_->url(QStringLiteral("/cs")));
         pixeldrain_ = std::make_unique<pixeldrain::Api>(*network_, nullptr, server_->url());
         mega_calls_ = 0;
+        max_concurrent_ = 2;
         makeManager();
     }
 
@@ -403,6 +481,231 @@ private slots:
                               QStringLiteral("Sousou no Frieren"), TaskOrigin::Manual);
         QCOMPARE(*first, *second);
         QCOMPARE(repository_->all()->size(), 1);
+    }
+
+    void runsTheQueueSeriesBySeriesInEpisodeOrder() {
+        max_concurrent_ = 1;
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        resolveTo(resolution({{"MEGA", megaUrl()}}), kBebop);
+        serveMega();
+        QSignalSpy completed(manager_.get(), &DownloadManager::taskCompleted);
+        const auto frieren = enqueueMany(kFrieren, {3, 1, 2, 1});
+        QVERIFY(frieren);
+        QCOMPARE(frieren->added, 3);
+        QCOMPARE(frieren->restarted, 0);
+        QVERIFY(manager_->enqueue(kBebop, 1, titleOf(kBebop), TaskOrigin::Manual));
+        // A later episode joins its series, ahead of the series that arrived after it.
+        QCOMPARE(enqueueMany(kFrieren, {4})->added, 1);
+        QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 5, kTimeout * 2);
+        QCOMPARE(resolved(),
+                 (QList<Episode>{
+                     {kFrieren, 1}, {kFrieren, 2}, {kFrieren, 3}, {kFrieren, 4}, {kBebop, 1}}));
+        for (const auto& task : manager_->tasks()) {
+            QCOMPARE(sha256File(task.targetPath), vectors().value(u"plainSha256").toString());
+        }
+    }
+
+    void queueingNeverStopsARunningTransfer() {
+        max_concurrent_ = 1;
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        serveMega();
+        server_->file("/files/episode", encrypted(), 64 * 1024, 1024 * 1024); // never ends
+        const auto running = *manager_->enqueue(kFrieren, 5, titleOf(kFrieren), TaskOrigin::Manual);
+        QTRY_VERIFY_WITH_TIMEOUT(taskOf(running)->bytesDone > 0, kTimeout);
+        QCOMPARE(enqueueMany(kFrieren, {1, 2})->added, 2);
+        QCOMPARE(enqueueMany(kBebop, {1})->added, 1);
+        QTest::qWait(1000);
+        QCOMPARE(taskOf(running)->state, TaskState::Downloading);
+        QCOMPARE(taskFor(kFrieren, 1)->state, TaskState::Queued);
+        QCOMPARE(listed(),
+                 (QList<Episode>{{kFrieren, 1}, {kFrieren, 2}, {kFrieren, 5}, {kBebop, 1}}));
+    }
+
+    void reordersTheSeriesAndKeepsTheOrderAcrossRestarts() {
+        QVERIFY(enqueueMany(kFrieren, {1, 2}));
+        QVERIFY(enqueueMany(kBebop, {1}));
+        QVERIFY(enqueueMany(kDandadan, {2, 1}));
+        manager_->pauseAll(); // nothing needs to run here
+        QCOMPARE(listed(),
+                 (QList<Episode>{
+                     {kFrieren, 1}, {kFrieren, 2}, {kBebop, 1}, {kDandadan, 1}, {kDandadan, 2}}));
+        // Unknown series are ignored; the ones left out follow in their order.
+        manager_->reorder({kDandadan, QStringLiteral("unknown"), kFrieren});
+        const QList<Episode> reordered{
+            {kDandadan, 1}, {kDandadan, 2}, {kFrieren, 1}, {kFrieren, 2}, {kBebop, 1}};
+        QCOMPARE(listed(), reordered);
+        restart();
+        QCOMPARE(listed(), reordered);
+        // A new series goes last; a new episode joins its series.
+        QVERIFY(manager_->enqueueMany(QStringLiteral("another"), {1}, QStringLiteral("Another"),
+                                      TaskOrigin::Manual));
+        QVERIFY(enqueueMany(kFrieren, {3}));
+        manager_->pauseAll();
+        QCOMPARE(listed(), (QList<Episode>{{kDandadan, 1},
+                                           {kDandadan, 2},
+                                           {kFrieren, 1},
+                                           {kFrieren, 2},
+                                           {kFrieren, 3},
+                                           {kBebop, 1},
+                                           {QStringLiteral("another"), 1}}));
+    }
+
+    void keepsTheSeriesTogetherInAQueueFromAnEarlierVersion() {
+        // Earlier versions numbered each task on its own: Frieren 1, Cowboy Bebop 1, Frieren 5.
+        qint64 order = 0;
+        for (const auto& [slug, number] :
+             QList<Episode>{{kFrieren, 1}, {kBebop, 1}, {kFrieren, 5}}) {
+            auto task = repository_->create(
+                slug, number, titleOf(slug), api::Audio::Sub, TaskOrigin::Manual,
+                downloads_ + QStringLiteral("/%1 - %2").arg(slug).arg(number));
+            QVERIFY(task);
+            task->state = TaskState::Paused;
+            task->queueOrder = ++order;
+            QVERIFY(repository_->save(*task));
+        }
+        restart();
+        // Frieren keeps its place when its first episode leaves the queue.
+        manager_->cancel(taskFor(kFrieren, 1)->id);
+        QCOMPARE(listed(), (QList<Episode>{{kFrieren, 5}, {kBebop, 1}, {kFrieren, 1}}));
+    }
+
+    void prioritizingTakesTheSlotAndTheOthersKeepTheirBytes() {
+        max_concurrent_ = 1;
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        serveMega();
+        // Frieren stalls after 1 MiB, so it is surely unfinished when it gives way.
+        server_->file("/files/episode", encrypted(), 64 * 1024, 1024 * 1024);
+        resolveTo(resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/bebop1")}}),
+                  kBebop);
+        const auto data = plaintext();
+        server_->json("/api/file/bebop1/info", QByteArrayLiteral("{\"name\":\"b.mp4\",\"size\":") +
+                                                   QByteArray::number(data.size()) + '}');
+        server_->file("/api/file/bebop1", data);
+        const auto frieren = *manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        const auto bebop = *manager_->enqueue(kBebop, 1, titleOf(kBebop), TaskOrigin::Manual);
+        QTRY_VERIFY_WITH_TIMEOUT(taskOf(frieren)->bytesDone >= 1024 * 1024, kTimeout);
+        QTest::qWait(1500); // aria2 saves its progress every second
+        QCOMPARE(taskOf(bebop)->state, TaskState::Queued);
+        const auto kept = taskOf(frieren)->bytesDone;
+        const auto before = server_->requests().size();
+
+        manager_->prioritize(kBebop);
+        QCOMPARE(taskOf(frieren)->state, TaskState::Queued);
+        QCOMPARE(listed().first(), (Episode{kBebop, 1}));
+        server_->file("/files/episode", encrypted());
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(bebop)->state, TaskState::Completed, kTimeout);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(frieren)->state, TaskState::Completed, kTimeout);
+        QCOMPARE(sha256File(taskOf(frieren)->targetPath),
+                 vectors().value(u"plainSha256").toString());
+        const auto resumed_at = resumedAt("/files/episode", before);
+        QVERIFY2(
+            resumed_at >= kept,
+            qPrintable(
+                QStringLiteral("resumed at %1, %2 bytes were kept").arg(resumed_at).arg(kept)));
+    }
+
+    void pausesAndResumesASeries() {
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        serveMega();
+        server_->file("/files/episode", encrypted(), 64 * 1024, 1024 * 1024);
+        QSignalSpy completed(manager_.get(), &DownloadManager::taskCompleted);
+        QCOMPARE(enqueueMany(kFrieren, {1, 2, 3})->added, 3);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            taskFor(kFrieren, 1)->bytesDone > 0 && taskFor(kFrieren, 2)->bytesDone > 0, kTimeout);
+        manager_->pauseSeries(kFrieren);
+        for (const auto& task : manager_->tasks()) {
+            QCOMPARE(task.state, TaskState::Paused);
+        }
+        QTest::qWait(1000);
+        QCOMPARE(taskFor(kFrieren, 3)->state, TaskState::Paused); // its slot stayed free
+        QVERIFY(!resolved().contains(Episode{kFrieren, 3}));
+
+        server_->file("/files/episode", encrypted());
+        manager_->resumeSeries(kFrieren);
+        QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 3, kTimeout * 2);
+        for (const auto& task : manager_->tasks()) {
+            QCOMPARE(sha256File(task.targetPath), vectors().value(u"plainSha256").toString());
+        }
+    }
+
+    void retriesTheFailedEpisodesOfASeries() {
+        resolveTo(resolution({}));
+        resolveTo(resolution({}), kBebop);
+        QSignalSpy failed(manager_.get(), &DownloadManager::taskFailed);
+        QVERIFY(enqueueMany(kFrieren, {1, 2}));
+        QVERIFY(enqueueMany(kBebop, {1}));
+        QTRY_COMPARE_WITH_TIMEOUT(failed.size(), 3, kTimeout);
+
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        resolveTo(resolution({{"MEGA", megaUrl()}}), kBebop);
+        serveMega();
+        QSignalSpy completed(manager_.get(), &DownloadManager::taskCompleted);
+        manager_->retryFailed(kFrieren);
+        QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 2, kTimeout);
+        QCOMPARE(taskFor(kFrieren, 1)->state, TaskState::Completed);
+        QCOMPARE(taskFor(kFrieren, 2)->state, TaskState::Completed);
+        QCOMPARE(taskFor(kBebop, 1)->state, TaskState::Failed);
+
+        // Asking for the series again restarts its failed episode and adds the new one.
+        const auto again = enqueueMany(kBebop, {1, 2});
+        QCOMPARE(again->added, 1);
+        QCOMPARE(again->restarted, 1);
+        QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 4, kTimeout);
+    }
+
+    void cancellingASeriesRemovesItsPartialFilesOnly() {
+        max_concurrent_ = 1;
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        resolveTo(resolution({{"MEGA", megaUrl()}}), kBebop);
+        serveMega();
+        server_->file("/files/episode", encrypted(), 64 * 1024, 1024 * 1024);
+        QVERIFY(enqueueMany(kFrieren, {1, 2}));
+        QVERIFY(enqueueMany(kBebop, {1}));
+        QTRY_VERIFY_WITH_TIMEOUT(taskFor(kFrieren, 1)->bytesDone > 0, kTimeout);
+        // Frieren 1 gives way and waits in line with its partial file, without a transfer.
+        manager_->prioritize(kBebop);
+        QTRY_VERIFY_WITH_TIMEOUT(taskFor(kBebop, 1)->bytesDone > 0, kTimeout);
+        const auto frieren_folder = downloads_ + QStringLiteral("/Sousou no Frieren");
+        QVERIFY(!leftovers(frieren_folder).isEmpty());
+
+        manager_->cancelSeries(kFrieren);
+        QCOMPARE(taskFor(kFrieren, 1)->state, TaskState::Cancelled);
+        QCOMPARE(taskFor(kFrieren, 2)->state, TaskState::Cancelled);
+        QTRY_VERIFY_WITH_TIMEOUT(leftovers(frieren_folder).isEmpty(), kTimeout);
+        QCOMPARE(taskFor(kBebop, 1)->state, TaskState::Downloading);
+        QVERIFY(!leftovers(downloads_ + QStringLiteral("/Cowboy Bebop")).isEmpty());
+    }
+
+    void forgetsTheFinishedRowsOfASeries() {
+        const auto folder = downloads_ + QStringLiteral("/Sousou no Frieren");
+        QVERIFY(QDir().mkpath(folder));
+        const auto seed = [&](const QString& slug, double number, TaskState state) {
+            auto task = repository_->create(
+                slug, number, titleOf(slug), api::Audio::Sub, TaskOrigin::Manual,
+                folder + QStringLiteral("/%1 - %2.mp4").arg(slug).arg(number));
+            task->state = state;
+            task->finishedAt = QDateTime::currentDateTimeUtc();
+            QVERIFY(repository_->save(*task));
+        };
+        seed(kFrieren, 1, TaskState::Completed);
+        seed(kFrieren, 2, TaskState::Cancelled);
+        seed(kFrieren, 3, TaskState::Failed);
+        seed(kFrieren, 4, TaskState::Paused);
+        seed(kBebop, 1, TaskState::Completed);
+        const auto completed_file = folder + QStringLiteral("/sousou-no-frieren - 1.mp4");
+        const auto failed_partial = folder + QStringLiteral("/sousou-no-frieren - 3.mp4.mega");
+        for (const auto& path : {completed_file, failed_partial}) {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("x");
+        }
+        restart();
+
+        manager_->forgetSeries(kFrieren);
+        QCOMPARE(listed(), (QList<Episode>{{kFrieren, 4}, {kBebop, 1}}));
+        QCOMPARE(repository_->all()->size(), 2);
+        QTRY_VERIFY(!QFileInfo::exists(failed_partial));
+        QVERIFY(QFileInfo::exists(completed_file)); // the list only; never the episode itself
     }
 };
 

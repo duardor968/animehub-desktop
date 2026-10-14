@@ -24,9 +24,19 @@ struct DownloadSettings {
     int maxConcurrent = 2;
 };
 
+// What a request for several episodes did.
+struct Enqueued {
+    int added = 0;
+    int restarted = 0; // paused or failed ones that go on
+};
+
 // Runs the download queue: resolves a source through the API, transfers it with aria2, decrypts
 // and verifies MEGA files, and records finished episodes in the library. State survives restarts;
 // transient failures wait and retry by themselves, the rest stop for the user.
+//
+// The queue keeps each series together: series go in the order they arrived, or the one set by
+// prioritize() and reorder(), and each series goes by episode number. Queueing never stops a
+// running transfer; only prioritize() does.
 class DownloadManager final : public QObject {
     Q_OBJECT
 
@@ -52,6 +62,9 @@ public:
 
     std::expected<qint64, QString> enqueue(const QString& slug, double number,
                                            const QString& anime_title, TaskOrigin origin);
+    // Queues the episodes without a task and restarts the paused or failed ones.
+    std::expected<Enqueued, QString> enqueueMany(const QString& slug, const QList<double>& numbers,
+                                                 const QString& anime_title, TaskOrigin origin);
     void pause(qint64 id);
     void resume(qint64 id);
     void cancel(qint64 id);
@@ -61,6 +74,20 @@ public:
     void pauseAll();
     void resumeAll();
 
+    void pauseSeries(const QString& slug);
+    void resumeSeries(const QString& slug);
+    void retryFailed(const QString& slug);  // failed and waiting tasks of the series
+    void cancelSeries(const QString& slug); // every task not completed; partial files go
+    void forgetSeries(const QString& slug); // completed, cancelled and failed rows leave the list
+    // "Descargar ahora": the series goes first, its paused tasks go on, and it takes the running
+    // slots it can use from the series last in line; those continue later from their partial
+    // files.
+    void prioritize(const QString& slug);
+    // New order of the series in the queue; series left out follow in their current order.
+    void reorder(const QStringList& slugs);
+
+    // In queue order the tasks still in line (waiting, running, paused or failed), then the
+    // completed and cancelled ones, newest first.
     [[nodiscard]] QList<Task> tasks() const;
     [[nodiscard]] std::optional<Task> task(qint64 id) const;
     [[nodiscard]] std::optional<Task> activeTaskFor(const QString& slug, double number) const;
@@ -108,7 +135,20 @@ private:
     void removeFiles(const QStringList& paths, int attempts_left);
     [[nodiscard]] bool isCurrent(qint64 id, quint64 generation, TaskState state) const;
     [[nodiscard]] int running() const;
-    [[nodiscard]] QString basePathFor(const QString& anime_title, double number) const;
+    [[nodiscard]] static QString basePathFor(const QString& directory, const QString& anime_title,
+                                             double number);
+
+    // The single-task steps behind the public calls; the callers pump once at the end.
+    bool pauseTask(qint64 id);
+    bool resumeTask(qint64 id);
+    bool retryTask(qint64 id);
+    void cancelTask(qint64 id);
+    void requeue(qint64 id);
+
+    [[nodiscard]] QList<qint64> idsOf(const QString& slug) const;
+    void sortByQueue(QList<Task>& tasks) const;
+    [[nodiscard]] QStringList seriesOrder() const;
+    void applySeriesOrder(const QStringList& order, bool announce = true);
 
     Services services_;
     std::function<DownloadSettings()> settings_;

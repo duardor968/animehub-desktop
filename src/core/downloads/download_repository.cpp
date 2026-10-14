@@ -138,33 +138,75 @@ DownloadRepository::DownloadRepository(storage::Database& database) : database_(
 Stored<Task> DownloadRepository::create(const QString& slug, double number,
                                         const QString& anime_title, api::Audio audio,
                                         TaskOrigin origin, const QString& target_path) {
-    const auto now = nowMs();
-    auto order = database_.run(QStringLiteral("SELECT COALESCE(MAX(queue_order), 0) + 1 FROM "
-                                              "download"));
-    if (!order) {
-        return std::unexpected(order.error());
-    }
-    order->next();
-    const auto queue_order = order->value(0).toLongLong();
-    auto inserted = database_.run(
-        QStringLiteral("INSERT INTO download (slug, number, anime_title, audio, origin, state, "
-                       "target_path, queue_order, created_at, updated_at) "
-                       "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)"),
-        {slug, number, anime_title, audio == api::Audio::Dub ? u"DUB"_s : u"SUB"_s,
-         origin == TaskOrigin::Automatic ? u"automatic"_s : u"manual"_s, target_path, queue_order,
-         now, now});
-    if (!inserted) {
-        return std::unexpected(inserted.error());
-    }
-    const auto id = inserted->lastInsertId().toLongLong();
-    auto created = task(id);
+    auto created = createMany(slug, {{number, target_path}}, anime_title, audio, origin);
     if (!created) {
         return std::unexpected(created.error());
     }
-    if (!*created) {
-        return std::unexpected(StorageError{QStringLiteral("download %1 vanished").arg(id)});
+    return created->first();
+}
+
+Stored<QList<Task>>
+DownloadRepository::createMany(const QString& slug,
+                               const QList<std::pair<double, QString>>& episodes,
+                               const QString& anime_title, api::Audio audio, TaskOrigin origin) {
+    QList<qint64> ids;
+    auto inserted = database_.transaction([&]() -> Stored<void> {
+        auto order = database_.run(
+            QStringLiteral("SELECT COALESCE((SELECT MIN(queue_order) FROM download WHERE slug = ? "
+                           "AND state NOT IN ('completed', 'cancelled')), (SELECT "
+                           "COALESCE(MAX(queue_order), 0) + 1 FROM download))"),
+            {slug});
+        if (!order) {
+            return std::unexpected(order.error());
+        }
+        order->next();
+        const auto queue_order = order->value(0).toLongLong();
+        order->finish();
+        const auto now = nowMs();
+        for (const auto& [number, target_path] : episodes) {
+            auto row = database_.run(
+                QStringLiteral("INSERT INTO download (slug, number, anime_title, audio, origin, "
+                               "state, target_path, queue_order, created_at, updated_at) "
+                               "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)"),
+                {slug, number, anime_title, audio == api::Audio::Dub ? u"DUB"_s : u"SUB"_s,
+                 origin == TaskOrigin::Automatic ? u"automatic"_s : u"manual"_s, target_path,
+                 queue_order, now, now});
+            if (!row) {
+                return std::unexpected(row.error());
+            }
+            ids.append(row->lastInsertId().toLongLong());
+        }
+        return {};
+    });
+    if (!inserted) {
+        return std::unexpected(inserted.error());
     }
-    return **created;
+    QList<Task> tasks;
+    for (const auto id : ids) {
+        auto created = task(id);
+        if (!created) {
+            return std::unexpected(created.error());
+        }
+        if (!*created) {
+            return std::unexpected(StorageError{QStringLiteral("download %1 vanished").arg(id)});
+        }
+        tasks.append(**created);
+    }
+    return tasks;
+}
+
+Stored<void> DownloadRepository::save(const QList<Task>& tasks) {
+    if (tasks.isEmpty()) {
+        return {};
+    }
+    return database_.transaction([&]() -> Stored<void> {
+        for (const auto& task : tasks) {
+            if (auto saved = save(task); !saved) {
+                return saved;
+            }
+        }
+        return {};
+    });
 }
 
 Stored<void> DownloadRepository::save(const Task& task) {
