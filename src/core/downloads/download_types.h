@@ -59,6 +59,7 @@ struct Task {
     qint64 queueOrder = 0;
     QDateTime createdAt;
     QDateTime finishedAt;
+    bool pausedWithAll = false; // paused by pauseAll(), so resumeAll() brings it back
 
     [[nodiscard]] bool active() const {
         return state != TaskState::Completed && state != TaskState::Cancelled &&

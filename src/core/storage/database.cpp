@@ -85,6 +85,10 @@ CREATE INDEX episode_activity ON episode(slug, state, state_at);
     R"sql(
 ALTER TABLE anime DROP COLUMN pending;
 )sql",
+    // Resuming all brings back only what pausing all stopped, not what was paused on its own.
+    R"sql(
+ALTER TABLE download ADD COLUMN paused_with_all INTEGER NOT NULL DEFAULT 0;
+)sql",
 };
 
 QString errorText(const QSqlError& error) {

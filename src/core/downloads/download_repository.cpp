@@ -16,7 +16,7 @@ using storage::StorageError;
 constexpr auto kColumns =
     "id, slug, number, anime_title, audio, origin, state, provider, source_id, target_path, "
     "bytes_done, bytes_total, error_code, error_detail, attempts, retry_at, queue_order, "
-    "created_at, finished_at";
+    "created_at, finished_at, paused_with_all";
 
 QDateTime timeAt(const QVariant& value) {
     return value.isNull() ? QDateTime()
@@ -56,6 +56,7 @@ Task readTask(const QSqlQuery& query) {
     task.queueOrder = query.value(16).toLongLong();
     task.createdAt = timeAt(query.value(17));
     task.finishedAt = timeAt(query.value(18));
+    task.pausedWithAll = query.value(19).toBool();
     return task;
 }
 
@@ -214,14 +215,14 @@ Stored<void> DownloadRepository::save(const Task& task) {
         QStringLiteral("UPDATE download SET state = ?, provider = ?, source_id = ?, "
                        "target_path = ?, bytes_done = ?, bytes_total = ?, error_code = ?, "
                        "error_detail = ?, attempts = ?, retry_at = ?, queue_order = ?, "
-                       "updated_at = ?, finished_at = ? WHERE id = ?"),
+                       "updated_at = ?, finished_at = ?, paused_with_all = ? WHERE id = ?"),
         {stateKey(task.state),
          task.provider ? QVariant(api::providerKey(*task.provider))
                        : QVariant(QMetaType::fromType<QString>()),
          nullableText(task.sourceId), task.targetPath, task.bytesDone, task.bytesTotal,
          nullableText(issueKey(task.issue)), nullableText(task.issueDetail), task.attempts,
          nullableTime(task.retryAt), task.queueOrder, nowMs(), nullableTime(task.finishedAt),
-         task.id});
+         task.pausedWithAll ? 1 : 0, task.id});
     if (!result) {
         return std::unexpected(result.error());
     }

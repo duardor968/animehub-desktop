@@ -139,7 +139,7 @@ private:
                                              double number);
 
     // The single-task steps behind the public calls; the callers pump once at the end.
-    bool pauseTask(qint64 id);
+    bool pauseTask(qint64 id, bool with_all = false);
     bool resumeTask(qint64 id);
     bool retryTask(qint64 id);
     void cancelTask(qint64 id);

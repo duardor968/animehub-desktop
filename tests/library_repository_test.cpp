@@ -146,7 +146,7 @@ private slots:
     }
 
     void migratesToTheCurrentSchema() {
-        QCOMPARE(database_->schemaVersion(), 2);
+        QCOMPARE(database_->schemaVersion(), 3);
     }
 
     void migratesAVersionOneLibrary() {
@@ -172,7 +172,7 @@ private slots:
         auto opened = storage::Database::open(path);
         QVERIFY2(opened, qPrintable(opened ? QString() : opened.error().message));
         const auto& database = **opened;
-        QCOMPARE(database.schemaVersion(), 2);
+        QCOMPARE(database.schemaVersion(), 3);
         auto columns = database.run(QStringLiteral("SELECT name FROM pragma_table_info('anime')"));
         QVERIFY(columns);
         QStringList names;
@@ -182,7 +182,8 @@ private slots:
         QVERIFY(!names.contains(QStringLiteral("pending")));
         QVERIFY(names.contains(QStringLiteral("favorite")));
 
-        // Everything else stays: flags, progress, files and the download queue.
+        // Everything else stays: flags, progress, files and the download queue, none of it
+        // paused all together.
         const LibraryRepository repository(**opened);
         const auto entry = repository.entry(QStringLiteral("sousou-no-frieren"));
         QVERIFY(entry && *entry);
@@ -191,7 +192,8 @@ private slots:
         QVERIFY(!(*entry)->notify);
         QCOMPARE((*entry)->watchedEpisodes, 1);
         QCOMPARE((*entry)->downloadedBytes, 5000);
-        auto queue = database.run(QStringLiteral("SELECT COUNT(*) FROM download"));
+        auto queue =
+            database.run(QStringLiteral("SELECT COUNT(*) FROM download WHERE paused_with_all = 0"));
         QVERIFY(queue && queue->next());
         QCOMPARE(queue->value(0).toInt(), 1);
     }

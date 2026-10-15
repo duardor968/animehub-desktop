@@ -899,7 +899,7 @@ void DownloadManager::pause(qint64 id) {
     }
 }
 
-bool DownloadManager::pauseTask(qint64 id) {
+bool DownloadManager::pauseTask(qint64 id, bool with_all) {
     const auto it = tasks_.find(id);
     if (it == tasks_.end()) {
         return false;
@@ -908,12 +908,14 @@ bool DownloadManager::pauseTask(qint64 id) {
     case TaskState::Downloading:
         services_.aria2.pause(live_[id].gid);
         it->bytesPerSecond = 0;
+        it->pausedWithAll = with_all;
         setState(id, TaskState::Paused);
         return true;
     case TaskState::Resolving:
     case TaskState::Queued:
     case TaskState::Waiting:
         ++live_[id].generation;
+        it->pausedWithAll = with_all;
         setState(id, TaskState::Paused);
         return true;
     default:
@@ -932,6 +934,7 @@ bool DownloadManager::resumeTask(qint64 id) {
     if (it == tasks_.end() || it->state != TaskState::Paused) {
         return false;
     }
+    it->pausedWithAll = false;
     auto& live = live_[id];
     if (!live.gid.isEmpty() && services_.aria2.isReady()) {
         services_.aria2.resume(live.gid);
@@ -1030,14 +1033,19 @@ void DownloadManager::clearFinished() {
 
 void DownloadManager::pauseAll() {
     for (const auto id : tasks_.keys()) {
-        pauseTask(id);
+        pauseTask(id, true);
     }
     pump();
 }
 
 void DownloadManager::resumeAll() {
+    // What pausing all stopped goes on; what was paused on its own waits, unless nothing was
+    // paused all together.
+    const bool together = std::ranges::any_of(tasks_, &Task::pausedWithAll);
     for (const auto id : tasks_.keys()) {
-        resumeTask(id);
+        if (!together || tasks_.value(id).pausedWithAll) {
+            resumeTask(id);
+        }
     }
     pump();
 }

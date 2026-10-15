@@ -628,6 +628,28 @@ private slots:
         }
     }
 
+    void resumingAllLeavesWhatWasPausedOnItsOwn() {
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        resolveTo(resolution({{"MEGA", megaUrl()}}), kBebop);
+        serveMega();
+        server_->file("/files/episode", encrypted(), 64 * 1024, 1024 * 1024);
+        QVERIFY(enqueueMany(kFrieren, {1}));
+        QVERIFY(enqueueMany(kBebop, {1}));
+        manager_->pauseSeries(kBebop);
+        manager_->pauseAll();
+        QCOMPARE(taskFor(kFrieren, 1)->state, TaskState::Paused);
+
+        // Also after a restart: Frieren goes on, Cowboy Bebop waits to be resumed on its own.
+        restart();
+        manager_->resumeAll();
+        QVERIFY(taskFor(kFrieren, 1)->state != TaskState::Paused);
+        QCOMPARE(taskFor(kBebop, 1)->state, TaskState::Paused);
+
+        // With nothing paused all together, resuming all resumes the rest.
+        manager_->resumeAll();
+        QVERIFY(taskFor(kBebop, 1)->state != TaskState::Paused);
+    }
+
     void retriesTheFailedEpisodesOfASeries() {
         resolveTo(resolution({}));
         resolveTo(resolution({}), kBebop);
