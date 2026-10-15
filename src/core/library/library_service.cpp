@@ -157,20 +157,32 @@ void LibraryService::refresh(const QString& slug, bool flag_new) {
                 emit refreshFailed(slug, detail.error().message);
                 return;
             }
-            if (auto saved = repository_.saveSnapshot(snapshotOf(detail->value)); !saved) {
-                qWarning("library: %s", qPrintable(saved.error().message));
-            }
-            emit animeChanged(slug);
-            // Episodes arrive in ascending pages of fifty; a known list only needs its tail.
-            const auto record = repository_.anime(slug);
-            const bool synced = record && *record && (*record)->episodesSyncedAt.isValid();
-            const auto known = repository_.episodes(slug);
-            const int first_page =
-                synced && known ? std::max(1, static_cast<int>(known->size()) / kEpisodesPerPage)
-                                : 1;
-            fetchEpisodes(slug, first_page, flag_new && synced, {});
+            store(detail->value, flag_new);
         },
         api::CachePolicy::NetworkOnly);
+}
+
+void LibraryService::refresh(const api::AnimeDetail& detail, bool flag_new) {
+    if (refreshing_.contains(detail.slug)) {
+        return;
+    }
+    refreshing_.insert(detail.slug);
+    store(detail, flag_new);
+}
+
+void LibraryService::store(const api::AnimeDetail& detail, bool flag_new) {
+    const auto& slug = detail.slug;
+    if (auto saved = repository_.saveSnapshot(snapshotOf(detail)); !saved) {
+        qWarning("library: %s", qPrintable(saved.error().message));
+    }
+    emit animeChanged(slug);
+    // Episodes arrive in ascending pages of fifty; a known list only needs its tail.
+    const auto record = repository_.anime(slug);
+    const bool synced = record && *record && (*record)->episodesSyncedAt.isValid();
+    const auto known = repository_.episodes(slug);
+    const int first_page =
+        synced && known ? std::max(1, static_cast<int>(known->size()) / kEpisodesPerPage) : 1;
+    fetchEpisodes(slug, first_page, flag_new && synced, {});
 }
 
 void LibraryService::fetchEpisodes(const QString& slug, int page, bool flag_new,

@@ -174,13 +174,9 @@ AnimeView::AnimeView(Services services, QObject* parent)
             });
     connect(&services_.library, &library::LibraryService::refreshFailed, this,
             [this](const QString& slug, const QString&) {
-                if (slug != slug_) {
-                    return;
+                if (slug == slug_) {
+                    loadFailed();
                 }
-                problem_ = episodes_.episodes().isEmpty()
-                               ? QStringLiteral("No se pudo cargar este anime. Revisa la conexión.")
-                               : QString();
-                update();
             });
     const auto on_task = [this](qint64 id) {
         const auto task = services_.downloads.task(id);
@@ -231,18 +227,24 @@ void AnimeView::reload() {
         return;
     }
     problem_.clear();
-    services_.library.refresh(slug_, false);
     fetchDetail();
     update();
 }
 
 void AnimeView::fetchDetail() {
-    // The library keeps a snapshot; score, trailer, next airing and relations come from here.
+    // One request for both: the library keeps a snapshot and fetches the episodes; score,
+    // trailer, next airing and relations stay here.
     const auto generation = generation_;
+    fetching_ = true;
     services_.api.anime(
         slug_, this,
         [this, generation](const api::Result<api::AnimeDetail>& result) {
-            if (generation != generation_ || !result) {
+            if (generation != generation_) {
+                return;
+            }
+            if (!result) {
+                fetching_ = false;
+                loadFailed();
                 return;
             }
             const bool fresh = result->origin == api::Origin::Network;
@@ -261,11 +263,20 @@ void AnimeView::fetchDetail() {
             }
             related_.setCards(std::move(cards));
             if (fresh) {
+                fetching_ = false;
+                services_.library.refresh(*detail_, false);
                 rememberRelated();
             }
             update();
         },
         api::CachePolicy::CacheThenNetwork);
+}
+
+void AnimeView::loadFailed() {
+    problem_ = episodes_.episodes().isEmpty()
+                   ? QStringLiteral("No se pudo cargar este anime. Revisa la conexión.")
+                   : QString();
+    update();
 }
 
 void AnimeView::rememberRelated() {
@@ -489,7 +500,7 @@ bool AnimeView::autoDownload() const {
 }
 
 bool AnimeView::refreshing() const {
-    return services_.library.isRefreshing(slug_);
+    return fetching_ || services_.library.isRefreshing(slug_);
 }
 
 QString AnimeView::folderPath() const {

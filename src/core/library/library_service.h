@@ -56,6 +56,8 @@ public:
     // Refreshes metadata and episodes from the API. With `flag_new`, episodes unknown so far are
     // new arrivals (the watcher); otherwise they are simply stored (first sync, browsing).
     void refresh(const QString& slug, bool flag_new);
+    // The same with the anime's detail already fetched (the anime's page needs it too).
+    void refresh(const api::AnimeDetail& detail, bool flag_new);
     [[nodiscard]] bool isRefreshing(const QString& slug) const {
         return refreshing_.contains(slug);
     }
@@ -76,6 +78,7 @@ signals:
     void newEpisodes(const QString& slug, const QList<double>& numbers);
 
 private:
+    void store(const api::AnimeDetail& detail, bool flag_new);
     void fetchEpisodes(const QString& slug, int page, bool flag_new, QList<double> added);
     void finishRefresh(const QString& slug, bool flag_new, const QList<double>& added);
     void sweep();

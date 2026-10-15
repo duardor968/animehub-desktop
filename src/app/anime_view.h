@@ -283,6 +283,7 @@ private:
     void readLibrary();
     void readTasks();
     void fetchDetail();
+    void loadFailed();
     void update();
     void report(const storage::Stored<void>& result);
     void request(const QList<double>& numbers, bool selection = false);
@@ -309,6 +310,7 @@ private:
     std::function<void()> undo_;
     QTimer notify_timer_;
     bool positioned_ = false;
+    bool fetching_ = false;
     quint64 generation_ = 0;
 };
 
