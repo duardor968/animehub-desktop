@@ -153,7 +153,7 @@ Item {
                     }
 
                     Label {
-                        text: "Próximo episodio: " + root.view.nextAiring
+                        text: root.view.nextAiring
                         color: Theme.ink
                         font.pixelSize: Theme.body
                     }

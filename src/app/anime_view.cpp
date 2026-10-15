@@ -90,7 +90,7 @@ QString airingText(const QDateTime& at) {
         return {};
     }
     const auto local = at.toLocalTime();
-    const auto time = spanish().toString(local.time(), QStringLiteral("H:mm"));
+    const auto time = spanish().toString(local.time(), QStringLiteral("HH:mm"));
     const auto days = now.date().daysTo(local.date());
     if (days == 0) {
         return QStringLiteral("hoy ") + time;
@@ -208,6 +208,7 @@ void AnimeView::open(const QString& slug, const library::AnimeRecord& hint) {
     problem_.clear();
     record_.reset();
     detail_.reset();
+    next_airing_.reset();
     positioned_ = false;
     related_.setCards({});
     emit slugChanged();
@@ -224,6 +225,7 @@ void AnimeView::reload() {
     }
     problem_.clear();
     fetchDetail();
+    fetchSchedule();
     update();
 }
 
@@ -263,6 +265,30 @@ void AnimeView::fetchDetail() {
                 services_.library.refresh(*detail_, false);
                 rememberRelated();
             }
+            update();
+        },
+        api::CachePolicy::CacheThenNetwork);
+}
+
+void AnimeView::fetchSchedule() {
+    const auto generation = generation_;
+    services_.api.schedule(
+        this,
+        [this, generation](const api::Result<QList<api::ScheduleEntry>>& result) {
+            if (generation != generation_ || !result) {
+                return;
+            }
+            const auto& entries = result->value;
+            const auto slot = std::ranges::find(
+                entries, slug_, [](const api::ScheduleEntry& entry) { return entry.anime.slug; });
+            auto next = slot == entries.end()
+                            ? std::nullopt
+                            : schedule::next(*slot, QDateTime::currentDateTimeUtc());
+            // A copy from the cache cannot tell a late episode from one already out.
+            if (next && next->late && result->origin == api::Origin::Cache) {
+                next.reset();
+            }
+            next_airing_ = next;
             update();
         },
         api::CachePolicy::CacheThenNetwork);
@@ -456,8 +482,19 @@ QString AnimeView::genres() const {
     return source().genres;
 }
 
+// As the web: an airing anime's next episode from the weekly schedule; before the first one,
+// the premiere.
 QString AnimeView::nextAiring() const {
-    return detail_ && airing() ? airingText(detail_->nextEpisodeAt) : QString();
+    if (next_airing_ && airing()) {
+        return QStringLiteral("Próximo episodio: ") +
+               schedule::text(*next_airing_, QDateTime::currentDateTimeUtc());
+    }
+    if (detail_ && episodes_.episodes().isEmpty()) {
+        if (const auto premiere = airingText(detail_->nextEpisodeAt); !premiere.isEmpty()) {
+            return QStringLiteral("Estreno: ") + premiere;
+        }
+    }
+    return {};
 }
 
 QUrl AnimeView::trailerUrl() const {

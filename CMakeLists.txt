@@ -88,6 +88,8 @@ qt_add_executable(animehub-desktop WIN32
   src/app/library_model.cpp
   src/app/library_model.h
   src/app/main.cpp
+  src/app/schedule.cpp
+  src/app/schedule.h
   src/app/shell.cpp
   src/app/shell.h
 )

@@ -8,6 +8,7 @@
 #include "jdownloader_view.h"
 #include "library/library_service.h"
 #include "playback/player.h"
+#include "schedule.h"
 
 #include <QObject>
 #include <QTimer>
@@ -288,6 +289,7 @@ private:
     void readLibrary();
     void readTasks();
     void fetchDetail();
+    void fetchSchedule();
     void loadFailed();
     void update();
     void report(const storage::Stored<void>& result);
@@ -308,7 +310,8 @@ private:
     library::AnimeRecord hint_;
     std::optional<library::LibraryEntry> record_;
     std::optional<api::AnimeDetail> detail_;
-    QList<downloads::Task> tasks_; // every task of this anime, finished ones too
+    std::optional<schedule::Next> next_airing_; // from the weekly schedule, as on the home
+    QList<downloads::Task> tasks_;              // every task of this anime, finished ones too
     EpisodeModel episodes_;
     CardModel related_;
     Summary summary_;

@@ -1,50 +1,20 @@
 #include "library_model.h"
 
 #include "display.h"
+#include "schedule.h"
 
-#include <QLocale>
-
-#include <cmath>
+#include <algorithm>
 
 namespace animehub::app {
 namespace {
 
 using library::LibraryEntry;
 
-// The schedule's rules (`ScheduleEntryDto` in the API contract): the next episode is the latest
-// one plus one, a week after it; older slots no longer describe a weekly release.
-constexpr qint64 kWeekSeconds = 7LL * 24 * 3600;
-constexpr qint64 kScheduleMaxAgeSeconds = 21LL * 24 * 3600;
-// Past its hour, an episode is still on its way for a while before it counts as late.
-constexpr qint64 kDueGraceSeconds = 3LL * 3600;
-
-const QLocale& spanish() {
-    static const QLocale kSpanish(QLocale::Spanish, QLocale::Spain);
-    return kSpanish;
-}
-
-// "Jueves 22:00 · Ep. 14", "Mañana 09:30 · Ep. 3", "Ahora · Ep. 8", "Retrasado · Ep. 8".
-QString upcomingCaption(const QDateTime& at, double number, const QDateTime& now) {
-    const auto episode = display::shortEpisode(number);
-    if (now > at.addSecs(kDueGraceSeconds)) {
-        return QStringLiteral("Retrasado · ") + episode;
-    }
-    if (now >= at) {
-        return QStringLiteral("Ahora · ") + episode;
-    }
-    const auto local = at.toLocalTime();
-    const auto days = now.toLocalTime().date().daysTo(local.date());
-    QString day;
-    if (days == 0) {
-        day = QStringLiteral("Hoy");
-    } else if (days == 1) {
-        day = QStringLiteral("Mañana");
-    } else {
-        day = spanish().dayName(local.date().dayOfWeek());
-        day[0] = day[0].toUpper();
-    }
-    return day + QLatin1Char(' ') + local.toString(QStringLiteral("HH:mm")) +
-           QStringLiteral(" · ") + episode;
+// The home's captions start with a capital: "Jueves 22:00 · Ep. 14", "Retrasado · Ep. 8".
+QString upcomingCaption(const schedule::Next& next, const QDateTime& now) {
+    auto caption = schedule::text(next, now);
+    caption[0] = caption[0].toUpper();
+    return caption;
 }
 
 } // namespace
@@ -276,44 +246,36 @@ void LibraryModel::rebuildShelves() {
 // The next episode of each library anime that airs weekly, soonest first; late ones last.
 void LibraryModel::rebuildUpcoming(const QList<const LibraryEntry*>& shown) {
     const auto now = QDateTime::currentDateTimeUtc();
-    struct Next {
+    struct Upcoming {
         const LibraryEntry* entry;
-        double number;
-        QDateTime at;
-        bool late;
+        schedule::Next next;
     };
-    QList<Next> upcoming;
+    QList<Upcoming> upcoming;
     for (const auto& slot : schedule_) {
-        const auto& basis = slot.basisPublishedAt;
-        const auto latest = slot.latestEpisode.number;
-        // A finale has no next episode; without a whole number there is none to predict.
-        if (slot.isFinalEpisode || slot.anime.status == api::AnimeStatus::Finished ||
-            !basis.isValid() || basis > now || basis.secsTo(now) > kScheduleMaxAgeSeconds ||
-            latest != std::trunc(latest)) {
+        const auto next = schedule::next(slot, now);
+        if (!next) {
             continue;
         }
         const auto it = std::ranges::find(shown, slot.anime.slug, &LibraryEntry::slug);
         if (it == shown.end()) {
             continue;
         }
-        const auto at = basis.addSecs(kWeekSeconds);
-        const bool late = now > at.addSecs(kDueGraceSeconds);
         // A copy from the cache cannot tell a late episode from one already out.
-        if (late && schedule_stale_) {
+        if (next->late && schedule_stale_) {
             continue;
         }
-        upcoming.append({.entry = *it, .number = latest + 1, .at = at, .late = late});
+        upcoming.append({.entry = *it, .next = *next});
     }
-    std::ranges::sort(upcoming, [](const Next& a, const Next& b) {
-        return a.late != b.late ? b.late : a.at < b.at;
+    std::ranges::sort(upcoming, [](const Upcoming& a, const Upcoming& b) {
+        return a.next.late != b.next.late ? b.next.late : a.next.at < b.next.at;
     });
     QList<Card> cards;
-    for (const auto& next : upcoming) {
-        cards.append({.slug = next.entry->slug,
-                      .title = next.entry->title,
-                      .posterUrl = next.entry->posterUrl,
-                      .caption = upcomingCaption(next.at, next.number, now),
-                      .episode = next.number});
+    for (const auto& item : upcoming) {
+        cards.append({.slug = item.entry->slug,
+                      .title = item.entry->title,
+                      .posterUrl = item.entry->posterUrl,
+                      .caption = upcomingCaption(item.next, now),
+                      .episode = item.next.number});
     }
     upcoming_shelf_.setCards(std::move(cards));
 }
