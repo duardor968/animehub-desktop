@@ -4,9 +4,9 @@ Aplicación nativa de Windows para seguir anime: una biblioteca personal, el cat
 
 ## Qué hace
 
-- **Biblioteca**, al estilo de la de Steam: la lista a la izquierda (buscar, filtrar por pendientes, favoritos, vistos o descargados) y, a la derecha, un inicio con portadas (*Continuar viendo*, *Episodios nuevos*, *Toda la biblioteca*) o la ficha del anime elegido.
+- **Biblioteca**, al estilo de la de Steam: la lista a la izquierda (buscar y filtrar: viendo, sin empezar, vistos, favoritos o descargados) y, a la derecha, un inicio con lo último que viste en grande, *Continuar viendo*, *Episodios nuevos*, *Próximos episodios* y *Toda la biblioteca*, o la ficha del anime elegido: puntuación, tráiler, tu progreso, relacionados y los episodios en páginas de 50.
 - **Catálogo**: episodios recientes, añadidos recientemente y todo el catálogo con búsqueda, estado, género y orden.
-- **Descargas nativas** de MEGA y Pixeldrain, con cola persistente, pausa y reanudación (también tras cerrar la app), reintentos y espera automática cuando se agota la cuota de MEGA. Los archivos de MEGA se descifran y se verifica su integridad antes de aparecer en la carpeta.
+- **Descargas nativas** de MEGA y Pixeldrain: la serie entera, lo que falta, los no vistos, un tramo o los episodios que elijas. La página Descargas las agrupa por serie, como Steam, con la velocidad de los últimos minutos y la cola reordenable. Cola persistente, pausa y reanudación (también tras cerrar la app), reintentos y espera automática cuando se agota la cuota de MEGA. Los archivos de MEGA se descifran y se verifica su integridad antes de aparecer en la carpeta.
 - **Reproducción**: con el reproductor incluido (mpv) AnimeHub sabe en qué minuto te quedaste y marca el episodio como visto al terminarlo; con la aplicación predeterminada de Windows, abrirlo lo marca como visto. Cualquier episodio se puede marcar a mano como visto, no visto o en curso desde un minuto concreto.
 - **Episodios nuevos**: AnimeHub comprueba la biblioteca mientras está abierto (también en la bandeja), avisa y, si lo activas en un anime, los descarga solo.
 - **JDownloader** (opcional) para MP4Upload y 1Fichier: el de este equipo por Click'n'Load o cualquiera de tus equipos por MyJDownloader. De la cuenta solo se guardan las claves derivadas, en el Administrador de credenciales de Windows.
