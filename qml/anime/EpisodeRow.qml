@@ -48,16 +48,19 @@ ItemDelegate {
     height: 76
     leftPadding: 32
     rightPadding: 24
-    // The hover and focus marks start next to the content, not at the panel's edge.
+    // The hover and focus marks start next to the content, not at the panel's edge; the row
+    // with the keyboard shows as the library list's current one.
     leftInset: 16
     rightInset: 8
+    highlighted: activeFocus
     Accessible.name: label + (title ? ", " + title : "") + (status ? ", " + status : "")
                      + (selected ? ", seleccionado" : "")
     onDoubleClicked: if (hasFile) view.play(number)
     // The clicked row takes the keyboard: Space marks it, Enter plays it.
+    // A mouse focus: the keyboard's focus frame is for keyboard users.
     onClicked: {
         ListView.view.currentIndex = index
-        forceActiveFocus()
+        forceActiveFocus(Qt.MouseFocusReason)
     }
     Keys.onReturnPressed: if (hasFile) view.play(number)
     // Space marks the episode, as its check box would; Mayús+Espacio extends the span.
@@ -111,7 +114,7 @@ ItemDelegate {
                 MouseArea {
                     anchors.fill: parent
                     onClicked: mouse => {
-                        row.forceActiveFocus()
+                        row.forceActiveFocus(Qt.MouseFocusReason)
                         row.toggle(mouse.modifiers & Qt.ShiftModifier)
                     }
                 }
