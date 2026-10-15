@@ -323,11 +323,11 @@ void LibraryModel::updateFeatured() {
     QVariantMap featured;
     if (entry && entry->resumeNumber) {
         const auto number = *entry->resumeNumber;
-        const auto episode = display::shortEpisode(number);
-        QString detail;
+        // The line names the episode; the button only says what it does.
+        QString detail = display::shortEpisode(number);
         double progress = -1;
         if (entry->resumePositionMs > 0) {
-            detail = episode + QStringLiteral(" · ") + display::clock(entry->resumePositionMs);
+            detail += QStringLiteral(" · ") + display::clock(entry->resumePositionMs);
             if (entry->resumeDurationMs > 0) {
                 detail += QStringLiteral(" de ") + display::clock(entry->resumeDurationMs);
                 progress = std::clamp(static_cast<double>(entry->resumePositionMs) /
@@ -338,18 +338,18 @@ void LibraryModel::updateFeatured() {
                        std::max(entry->episodeCount.value_or(0), entry->knownEpisodes);
                    total > 0) {
             // The next episode is not started: how far the series is.
-            detail = QStringLiteral("%1 de %2 vistos").arg(entry->watchedEpisodes).arg(total);
+            detail += QStringLiteral(" · %1 de %2 vistos").arg(entry->watchedEpisodes).arg(total);
             progress = progressOf(*entry);
         }
         auto action = FeaturedAction::Download;
-        QString action_text = QStringLiteral("Descargar ep. ") + display::episodeNumber(number);
+        QString action_text = QStringLiteral("Descargar");
         if (featured_on_disk_) {
             action = FeaturedAction::Play;
-            action_text = QStringLiteral("Continuar · ") + episode;
+            action_text = QStringLiteral("Continuar");
         } else if (const auto task = downloads_.activeTaskFor(entry->slug, number);
                    task && task->state != downloads::TaskState::Paused) {
             action = FeaturedAction::Downloading;
-            action_text = QStringLiteral("Descargando ep. ") + display::episodeNumber(number);
+            action_text = QStringLiteral("Descargando");
         }
         featured = {{QStringLiteral("slug"), entry->slug},
                     {QStringLiteral("title"), entry->title},

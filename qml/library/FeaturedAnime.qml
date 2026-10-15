@@ -121,7 +121,7 @@ Item {
                 icon.source: Theme.source(root.featured.action === LibraryModel.Play ? Theme.icon.play
                                                                                       : Theme.icon.download)
                 onClicked: root.act(root.featured.slug)
-                Accessible.name: text + ", " + (root.featured.title ?? "")
+                Accessible.name: text + ", " + (root.featured.title ?? "") + ", " + (root.featured.detail ?? "")
             }
         }
     }
