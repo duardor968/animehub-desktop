@@ -19,6 +19,11 @@ AbstractButton {
 
     background: null
     contentItem: Item {
+        FontMetrics {
+            id: titleMetrics
+            font: titleLabel.font
+        }
+
         Poster {
             id: poster
             width: parent.width
@@ -51,6 +56,9 @@ AbstractButton {
             anchors.top: poster.bottom
             anchors.topMargin: 8
             width: parent.width
+            // Always two lines tall: captions of a row line up whatever the title's length.
+            height: 2 * titleMetrics.lineSpacing
+            verticalAlignment: Text.AlignTop
             text: root.text
             color: Theme.ink
             font.pixelSize: Theme.body
