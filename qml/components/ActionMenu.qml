@@ -20,20 +20,28 @@ Menu {
         popup(anchor, alignRight ? anchor.width - width + rightInset : 0, anchor.height)
     }
 
+    // Only what changes moves: taking an entry out and adding it back while the menu shows
+    // leaves the menu's list a stale view of it, and hovering the entry then hides it.
     function rebuild() {
-        while (count > 0)
-            takeItem(0)
-        let last = null
+        const wanted = []
         for (const entry of entries) {
             if (entry.wanted === false)
                 continue
+            const last = wanted.length > 0 ? wanted[wanted.length - 1] : null
             if (entry.separator === true && (last === null || last.separator === true))
                 continue
-            addItem(entry)
-            last = entry
+            wanted.push(entry)
         }
-        if (last !== null && last.separator === true)
-            takeItem(count - 1)
+        if (wanted.length > 0 && wanted[wanted.length - 1].separator === true)
+            wanted.pop()
+        for (let i = count - 1; i >= 0; --i) {
+            if (!wanted.includes(itemAt(i)))
+                takeItem(i)
+        }
+        wanted.forEach((entry, index) => {
+            if (itemAt(index) !== entry)
+                insertItem(index, entry)
+        })
     }
 
     function fit() {
