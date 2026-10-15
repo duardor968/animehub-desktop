@@ -162,14 +162,13 @@ ApplicationWindow {
             app: window.app
             onBrowseCatalog: window.showPage(1)
             onOpenAnime: slug => window.openAnime(slug)
+            onSettingsRequested: settingsDialog.open()
         }
     }
 
     footer: DownloadBar {
         downloads: window.app.downloads
-        // `barVisible` comes with the new Downloads page; until then, what is running.
-        visible: (window.app.downloads.barVisible ?? window.app.downloads.activeCount > 0)
-                 && tabs.currentIndex !== 2
+        visible: window.app.downloads.barVisible && tabs.currentIndex !== 2
         onClicked: window.showPage(2)
     }
 

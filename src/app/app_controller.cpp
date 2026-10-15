@@ -89,7 +89,7 @@ AppController::AppController(AppPaths paths, QObject* parent)
                             *player_, *settings_};
     library_model_ = std::make_unique<LibraryModel>(*library_, *downloads_, *api_);
     catalog_view_ = std::make_unique<CatalogView>(*api_, *library_model_);
-    downloads_view_ = std::make_unique<DownloadsView>(*downloads_, *library_repository_, *player_);
+    downloads_view_ = std::make_unique<DownloadsView>(*downloads_, *library_, *player_);
     library_anime_ = std::make_unique<AnimeView>(services);
     catalog_anime_ = std::make_unique<AnimeView>(services);
 

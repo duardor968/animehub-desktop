@@ -3,16 +3,21 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// The download in progress, at the bottom of every page but Downloads.
+// Downloads at the bottom of every page but Downloads, while something is unfinished: the one
+// running, or that they are paused, or that some failed. A click opens Downloads.
 AbstractButton {
     id: root
 
     required property DownloadsView downloads
 
-    implicitHeight: 36
+    readonly property int mode: downloads.barMode
+    readonly property bool running: mode === DownloadsView.Active || mode === DownloadsView.Waiting
+
+    implicitHeight: 40
     hoverEnabled: true
     focusPolicy: Qt.NoFocus
-    Accessible.name: "Descargas: " + downloads.currentTitle + " " + downloads.currentDetail
+    Accessible.name: "Descargas: " + downloads.barText
+                     + (downloads.barProblem !== "" ? ", " + downloads.barProblem : "")
 
     background: Rectangle {
         color: root.hovered ? Theme.hover : Theme.pane
@@ -28,42 +33,54 @@ AbstractButton {
     contentItem: RowLayout {
         spacing: 10
 
-        Item { Layout.preferredWidth: 6 }
-
+        // What the bar is about, not a control: the action is on the right, with its name.
         Glyph {
-            glyph: Theme.icon.download
+            Layout.leftMargin: 16
+            glyph: root.mode === DownloadsView.Failed ? Theme.icon.warning : Theme.icon.download
             size: 14
-            color: Theme.accent
+            color: root.mode === DownloadsView.Failed ? Theme.danger
+                 : root.mode === DownloadsView.Paused ? Theme.muted : Theme.accent
         }
 
         Label {
-            text: root.downloads.currentTitle || "Descargas en espera"
+            text: root.downloads.barText
             color: Theme.ink
             font.pixelSize: Theme.caption
             elide: Text.ElideRight
-            Layout.maximumWidth: 420
         }
 
         ProgressLine {
-            visible: root.downloads.currentTitle !== ""
+            visible: root.mode === DownloadsView.Active
             Layout.preferredWidth: 160
-            value: root.downloads.currentProgress
+            value: root.downloads.barProgress
         }
 
         Label {
-            text: root.downloads.currentDetail
-            color: Theme.muted
+            visible: text !== ""
+            text: root.downloads.barProblem
+            color: Theme.danger
             font.pixelSize: Theme.caption
         }
 
         Item { Layout.fillWidth: true }
 
-        Label {
-            text: root.downloads.queueText
-            color: Theme.muted
-            font.pixelSize: Theme.caption
+        Button {
+            Layout.rightMargin: 8
+            flat: true
+            text: root.mode === DownloadsView.Failed ? "Reintentar"
+                  : root.running ? "Pausar" : "Reanudar"
+            icon.source: Theme.source(root.mode === DownloadsView.Failed ? Theme.icon.retry
+                                      : root.running ? Theme.icon.pause : Theme.icon.download)
+            icon.width: 16
+            icon.height: 16
+            onClicked: {
+                if (root.mode === DownloadsView.Failed)
+                    root.downloads.retryAllFailed()
+                else if (root.running)
+                    root.downloads.pauseAll()
+                else
+                    root.downloads.resumeAll()
+            }
         }
-
-        Item { Layout.preferredWidth: 10 }
     }
 }

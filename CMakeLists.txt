@@ -75,6 +75,8 @@ qt_add_executable(animehub-desktop WIN32
   src/app/catalog_view.h
   src/app/display.cpp
   src/app/display.h
+  src/app/download_series_model.cpp
+  src/app/download_series_model.h
   src/app/downloads_view.cpp
   src/app/downloads_view.h
   src/app/episode_model.cpp
@@ -128,7 +130,12 @@ qt_add_qml_module(animehub-desktop
     qml/components/Shelf.qml
     qml/components/Toast.qml
     qml/downloads/DownloadBar.qml
+    qml/downloads/DownloadsHeader.qml
     qml/downloads/DownloadsPage.qml
+    qml/downloads/EpisodeLine.qml
+    qml/downloads/SectionHeading.qml
+    qml/downloads/SeriesRow.qml
+    qml/downloads/SpeedGraph.qml
     qml/library/FeaturedAnime.qml
     qml/library/LibraryHome.qml
     qml/library/LibraryList.qml

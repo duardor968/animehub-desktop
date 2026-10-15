@@ -3,7 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// The download queue: what is transferring, what waits, and what has finished.
+// Downloads, by series as in Steam: the download on view and the speed at the top, then the
+// series in line and the completed ones.
 Item {
     id: page
 
@@ -12,22 +13,129 @@ Item {
 
     signal browseCatalog()
     signal openAnime(string slug)
+    // The gear: the download settings.
+    signal settingsRequested()
+
+    // Unfolded series, by slug; kept while a series moves between sections.
+    property var expanded: ({})
+    function toggle(slug) {
+        const next = Object.assign({}, expanded)
+        if (next[slug])
+            delete next[slug]
+        else
+            next[slug] = true
+        expanded = next
+    }
+
+    // Width of the progress column of every row.
+    readonly property int barWidth: width >= 1400 ? 280 : width >= 1100 ? 220 : width >= 900 ? 160 : 136
+
+    // Dragging a series in line: the place it would take; the rows between make room for it.
+    property int dragFrom: -1
+    property int dropTo: -1
+    property real dragHeight: 0
+    function placeFor(row) {
+        const center = row.y + row.dragOffset + row.height / 2
+        let slot = 0
+        for (let i = 0; i < queueList.count; ++i) {
+            const item = queueList.itemAtIndex(i)
+            if (item && center > item.y + item.height / 2)
+                slot = i + 1
+        }
+        return slot > row.index ? slot - 1 : slot
+    }
+    function trackDrag(row) {
+        dragFrom = row.index
+        dragHeight = row.height
+        dropTo = placeFor(row)
+    }
+    function dropSeries(from) {
+        const to = dropTo
+        dragFrom = -1
+        dropTo = -1
+        if (to >= 0 && to !== from)
+            downloads.moveSeries(from, to)
+    }
+    // How far a row steps aside while another is dragged over it.
+    function displacement(index) {
+        if (dragFrom < 0 || index === dragFrom)
+            return 0
+        if (index > dragFrom && index <= dropTo)
+            return -dragHeight
+        if (index < dragFrom && index >= dropTo)
+            return dragHeight
+        return 0
+    }
+
+    function askCancel(slug, title, consequence) {
+        if (consequence === "") {
+            downloads.cancelSeries(slug)
+            return
+        }
+        cancelDialog.slug = slug
+        cancelDialog.taskId = -1
+        cancelDialog.title = "¿Cancelar la descarga de " + title + "?"
+        cancelDialog.consequence = consequence
+        cancelDialog.open()
+    }
+    function askCancelEpisode(taskId, label, title, partial) {
+        if (partial === "") {
+            downloads.cancel(taskId)
+            return
+        }
+        cancelDialog.taskId = taskId
+        cancelDialog.title = "¿Cancelar la descarga del " + label.toLowerCase() + " de " + title + "?"
+        cancelDialog.consequence = "Se borrarán los " + partial + " descargados."
+        cancelDialog.open()
+    }
+    // Opens a menu under its button, right edges aligned, as wide as its widest visible entry.
+    function popupUnder(menu, anchor) {
+        // As ActionMenu sizes it when shown: never narrower than its own implicit width.
+        let widest = menu.implicitWidth - menu.leftPadding - menu.rightPadding
+        for (let i = 0; i < menu.count; ++i) {
+            const item = menu.itemAt(i)
+            if (item && item.visible)
+                widest = Math.max(widest, item.implicitWidth)
+        }
+        const width = widest + menu.leftPadding + menu.rightPadding
+        // Fluent draws the menu past its box by its (negative) inset: the drawn edges align.
+        menu.popup(anchor, anchor.width - width + menu.rightInset, anchor.height)
+    }
+
+    function askRemove(slug, title, files, diskText) {
+        if (files === 0) {
+            downloads.forgetSeries(slug)
+            return
+        }
+        removeDialog.slug = slug
+        removeDialog.title = "¿Quitar " + title + " de Descargas?"
+        removeDialog.consequence = diskText + " en disco."
+        removeDialog.open()
+    }
+
+    DownloadsHeader {
+        id: header
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        downloads: page.downloads
+    }
 
     RowLayout {
         id: toolbar
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.margins: 16
+        anchors.top: header.bottom
         anchors.leftMargin: 32
+        anchors.rightMargin: 32
+        anchors.topMargin: 16
         spacing: 8
-        visible: page.downloads.count > 0
 
         Button {
             visible: page.downloads.activeCount > 0 || page.downloads.anyPaused
-            text: page.downloads.anyPaused ? "Reanudar todo" : "Pausar todo"
-            icon.source: Theme.source(page.downloads.anyPaused ? Theme.icon.download : Theme.icon.pause)
-            onClicked: page.downloads.anyPaused ? page.downloads.resumeAll() : page.downloads.pauseAll()
+            text: page.downloads.activeCount > 0 ? "Pausar todo" : "Reanudar todo"
+            icon.source: Theme.source(page.downloads.activeCount > 0 ? Theme.icon.pause : Theme.icon.download)
+            onClicked: page.downloads.activeCount > 0 ? page.downloads.pauseAll() : page.downloads.resumeAll()
         }
 
         Button {
@@ -38,199 +146,292 @@ Item {
 
         Item { Layout.fillWidth: true }
 
-        Button {
-            visible: page.downloads.finishedCount > 0
-            flat: true
-            text: "Quitar terminadas de la lista"
-            onClicked: page.downloads.clearFinished()
+        ToolButton {
+            icon.source: Theme.source(Theme.icon.settings)
+            display: AbstractButton.IconOnly
+            text: "Ajustes de descargas"
+            ToolTip.visible: hovered
+            ToolTip.text: text
+            onClicked: page.settingsRequested()
         }
     }
 
-    ListView {
-        id: list
+    Flickable {
+        id: scroll
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: toolbar.bottom
         anchors.bottom: parent.bottom
         anchors.topMargin: 8
         clip: true
-        model: page.downloads
+        contentWidth: width
+        contentHeight: sections.implicitHeight
         boundsBehavior: Flickable.StopAtBounds
+        // A mouse drag moves a series in line, not the page; the wheel scrolls it.
+        acceptedButtons: Qt.NoButton
         ScrollBar.vertical: ScrollBar {}
-        keyNavigationEnabled: true
-        Accessible.name: "Descargas"
 
-        section.property: "section"
-        section.delegate: Label {
-            required property string section
-            leftPadding: 32
-            topPadding: 16
-            bottomPadding: 6
-            text: section
-            color: Theme.muted
-            font.pixelSize: Theme.caption
-            font.weight: Font.DemiBold
+        // The edge the list passes under once scrolled.
+        Rectangle {
+            parent: scroll
+            z: 1
+            width: scroll.width
+            height: 1
+            color: Theme.stroke
+            opacity: scroll.contentY > 0 ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 150 } }
         }
 
-        delegate: ItemDelegate {
-            id: row
-            required property int index
-            required property var taskId
-            required property string slug
-            required property string title
-            required property string episodeLabel
-            required property url posterUrl
-            required property string state
-            required property real progress
-            required property string detail
-            required property bool problem
+        ColumnLayout {
+            id: sections
+            width: scroll.width
+            spacing: 0
 
-            readonly property bool active: state === "downloading" || state === "resolving"
-                                           || state === "verifying"
-            readonly property bool finished: state === "completed" || state === "failed"
-                                             || state === "cancelled"
+            SectionHeading {
+                Layout.fillWidth: true
+                Layout.topMargin: 16
+                Layout.leftMargin: 32
+                Layout.rightMargin: 32
+                Layout.bottomMargin: 8
+                text: "A continuación"
+                count: page.downloads.queue.count
+            }
 
-            width: ListView.view.width
-            height: 72
-            leftPadding: 32
-            rightPadding: 24
-            Accessible.name: title + ", " + episodeLabel + ", " + detail
-            onClicked: ListView.view.currentIndex = index
-            onDoubleClicked: if (state === "completed") page.downloads.play(taskId)
+            ColumnLayout {
+                visible: page.downloads.queue.count === 0
+                Layout.leftMargin: 32
+                Layout.topMargin: 8
+                spacing: 16
 
-            contentItem: RowLayout {
-                spacing: 14
-
-                Poster {
-                    Layout.preferredWidth: 38
-                    Layout.preferredHeight: 54
-                    source: row.posterUrl
-                    radius: 3
+                Label {
+                    text: "No hay descargas en cola"
+                    color: Theme.muted
+                    font.pixelSize: Theme.body
                 }
 
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 4
+                Button {
+                    text: "Explorar el catálogo"
+                    highlighted: true
+                    onClicked: page.browseCatalog()
+                }
+            }
 
-                    Label {
-                        Layout.fillWidth: true
-                        text: row.title + " · " + row.episodeLabel
-                        color: Theme.ink
-                        font.pixelSize: Theme.body
-                        font.weight: Font.DemiBold
-                        elide: Text.ElideRight
-                    }
+            ListView {
+                id: queueList
+                Layout.fillWidth: true
+                Layout.preferredHeight: contentHeight
+                interactive: false
+                model: page.downloads.queue
+                Accessible.name: "A continuación"
 
-                    ProgressLine {
-                        Layout.fillWidth: true
-                        Layout.maximumWidth: 520
-                        visible: !row.finished
-                        value: row.progress
-                    }
+                move: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                moveDisplaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                displaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 } }
+                remove: Transition { NumberAnimation { property: "opacity"; to: 0; duration: 150 } }
 
-                    Label {
-                        Layout.fillWidth: true
-                        text: row.detail
-                        color: row.problem ? Theme.danger : Theme.muted
-                        font.pixelSize: Theme.caption
-                        elide: Text.ElideRight
-                    }
+                delegate: SeriesRow {
+                    id: row
+                    downloads: page.downloads
+                    queued: true
+                    expanded: page.expanded[slug] === true
+                    barWidth: page.barWidth
+                    displacement: page.displacement(index)
+                    onToggled: page.toggle(slug)
+                    onMenuRequested: anchor => queueMenu.show(row, anchor)
+                    onEpisodeCancelRequested: (taskId, label, partial) =>
+                        page.askCancelEpisode(taskId, label, title, partial)
+                    onMoveRequested: step => page.downloads.moveSeries(index, index + step)
+                    onDragOffsetChanged: if (dragging) page.trackDrag(row)
+                    onDragFinished: page.dropSeries(index)
                 }
+            }
 
-                ToolButton {
-                    visible: row.state === "completed"
-                    icon.source: Theme.source(Theme.icon.play)
-                    display: AbstractButton.IconOnly
-                    text: "Ver"
-                    ToolTip.visible: hovered
-                    ToolTip.text: text
-                    onClicked: page.downloads.play(row.taskId)
-                }
-                ToolButton {
-                    visible: row.state === "completed"
-                    icon.source: Theme.source(Theme.icon.folder)
-                    display: AbstractButton.IconOnly
-                    text: "Mostrar en la carpeta"
-                    ToolTip.visible: hovered
-                    ToolTip.text: text
-                    onClicked: page.downloads.showFile(row.taskId)
-                }
-                ToolButton {
-                    visible: row.active || row.state === "queued" || row.state === "waiting"
-                    enabled: row.state !== "verifying"
-                    icon.source: Theme.source(Theme.icon.pause)
-                    display: AbstractButton.IconOnly
-                    text: "Pausar"
-                    ToolTip.visible: hovered
-                    ToolTip.text: text
-                    onClicked: page.downloads.pause(row.taskId)
-                }
-                ToolButton {
-                    visible: row.state === "paused"
-                    icon.source: Theme.source(Theme.icon.download)
-                    display: AbstractButton.IconOnly
-                    text: "Reanudar"
-                    ToolTip.visible: hovered
-                    ToolTip.text: text
-                    onClicked: page.downloads.resume(row.taskId)
-                }
-                ToolButton {
-                    visible: row.state === "failed" || row.state === "waiting"
-                    icon.source: Theme.source(Theme.icon.retry)
-                    display: AbstractButton.IconOnly
-                    text: row.state === "waiting" ? "Reintentar ahora" : "Reintentar"
-                    ToolTip.visible: hovered
-                    ToolTip.text: text
-                    onClicked: page.downloads.retry(row.taskId)
-                }
-                ToolButton {
-                    visible: !row.finished
-                    icon.source: Theme.source(Theme.icon.cancel)
-                    display: AbstractButton.IconOnly
-                    text: "Cancelar"
-                    ToolTip.visible: hovered
-                    ToolTip.text: text
-                    onClicked: page.downloads.cancel(row.taskId)
-                }
-                ToolButton {
-                    visible: row.finished
-                    icon.source: Theme.source(Theme.icon.cancel)
-                    display: AbstractButton.IconOnly
+            SectionHeading {
+                visible: page.downloads.completed.count > 0
+                Layout.fillWidth: true
+                Layout.topMargin: 32
+                Layout.leftMargin: 32
+                Layout.rightMargin: 32
+                Layout.bottomMargin: 8
+                text: "Completadas"
+                count: page.downloads.completed.count
+
+                Button {
+                    flat: true
                     text: "Quitar de la lista"
-                    ToolTip.visible: hovered
-                    ToolTip.text: text
-                    onClicked: page.downloads.forget(row.taskId)
+                    onClicked: page.downloads.clearCompleted()
                 }
-                ToolButton {
-                    icon.source: Theme.source(Theme.icon.library)
-                    display: AbstractButton.IconOnly
-                    text: "Ir al anime"
-                    ToolTip.visible: hovered
-                    ToolTip.text: text
-                    onClicked: page.openAnime(row.slug)
+            }
+
+            ListView {
+                id: completedList
+                Layout.fillWidth: true
+                Layout.preferredHeight: contentHeight
+                Layout.bottomMargin: 24
+                interactive: false
+                model: page.downloads.completed
+                Accessible.name: "Completadas"
+
+                displaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 } }
+                remove: Transition { NumberAnimation { property: "opacity"; to: 0; duration: 150 } }
+
+                delegate: SeriesRow {
+                    id: done
+                    downloads: page.downloads
+                    queued: false
+                    expanded: page.expanded[slug] === true
+                    barWidth: page.barWidth
+                    onToggled: page.toggle(slug)
+                    onMenuRequested: anchor => completedMenu.show(done, anchor)
                 }
             }
         }
     }
 
-    ColumnLayout {
-        anchors.centerIn: parent
-        visible: page.downloads.count === 0
-        spacing: 16
+    // One menu for every series in line.
+    ActionMenu {
+        id: queueMenu
+
+        property string slug
+        property string name
+        property bool first
+        property bool hasFolder
+        property string consequence
+
+        function show(row, anchor) {
+            slug = row.slug
+            name = row.title
+            first = row.first
+            hasFolder = row.hasFolder
+            consequence = row.cancelText
+            page.popupUnder(queueMenu, anchor)
+        }
+
+        MenuEntry {
+            text: "Descargar ahora"
+            visible: !queueMenu.first
+            glyph: Theme.icon.download
+            onTriggered: page.downloads.prioritize(queueMenu.slug)
+        }
+        MenuEntry {
+            text: "Abrir la carpeta"
+            enabled: queueMenu.hasFolder
+            glyph: Theme.icon.folder
+            onTriggered: page.downloads.openSeriesFolder(queueMenu.slug)
+        }
+        MenuEntry {
+            text: "Ir al anime"
+            glyph: Theme.icon.library
+            onTriggered: page.openAnime(queueMenu.slug)
+        }
+        MenuSeparator {}
+        MenuEntry {
+            text: queueMenu.consequence !== "" ? "Cancelar la descarga…" : "Cancelar la descarga"
+            glyph: Theme.icon.cancel
+            onTriggered: page.askCancel(queueMenu.slug, queueMenu.name, queueMenu.consequence)
+        }
+    }
+
+    // One menu for every completed series.
+    ActionMenu {
+        id: completedMenu
+
+        property string slug
+        property string name
+        property int files
+        property string diskText
+
+        function show(row, anchor) {
+            slug = row.slug
+            name = row.title
+            files = row.filesOnDisk
+            diskText = row.diskText
+            page.popupUnder(completedMenu, anchor)
+        }
+
+        MenuEntry {
+            text: "Ir al anime"
+            glyph: Theme.icon.library
+            onTriggered: page.openAnime(completedMenu.slug)
+        }
+        MenuEntry {
+            text: completedMenu.files > 0 ? "Quitar…" : "Quitar de la lista"
+            glyph: Theme.icon.remove
+            onTriggered: page.askRemove(completedMenu.slug, completedMenu.name, completedMenu.files,
+                                        completedMenu.diskText)
+        }
+    }
+
+    ModalDialog {
+        id: cancelDialog
+
+        property string slug
+        property var taskId: -1
+        property string consequence
+
+        // Wide enough for the title, which names the series.
+        width: Math.min(Math.max(460, implicitHeaderWidth), parent.width - 48)
 
         Label {
-            Layout.alignment: Qt.AlignHCenter
-            text: "No hay descargas"
+            width: cancelDialog.availableWidth
+            text: cancelDialog.consequence
             color: Theme.ink
-            font.pixelSize: Theme.subtitle
-            font.weight: Font.DemiBold
+            wrapMode: Text.Wrap
         }
 
-        Button {
-            Layout.alignment: Qt.AlignHCenter
-            text: "Explorar el catálogo"
-            highlighted: true
-            onClicked: page.browseCatalog()
+        footer: DialogButtonBox {
+            Button {
+                text: "Cancelar la descarga"
+                // DialogButtonBox clears a `highlighted` set at creation; a binding comes back.
+                highlighted: cancelDialog.visible
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+            Button {
+                text: "Seguir descargando"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
         }
+
+        onAccepted: taskId >= 0 ? page.downloads.cancel(taskId) : page.downloads.cancelSeries(slug)
+    }
+
+    ModalDialog {
+        id: removeDialog
+
+        property string slug
+        property string consequence
+
+        width: Math.min(Math.max(520, implicitHeaderWidth), parent.width - 48)
+
+        Label {
+            width: removeDialog.availableWidth
+            text: removeDialog.consequence
+            color: Theme.ink
+            wrapMode: Text.Wrap
+        }
+
+        footer: DialogButtonBox {
+            Button {
+                text: "Quitar de la lista"
+                highlighted: removeDialog.visible
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+            Button {
+                text: "Mover a la Papelera"
+                DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
+                onClicked: {
+                    removeDialog.close()
+                    page.downloads.trashSeries(removeDialog.slug)
+                }
+            }
+            Button {
+                text: "Cancelar"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+        }
+
+        onAccepted: page.downloads.forgetSeries(slug)
     }
 }
