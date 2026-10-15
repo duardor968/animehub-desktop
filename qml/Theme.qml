@@ -29,8 +29,8 @@ QtObject {
     function posterColumns(width) {
         return Math.max(1, Math.round((width + posterGap) / (posterWidth + posterGap)))
     }
-    // A poster card: the cover, two title lines, a caption and the gap under them.
-    function posterCardHeight(cardWidth) { return Math.round(cardWidth * 1.42) + 92 }
+    // A poster card: the cover, its title, a caption and the gap under them.
+    function posterCardHeight(cardWidth) { return Math.round(cardWidth * 1.42) + 72 }
 
     readonly property int caption: 12
     readonly property int body: 14

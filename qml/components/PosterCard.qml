@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import AnimeHub
 
-// An anime as a poster with its title and one line under it.
+// An anime as a poster with its title and one line under it, each on one line so the captions
+// of a row line up; a cut title shows whole in a tooltip.
 AbstractButton {
     id: root
 
@@ -18,12 +19,10 @@ AbstractButton {
     Accessible.name: caption ? text + ", " + caption : text
 
     background: null
-    contentItem: Item {
-        FontMetrics {
-            id: titleMetrics
-            font: titleLabel.font
-        }
+    ToolTip.visible: hovered && titleLabel.truncated
+    ToolTip.text: text
 
+    contentItem: Item {
         Poster {
             id: poster
             width: parent.width
@@ -56,16 +55,11 @@ AbstractButton {
             anchors.top: poster.bottom
             anchors.topMargin: 8
             width: parent.width
-            // Always two lines tall: captions of a row line up whatever the title's length.
-            height: 2 * titleMetrics.lineSpacing
-            verticalAlignment: Text.AlignTop
             text: root.text
             color: Theme.ink
             font.pixelSize: Theme.body
             font.weight: Font.DemiBold
             elide: Text.ElideRight
-            maximumLineCount: 2
-            wrapMode: Text.Wrap
         }
 
         // New episodes read as in the library list: a dot and the accent colour.
