@@ -80,6 +80,7 @@ class AnimeView final : public QObject {
     // The series' downloads: some transferring or waiting their turn, or all of them paused.
     Q_PROPERTY(bool downloadRunning READ downloadRunning NOTIFY changed)
     Q_PROPERTY(bool downloadPaused READ downloadPaused NOTIFY changed)
+    Q_PROPERTY(bool downloadWaiting READ downloadWaiting NOTIFY changed)
     Q_PROPERTY(QString downloadText READ downloadText NOTIFY changed) // "3 de 12"
     Q_PROPERTY(int failedCount READ failedCount NOTIFY changed)
     // The episode to watch next: number (< 0 when everything is watched), title, image, state.
@@ -167,6 +168,9 @@ public:
     }
     [[nodiscard]] bool downloadPaused() const {
         return summary_.paused;
+    }
+    [[nodiscard]] bool downloadWaiting() const {
+        return summary_.retryAt.isValid();
     }
     [[nodiscard]] QString downloadText() const;
     [[nodiscard]] int failedCount() const {
@@ -267,6 +271,7 @@ private:
         bool watching = false;
         bool running = false;
         bool paused = false;
+        QDateTime retryAt; // valid when what runs only waits to try again
         int batchDone = 0;
         int batchTotal = 0;
         double batchProgress = 0;

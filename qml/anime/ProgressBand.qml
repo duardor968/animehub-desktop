@@ -169,7 +169,10 @@ ColumnLayout {
             spacing: 4
 
             Label {
-                text: root.view.downloadRunning ? "Descargando"
+                // With the main button on the downloads, only their failures are left here.
+                text: !root.showsDownloads ? "Descargas"
+                      : root.view.downloadWaiting ? "En espera"
+                      : root.view.downloadRunning ? "Descargando"
                       : root.view.downloadPaused ? "En pausa" : "Descargas"
                 color: Theme.muted
                 font.pixelSize: Theme.caption

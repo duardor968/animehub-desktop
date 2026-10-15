@@ -102,7 +102,7 @@ QString issue(downloads::TaskIssue issue) {
     case TaskIssue::Quota:
         return QStringLiteral("Se agotó la cuota de descarga de MEGA.");
     case TaskIssue::RateLimited:
-        return QStringLiteral("AnimeHub pidió esperar un momento.");
+        return QStringLiteral("El servidor de AnimeHub pidió esperar.");
     case TaskIssue::Network:
         return QStringLiteral("No hay conexión con el servidor.");
     case TaskIssue::NoSpace:
@@ -117,9 +117,9 @@ QString issue(downloads::TaskIssue issue) {
     return {};
 }
 
-QString retry(const downloads::Task& task) {
+QString retry(const QDateTime& at) {
     return QStringLiteral("Se reintenta a las ") +
-           spanish().toString(task.retryAt.toLocalTime().time(), QStringLiteral("HH:mm"));
+           spanish().toString(at.toLocalTime().time(), QStringLiteral("HH:mm"));
 }
 
 QString download(const downloads::Task& task) {
@@ -150,7 +150,7 @@ QString download(const downloads::Task& task) {
     case TaskState::Paused:
         return size.isEmpty() ? QStringLiteral("En pausa") : QStringLiteral("En pausa · ") + size;
     case TaskState::Waiting:
-        return issue(task.issue) + QLatin1Char(' ') + retry(task) + QLatin1Char('.');
+        return issue(task.issue) + QLatin1Char(' ') + retry(task.retryAt) + QLatin1Char('.');
     case TaskState::Completed: {
         QStringList parts{bytes(task.bytesTotal)};
         if (task.provider) {

@@ -148,10 +148,6 @@ Clock parseClock(const QString& text, qint64 duration_ms) {
     return {.complete = true, .ms = ms};
 }
 
-bool unfinished(const downloads::Task& task) {
-    return task.state != TaskState::Completed && task.state != TaskState::Cancelled;
-}
-
 QString percent(double fraction) {
     return QString::number(static_cast<int>(std::floor(std::clamp(fraction, 0.0, 1.0) * 100))) +
            QStringLiteral(" %");
@@ -346,27 +342,18 @@ AnimeView::Summary AnimeView::summarize() const {
         }
     }
 
-    // The series' current downloads: the unfinished ones and those finished since the first of
-    // them was queued.
-    QDateTime since;
-    for (const auto& task : tasks_) {
-        if (unfinished(task) && (!since.isValid() || task.createdAt < since)) {
-            since = task.createdAt;
-        }
-    }
+    // The series' downloads as the Downloads page counts them: every one still listed.
     double transferred = 0;
+    bool moving = false;
     for (const auto& task : tasks_) {
         if (task.state == TaskState::Cancelled) {
             continue;
         }
+        ++summary.batchTotal;
         if (task.state == TaskState::Completed) {
-            if (since.isValid() && task.createdAt >= since) {
-                ++summary.batchDone;
-                ++summary.batchTotal;
-            }
+            ++summary.batchDone;
             continue;
         }
-        ++summary.batchTotal;
         summary.partialBytes += task.bytesDone;
         if (task.bytesTotal > 0) {
             transferred +=
@@ -378,9 +365,17 @@ AnimeView::Summary AnimeView::summarize() const {
             summary.paused = true;
         } else {
             summary.running = true;
+            if (task.state != TaskState::Waiting) {
+                moving = true;
+            } else if (!summary.retryAt.isValid() || task.retryAt < summary.retryAt) {
+                summary.retryAt = task.retryAt;
+            }
         }
     }
     summary.paused = summary.paused && !summary.running;
+    if (moving) {
+        summary.retryAt = {};
+    }
     if (summary.batchTotal > 0) {
         summary.batchProgress = (summary.batchDone + transferred) / summary.batchTotal;
     }
@@ -525,7 +520,6 @@ double AnimeView::lastNumber() const {
 
 QString AnimeView::primaryText() const {
     const bool film = source().category.startsWith(QStringLiteral("Pel"), Qt::CaseInsensitive);
-    const int position = std::min(summary_.batchDone + 1, summary_.batchTotal);
     switch (summary_.primary) {
     case PrimaryAction::Play: {
         const auto episode = episodes_.episode(*summary_.target);
@@ -544,13 +538,18 @@ QString AnimeView::primaryText() const {
         }
         return QStringLiteral("Descargar todo (%1)").arg(summary_.missing.size());
     case PrimaryAction::Downloading:
-        return single()
-                   ? QStringLiteral("Descargando · ") + percent(summary_.batchProgress)
-                   : QStringLiteral("Descargando %1 de %2").arg(position).arg(summary_.batchTotal);
+        if (summary_.retryAt.isValid()) {
+            return display::retry(summary_.retryAt);
+        }
+        return single() ? QStringLiteral("Descargando · ") + percent(summary_.batchProgress)
+                        : QStringLiteral("Descargando %1 de %2")
+                              .arg(summary_.batchDone)
+                              .arg(summary_.batchTotal);
     case PrimaryAction::Paused:
-        return single()
-                   ? QStringLiteral("En pausa · ") + percent(summary_.batchProgress)
-                   : QStringLiteral("En pausa · %1 de %2").arg(position).arg(summary_.batchTotal);
+        return single() ? QStringLiteral("En pausa · ") + percent(summary_.batchProgress)
+                        : QStringLiteral("En pausa · %1 de %2")
+                              .arg(summary_.batchDone)
+                              .arg(summary_.batchTotal);
     case PrimaryAction::None:
         break;
     }
@@ -616,12 +615,13 @@ QString AnimeView::downloadText() const {
     if (!summary_.running && !summary_.paused) {
         return {};
     }
+    if (summary_.retryAt.isValid()) {
+        return display::retry(summary_.retryAt);
+    }
     if (single()) {
         return percent(summary_.batchProgress);
     }
-    return QStringLiteral("%1 de %2")
-        .arg(std::min(summary_.batchDone + 1, summary_.batchTotal))
-        .arg(summary_.batchTotal);
+    return QStringLiteral("%1 de %2").arg(summary_.batchDone).arg(summary_.batchTotal);
 }
 
 double AnimeView::nextNumber() const {

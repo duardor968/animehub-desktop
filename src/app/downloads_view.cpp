@@ -344,7 +344,7 @@ void DownloadsView::rebuild() {
                   .episode = display::episode(subject->number) + QStringLiteral(" · ") +
                              amounts.value(subject->slug),
                   // The reason is on the episode's line; a single line here says when.
-                  .detail = subject->state == TaskState::Waiting ? display::retry(*subject)
+                  .detail = subject->state == TaskState::Waiting ? display::retry(subject->retryAt)
                                                                  : display::download(*subject),
                   .progress = fractionOf(*subject),
                   .art = info(subject->slug).art};
