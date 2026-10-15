@@ -21,6 +21,8 @@ namespace animehub::app::display {
 [[nodiscard]] QString issue(downloads::TaskIssue issue);
 // Where a download is, worded the same in every view: "En pausa · 143 MB de 348 MB".
 [[nodiscard]] QString download(const downloads::Task& task);
+// When a waiting download tries again: "Se reintenta a las 11:40".
+[[nodiscard]] QString retry(const downloads::Task& task);
 
 } // namespace animehub::app::display
 

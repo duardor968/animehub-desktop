@@ -20,6 +20,8 @@ class DownloadsView final : public QObject {
 
     Q_PROPERTY(DownloadSeriesModel* queue READ queue CONSTANT)
     Q_PROPERTY(DownloadSeriesModel* completed READ completed CONSTANT)
+    // The series on view at the top of the page (none or one), out of the queue, as in Steam.
+    Q_PROPERTY(DownloadSeriesModel* current READ current CONSTANT)
 
     // Running, queued or due to retry: what goes on by itself. Paused ones wait for the user.
     Q_PROPERTY(int activeCount READ activeCount NOTIFY summaryChanged)
@@ -65,6 +67,9 @@ public:
     }
     [[nodiscard]] DownloadSeriesModel* completed() {
         return &completed_;
+    }
+    [[nodiscard]] DownloadSeriesModel* current() {
+        return &current_;
     }
 
     [[nodiscard]] int activeCount() const {
@@ -202,6 +207,8 @@ private:
     playback::Player& player_;
     DownloadSeriesModel queue_;
     DownloadSeriesModel completed_;
+    DownloadSeriesModel current_;
+    qsizetype current_place_ = 0; // where the current series is in line
     QHash<QString, SeriesInfo> infos_;
     QTimer rebuild_timer_;
 

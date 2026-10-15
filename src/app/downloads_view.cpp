@@ -6,6 +6,8 @@
 #include <QFileInfo>
 #include <QLocale>
 
+#include <algorithm>
+
 namespace animehub::app {
 namespace {
 
@@ -156,7 +158,8 @@ void DownloadsView::rebuild() {
 
     QList<DownloadSeriesRow> queue;
     QList<DownloadSeriesRow> completed;
-    QHash<QString, QString> counts; // "3 de 12" by series, for the bar
+    QHash<QString, QString> counts;  // "3 de 12" by series, for the bar
+    QHash<QString, QString> amounts; // "3 de 12 descargados · 1,1 GB de 4,2 GB", for the header
     for (auto& group : groups) {
         std::ranges::sort(group.tasks, {}, &Task::number);
         const auto& series = info(group.slug);
@@ -246,12 +249,18 @@ void DownloadsView::rebuild() {
             }
         }
         summary.append(QStringLiteral("%1 de %2").arg(done).arg(episodes));
+        QString size;
         if (group.inLine && totals_known && total > 0) {
-            summary.append(display::bytes(bytes) + QStringLiteral(" de ") + display::bytes(total));
+            size = display::bytes(bytes) + QStringLiteral(" de ") + display::bytes(total);
         } else if (bytes > 0) {
-            summary.append(display::bytes(bytes));
+            size = display::bytes(bytes);
+        }
+        if (!size.isEmpty()) {
+            summary.append(size);
         }
         row.summary = summary.join(QStringLiteral(" · "));
+        amounts.insert(group.slug, QStringLiteral("%1 de %2 descargados").arg(done).arg(episodes) +
+                                       (size.isEmpty() ? QString() : QStringLiteral(" · ") + size));
         row.progress = episodes > 0 ? fraction / static_cast<double>(episodes) : 0.0;
         row.failed = failed;
         row.failedText = failed > 0 ? QStringLiteral("%1 con error").arg(failed) : QString();
@@ -289,8 +298,6 @@ void DownloadsView::rebuild() {
     if (!queue.isEmpty()) {
         queue.first().first = true;
     }
-    queue_.setRows(std::move(queue));
-    completed_.setRows(std::move(completed));
 
     // What the top of the page and the bar show: something running, else what will start by
     // itself, else what waits for the user, else the failures.
@@ -334,16 +341,33 @@ void DownloadsView::rebuild() {
                                  : Mode::Paused,
                   .slug = subject->slug,
                   .title = subject->animeTitle,
-                  .episode = display::episode(subject->number),
-                  .detail = display::download(*subject),
+                  .episode = display::episode(subject->number) + QStringLiteral(" · ") +
+                             amounts.value(subject->slug),
+                  // The reason is on the episode's line; a single line here says when.
+                  .detail = subject->state == TaskState::Waiting ? display::retry(*subject)
+                                                                 : display::download(*subject),
                   .progress = fractionOf(*subject),
                   .art = info(subject->slug).art};
     } else {
         header.title = QStringLiteral("Nada descargando");
     }
+
+    // The series on view leaves the line under it.
+    QList<DownloadSeriesRow> current;
+    current_place_ = 0;
+    if (subject) {
+        const auto place = std::ranges::find(queue, subject->slug, &DownloadSeriesRow::slug);
+        if (place != queue.end()) {
+            current_place_ = std::distance(queue.begin(), place);
+            current.append(std::move(*place));
+            queue.erase(place);
+        }
+    }
+    queue_.setRows(std::move(queue));
+    completed_.setRows(std::move(completed));
+    current_.setRows(std::move(current));
     if (shown || next) {
-        QStringList parts{subject->animeTitle,
-                          display::shortEpisode(subject->number),
+        QStringList parts{subject->animeTitle, display::shortEpisode(subject->number),
                           counts.value(subject->slug)};
         parts.append(subject->state == TaskState::Downloading ? display::speed(speed)
                                                               : header.detail);
@@ -489,6 +513,10 @@ void DownloadsView::moveSeries(int from, int to) {
         return;
     }
     order.move(from, to);
+    // The series on view keeps its place in line.
+    if (!current_.rows().isEmpty()) {
+        order.insert(current_place_, current_.rows().first().slug);
+    }
     manager_.reorder(order);
     reorderNow();
 }

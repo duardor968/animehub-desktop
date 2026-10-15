@@ -4,11 +4,19 @@ import QtQuick.Layouts
 import AnimeHub
 
 // The top of the Downloads page, as in Steam: the series on view over its art, with its
-// episode, progress and pause; on the right, the speed of the last minutes.
+// episode, progress, failures and actions; on the right, the speed of the last minutes. The
+// series is not repeated in the line below: it unfolds into its episodes from here.
 Rectangle {
     id: root
 
     required property DownloadsView downloads
+    // The series on view is unfolded into its episodes, under the header.
+    property bool expanded
+    // Room left at the top for the page's own buttons.
+    property int topRoom: 64
+
+    signal toggled(string slug)
+    signal menuRequested(var row, Item anchor)
 
     readonly property int mode: downloads.headerMode
     readonly property bool idle: mode === DownloadsView.Idle
@@ -16,7 +24,7 @@ Rectangle {
     readonly property bool wide: width >= 1280
 
     // Without a download on view there is no art: the band shrinks to the figures.
-    implicitHeight: idle ? 136 : 200
+    implicitHeight: idle ? 136 : Math.max(200, topRoom + subject.implicitHeight + 28)
     Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
     color: Theme.pane
     clip: true
@@ -109,6 +117,30 @@ Rectangle {
             elide: Text.ElideRight
         }
 
+        Repeater {
+            model: root.idle ? null : root.downloads.current
+
+            RowLayout {
+                required property string slug
+                required property int failed
+                required property string failedText
+
+                visible: failed > 0
+                spacing: 4
+
+                Label {
+                    text: parent.failedText
+                    color: Theme.danger
+                    font.pixelSize: Theme.body
+                }
+                Button {
+                    flat: true
+                    text: "Reintentar fallidos"
+                    onClicked: root.downloads.retryFailed(parent.slug)
+                }
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Layout.topMargin: 12
@@ -145,6 +177,43 @@ Rectangle {
                     color: Theme.muted
                     font.pixelSize: Theme.caption
                     elide: Text.ElideRight
+                }
+            }
+
+            Repeater {
+                model: root.idle ? null : root.downloads.current
+
+                // What the series rows below offer, for the series on view.
+                RowLayout {
+                    id: actions
+
+                    required property string slug
+                    required property string title
+                    required property bool first
+                    required property bool hasFolder
+                    required property string cancelText
+
+                    spacing: 4
+
+                    // A tool button: as narrow as its chevron alone, which says it in narrow windows.
+                    ToolButton {
+                        display: subject.width >= 440 ? AbstractButton.TextBesideIcon
+                                                      : AbstractButton.IconOnly
+                        text: root.expanded ? "Ocultar episodios" : "Ver episodios"
+                        icon.source: Theme.source(root.expanded ? "e70e" : "e70d")
+                        ToolTip.visible: hovered && display === AbstractButton.IconOnly
+                        ToolTip.text: text
+                        onClicked: root.toggled(actions.slug)
+                    }
+                    ToolButton {
+                        id: more
+                        icon.source: Theme.source(Theme.icon.more)
+                        display: AbstractButton.IconOnly
+                        text: "Más opciones"
+                        ToolTip.visible: hovered
+                        ToolTip.text: text
+                        onClicked: root.menuRequested(actions, more)
+                    }
                 }
             }
         }

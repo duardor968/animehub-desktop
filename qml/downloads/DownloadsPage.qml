@@ -3,8 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// Downloads, by series as in Steam: the download on view and the speed at the top, then the
-// series in line and the completed ones.
+// Downloads, by series as in Steam: the series on view and the speed at the top, then the
+// other series in line and the completed ones.
 Item {
     id: page
 
@@ -13,8 +13,6 @@ Item {
 
     signal browseCatalog()
     signal openAnime(string slug)
-    // The gear: the download settings.
-    signal settingsRequested()
 
     // Unfolded series, by slug; kept while a series moves between sections.
     property var expanded: ({})
@@ -105,14 +103,17 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         downloads: page.downloads
+        topRoom: toolbar.y + toolbar.height + 16
+        expanded: page.expanded[page.downloads.headerSlug] === true
+        onToggled: slug => page.toggle(slug)
+        onMenuRequested: (row, anchor) => queueMenu.showFor(row, anchor)
     }
 
+    // In the header's corner; the window's gear, right above, opens the download settings.
     RowLayout {
         id: toolbar
-        anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: header.bottom
-        anchors.leftMargin: 32
+        anchors.top: parent.top
         anchors.rightMargin: 32
         anchors.topMargin: 16
         spacing: 8
@@ -129,26 +130,14 @@ Item {
             icon.source: Theme.source(Theme.icon.folder)
             onClicked: page.app.openDownloadFolder()
         }
-
-        Item { Layout.fillWidth: true }
-
-        ToolButton {
-            icon.source: Theme.source(Theme.icon.settings)
-            display: AbstractButton.IconOnly
-            text: "Ajustes de descargas"
-            ToolTip.visible: hovered
-            ToolTip.text: text
-            onClicked: page.settingsRequested()
-        }
     }
 
     Flickable {
         id: scroll
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: toolbar.bottom
+        anchors.top: header.bottom
         anchors.bottom: parent.bottom
-        anchors.topMargin: 8
         clip: true
         contentWidth: width
         contentHeight: sections.implicitHeight
@@ -173,7 +162,51 @@ Item {
             width: scroll.width
             spacing: 0
 
+            // The episodes of the series on view, unfolded from the header.
+            Repeater {
+                model: page.downloads.current
+
+                Item {
+                    id: unfolded
+
+                    required property string slug
+                    required property string title
+                    required property var episodes
+                    readonly property bool open: page.expanded[slug] === true
+
+                    Layout.fillWidth: true
+                    implicitHeight: open ? currentColumn.implicitHeight : 0
+                    clip: true
+                    opacity: open ? 1 : 0
+                    Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                    Behavior on opacity { NumberAnimation { duration: 200 } }
+
+                    Column {
+                        id: currentColumn
+                        width: parent.width
+                        topPadding: 8
+                        bottomPadding: 8
+
+                        Repeater {
+                            model: unfolded.open || unfolded.height > 0 ? unfolded.episodes : null
+
+                            EpisodeLine {
+                                width: currentColumn.width
+                                downloads: page.downloads
+                                indent: 32
+                                barWidth: page.barWidth
+                                actionsWidth: 84
+                                onCancelRequested: (taskId, label, partial) =>
+                                    page.askCancelEpisode(taskId, label, unfolded.title, partial)
+                            }
+                        }
+                    }
+                }
+            }
+
             SectionHeading {
+                // With the series on view alone in line, there is nothing after it.
+                visible: page.downloads.queue.count > 0 || page.downloads.current.count === 0
                 Layout.fillWidth: true
                 Layout.topMargin: 16
                 Layout.leftMargin: 32
@@ -184,7 +217,7 @@ Item {
             }
 
             ColumnLayout {
-                visible: page.downloads.queue.count === 0
+                visible: page.downloads.queue.count === 0 && page.downloads.current.count === 0
                 Layout.leftMargin: 32
                 Layout.topMargin: 8
                 spacing: 16

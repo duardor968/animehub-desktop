@@ -162,7 +162,6 @@ ApplicationWindow {
             app: window.app
             onBrowseCatalog: window.showPage(1)
             onOpenAnime: slug => window.openAnime(slug)
-            onSettingsRequested: settingsDialog.open()
         }
     }
 
