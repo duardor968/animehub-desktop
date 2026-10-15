@@ -18,7 +18,14 @@ function(animehub_deploy_runtime target)
                sqldrivers/qsqlodbc.dll sqldrivers/qsqlpsql.dll
                tls/qcertonlybackend.dll tls/qopensslbackend.dll
                imageformats/qicns.dll imageformats/qtga.dll imageformats/qtiff.dll
-               imageformats/qwbmp.dll)
+               imageformats/qwbmp.dll
+               qml/QtQuick/Controls/Imagine qml/QtQuick/Controls/Material
+               qml/QtQuick/Controls/Universal qml/QtQuick/Controls/Windows qml/QtQuick/NativeStyle
+               Qt6QuickControls2Imagine.dll Qt6QuickControls2ImagineStyleImpl.dll
+               Qt6QuickControls2Material.dll Qt6QuickControls2MaterialStyleImpl.dll
+               Qt6QuickControls2Universal.dll Qt6QuickControls2UniversalStyleImpl.dll
+               Qt6QuickControls2WindowsStyleImpl.dll Qt6Quick3DUtils.dll
+               concrt140.dll msvcp140_atomic_wait.dll msvcp140_codecvt_ids.dll)
     list(APPEND unused "$<TARGET_FILE_DIR:${target}>/${path}")
   endforeach()
 
@@ -35,11 +42,13 @@ function(animehub_deploy_runtime target)
             --no-ffmpeg
             --verbose 0
             "$<TARGET_FILE:${target}>"
-    # windeployqt 6.11 ignores --skip-plugin-types and --exclude-plugins: drop what AnimeHub does
-    # not use (QML debugging, touch, reachability, other databases, OpenSSL, unused images).
-    COMMAND "${CMAKE_COMMAND}" -E rm -rf ${unused}
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
             "$<TARGET_FILE_DIR:${target}>"
+    # windeployqt 6.11 ignores --skip-plugin-types and --exclude-plugins: drop what AnimeHub does
+    # not use (QML debugging, touch, reachability, other databases, OpenSSL, unused images, the
+    # Controls styles other than FluentWinUI3 and the Fusion and Basic it builds on, and the parts
+    # of the MSVC runtime nothing links).
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf ${unused}
     COMMENT "Deploying the Qt and MSVC runtime next to AnimeHub.exe"
     VERBATIM
   )
