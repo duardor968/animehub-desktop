@@ -26,6 +26,10 @@ QString episode(double number) {
     return QStringLiteral("Episodio ") + episodeNumber(number);
 }
 
+QString shortEpisode(double number) {
+    return QStringLiteral("Ep. ") + episodeNumber(number);
+}
+
 QString bytes(qint64 value) {
     if (value < 1000 * 1000) {
         return spanish().toString(std::max<qint64>(value, 0) / 1000) + QStringLiteral(" KB");

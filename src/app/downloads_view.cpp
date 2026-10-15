@@ -343,7 +343,7 @@ void DownloadsView::rebuild() {
     }
     if (shown || next) {
         QStringList parts{subject->animeTitle,
-                          QStringLiteral("Ep. ") + display::episodeNumber(subject->number),
+                          display::shortEpisode(subject->number),
                           counts.value(subject->slug)};
         parts.append(subject->state == TaskState::Downloading ? display::speed(speed)
                                                               : header.detail);

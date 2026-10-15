@@ -29,7 +29,7 @@ CatalogView::CatalogView(api::ApiClient& api, const LibraryModel& library, QObje
 QString CatalogView::captionOf(const api::AnimeSummary& anime, double episode) const {
     const bool owned = library_.contains(anime.slug);
     if (episode >= 0) {
-        auto caption = QStringLiteral("Ep. ") + display::episodeNumber(episode);
+        auto caption = display::shortEpisode(episode);
         return owned ? caption + QStringLiteral(" · En la biblioteca") : caption;
     }
     if (owned) {

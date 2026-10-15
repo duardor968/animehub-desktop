@@ -622,7 +622,7 @@ QString AnimeView::nextTitle() const {
     if (!episode) {
         return {};
     }
-    const auto label = QStringLiteral("Ep. ") + display::episodeNumber(episode->number);
+    const auto label = display::shortEpisode(episode->number);
     return episode->title.isEmpty() ? label : label + QStringLiteral(" · ") + episode->title;
 }
 

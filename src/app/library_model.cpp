@@ -18,10 +18,6 @@ constexpr qint64 kScheduleMaxAgeSeconds = 21LL * 24 * 3600;
 // Past its hour, an episode is still on its way for a while before it counts as late.
 constexpr qint64 kDueGraceSeconds = 3LL * 3600;
 
-QString shortEpisode(double number) {
-    return QStringLiteral("Ep. ") + display::episodeNumber(number);
-}
-
 const QLocale& spanish() {
     static const QLocale kSpanish(QLocale::Spanish, QLocale::Spain);
     return kSpanish;
@@ -29,7 +25,7 @@ const QLocale& spanish() {
 
 // "Jueves 22:00 · Ep. 14", "Mañana 09:30 · Ep. 3", "Ahora · Ep. 8", "Retrasado · Ep. 8".
 QString upcomingCaption(const QDateTime& at, double number, const QDateTime& now) {
-    const auto episode = shortEpisode(number);
+    const auto episode = display::shortEpisode(number);
     if (now > at.addSecs(kDueGraceSeconds)) {
         return QStringLiteral("Retrasado · ") + episode;
     }
@@ -125,10 +121,10 @@ QString LibraryModel::captionOf(const LibraryEntry& entry) {
                    : QStringLiteral("%1 episodios nuevos").arg(entry.newEpisodes);
     }
     if (entry.resumeNumber && entry.resumePositionMs > 0) {
-        return QStringLiteral("Continuar · ") + shortEpisode(*entry.resumeNumber);
+        return QStringLiteral("Continuar · ") + display::shortEpisode(*entry.resumeNumber);
     }
     if (entry.resumeNumber && entry.watchedEpisodes > 0) {
-        return QStringLiteral("Siguiente · ") + shortEpisode(*entry.resumeNumber);
+        return QStringLiteral("Siguiente · ") + display::shortEpisode(*entry.resumeNumber);
     }
     if (entry.finished()) {
         return QStringLiteral("Visto");
@@ -327,7 +323,7 @@ void LibraryModel::updateFeatured() {
     QVariantMap featured;
     if (entry && entry->resumeNumber) {
         const auto number = *entry->resumeNumber;
-        const auto episode = shortEpisode(number);
+        const auto episode = display::shortEpisode(number);
         QString detail;
         double progress = -1;
         if (entry->resumePositionMs > 0) {

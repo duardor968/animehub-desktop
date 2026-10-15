@@ -11,6 +11,7 @@ namespace animehub::app::display {
 
 [[nodiscard]] QString episodeNumber(double number); // "12", "12,5"
 [[nodiscard]] QString episode(double number);       // "Episodio 12"
+[[nodiscard]] QString shortEpisode(double number);  // "Ep. 12"
 [[nodiscard]] QString bytes(qint64 value);          // "350 MB", "1,2 GB"
 [[nodiscard]] QString speed(qint64 bytes_per_second);
 [[nodiscard]] QString clock(qint64 ms);          // "8:12", "1:02:03"
