@@ -26,6 +26,8 @@ mpv 0.41.0 (engines/mpv)
   Licencia: GNU General Public License, versión 2 o posterior (engines/mpv/LICENSE.GPL.txt);
   autoría y licencias de sus componentes en engines/mpv/Copyright.txt.
   Código fuente: https://github.com/mpv-player/mpv/releases/tag/v0.41.0
+  Es la compilación oficial mpv-v0.41.0-x86_64-w64-mingw32 sin su información de
+  depuración (strip --strip-debug); el resto de cada archivo no cambia.
 
 Biblioteca de ejecución de Microsoft Visual C++
   Microsoft Corporation. Se redistribuye según los términos de redistribución de

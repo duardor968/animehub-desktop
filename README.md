@@ -13,7 +13,7 @@ Aplicación nativa de Windows para seguir anime: una biblioteca personal, el cat
 
 ## Compilar
 
-Requisitos: Visual Studio 2022 (o Build Tools) con *Desktop development with C++*, Qt 6.11 para MSVC 2022 64-bit con el módulo **Qt Image Formats** (las portadas son WebP) y CMake 4.0 o posterior.
+Requisitos: Visual Studio 2022 (o Build Tools) con *Desktop development with C++*, Qt 6.11 para MSVC 2022 64-bit con el módulo **Qt Image Formats** (las portadas son WebP), el MinGW de Qt (en *Build Tools* del instalador de Qt; basta cualquier `strip` de binutils en el `PATH`) y CMake 4.0 o posterior.
 
 ```powershell
 .\scripts\build.ps1                         # Debug y pruebas
@@ -22,7 +22,7 @@ Requisitos: Visual Studio 2022 (o Build Tools) con *Desktop development with C++
 
 El script prepara MSVC, Qt y CMake solo para su proceso; no toca el `PATH` global. `-Fresh` reconfigura desde cero. Si Qt está en otra ruta, define `QT_ROOT`.
 
-La primera configuración descarga **aria2 1.37.0** y **mpv 0.41.0** desde sus versiones oficiales y comprueba su SHA-256 (fijado en [`cmake/Engines.cmake`](cmake/Engines.cmake)); quedan en `out/engine-cache` para las siguientes.
+La primera configuración descarga **aria2 1.37.0** y **mpv 0.41.0** desde sus versiones oficiales y comprueba su SHA-256 (fijado en [`cmake/Engines.cmake`](cmake/Engines.cmake)); quedan en `out/engine-cache` para las siguientes. A mpv se le quita la información de depuración que trae incrustada, más de un tercio de su tamaño.
 
 ## Instalación
 
