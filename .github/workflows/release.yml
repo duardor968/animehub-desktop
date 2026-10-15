@@ -75,6 +75,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # checkout leaves the tag pointing at the commit, without its message: fetch the tag itself.
+          git fetch --force --no-tags --depth=1 origin "+${env:GITHUB_REF}:${env:GITHUB_REF}"
+          if ((git cat-file -t $env:GITHUB_REF) -ne "tag") { throw "$env:GITHUB_REF_NAME is not an annotated tag." }
           $version = $env:GITHUB_REF_NAME.TrimStart("v")
           gh release create $env:GITHUB_REF_NAME --verify-tag --notes-from-tag --title "AnimeHub $version" `
             (Get-Item out/package/AnimeHub-*-win64.zip).FullName `
