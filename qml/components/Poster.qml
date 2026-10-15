@@ -23,7 +23,9 @@ Rectangle {
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
         cache: true
+        // Both sides: cropped, a wide image is decoded just large enough to cover, not to the width.
         sourceSize.width: Math.ceil(root.width * Screen.devicePixelRatio)
+        sourceSize.height: Math.ceil(root.height * Screen.devicePixelRatio)
         opacity: status === Image.Ready ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
     }
