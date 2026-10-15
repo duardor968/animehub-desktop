@@ -8,7 +8,7 @@ AnimeHub Desktop es una aplicación nativa C++26 con Qt Quick para Windows: bibl
 
 - No replica AnimeHub Web. Consume `animehub-api` bajo `/api/v1`, con caché local de respuestas para uso sin conexión.
 - Sin scraping en C++: AnimeAV1 se procesa solo en el servidor.
-- La biblioteca es local, privada y reconstruible (SQLite). Visto, pendiente y favorito son datos, no carpetas.
+- La biblioteca es local, privada y reconstruible (SQLite). Visto y favorito son datos, no carpetas.
 - Descargas nativas solo de MEGA (API pública, descifrado AES-CTR y verificación del MAC) y Pixeldrain, siempre con aria2 por JSON-RPC. Otros servidores, solo a través de JDownloader (Click'n'Load local o MyJDownloader).
 - La cola nunca guarda URLs firmadas, claves de enlace ni credenciales; una tarea reanudada vuelve a resolver su origen.
 - Reproducción externa: mpv incluido por defecto (seguimiento por IPC) o la aplicación predeterminada del sistema (abrir marca visto). Nada de reproductor embebido sin una nueva decisión. Cerrar AnimeHub no detiene un vídeo.
@@ -17,9 +17,9 @@ AnimeHub Desktop es una aplicación nativa C++26 con Qt Quick para Windows: bibl
 
 ## Interfaz
 
-- Referencia: la biblioteca de Steam. Pestañas arriba (Biblioteca · Catálogo · Descargas) y Ajustes en un diálogo; en Biblioteca, lista a la izquierda y a la derecha el inicio con portadas o la ficha. Barra de descarga abajo solo con descargas activas.
+- Referencia: la biblioteca de Steam. Pestañas arriba (Biblioteca · Catálogo · Descargas) y Ajustes en un diálogo; en Biblioteca, lista a la izquierda y a la derecha el inicio con portadas o la ficha. Barra de descarga abajo mientras quede algo sin terminar, también en pausa o con error.
 - Controles del estilo FluentWinUI3 de Qt sin re-estilar, tema oscuro, acento de marca `#2f81f7`, iconos Segoe Fluent Icons (`image://glyph/<código>` para `icon.source`). Tokens en `qml/Theme.qml`.
-- Menús con `ActionMenu` y `MenuEntry`, diálogos con `ModalDialog` y portadas con los tokens `poster*` de `Theme`: corrigen el ancho fijo de los menús de Fluent, la alineación de sus textos, la barra de título bajo el velo modal y los tamaños entre filas y rejillas.
+- Menús con `ActionMenu` (con `entries`, solo las entradas cuyo `wanted` aplica) y `MenuEntry`, diálogos con `ModalDialog` y portadas con los tokens `poster*` de `Theme`: corrigen el ancho fijo de los menús de Fluent, la alineación de sus textos, la barra de título bajo el velo modal y los tamaños entre filas y rejillas.
 - Teclado, foco visible, nombres accesibles y la acción "pulsar" de accesibilidad en todo control; la ventana debe funcionar desde su ancho mínimo.
 - Las acciones destructivas o automáticas comunican destino, alcance y recuperación (los archivos van a la papelera).
 
