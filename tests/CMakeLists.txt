@@ -24,6 +24,7 @@ function(animehub_add_test name)
 endfunction()
 
 animehub_add_test(api-json-test api_json_test.cpp)
+animehub_add_test(autostart-test autostart_test.cpp)
 animehub_add_test(api-client-test api_client_test.cpp)
 animehub_add_test(library-repository-test library_repository_test.cpp)
 animehub_add_test(mega-test mega_test.cpp)

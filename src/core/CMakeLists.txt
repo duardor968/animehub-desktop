@@ -31,6 +31,7 @@ qt_add_library(animehub-core STATIC
   playback/player.cpp
   playback/player.h
   platform/aes.h
+  platform/autostart.h
   platform/credentials.h
   platform/process_job.h
   platform/trash.h
@@ -42,8 +43,8 @@ qt_add_library(animehub-core STATIC
 
 if(WIN32)
   target_sources(animehub-core PRIVATE
-    platform/aes_win.cpp platform/credentials_win.cpp platform/process_job_win.cpp
-    platform/trash_win.cpp)
+    platform/aes_win.cpp platform/autostart_win.cpp platform/credentials_win.cpp
+    platform/process_job_win.cpp platform/trash_win.cpp)
   target_link_libraries(animehub-core PRIVATE bcrypt advapi32)
 else()
   message(FATAL_ERROR "AnimeHub Desktop needs a platform AES backend for this OS.")

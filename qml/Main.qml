@@ -62,11 +62,19 @@ ApplicationWindow {
         app.tintTitleBar(window, caption, text)
     }
 
-    Component.onCompleted: {
-        tintTitleBar()
-        // INI settings come back as text.
+    // INI settings come back as text.
+    function showAsLeft() {
         if (String(app.settings.value("window/maximized", false)) === "true")
             showMaximized()
+        else
+            show()
+    }
+
+    Component.onCompleted: {
+        tintTitleBar()
+        // Started in the tray, it stays hidden until asked for.
+        if (visible)
+            showAsLeft()
     }
 
     onClosing: close => {
@@ -82,7 +90,8 @@ ApplicationWindow {
     Connections {
         target: window.app
         function onShowRequested() {
-            window.show()
+            if (!window.visible)
+                window.showAsLeft()
             window.raise()
             window.requestActivate()
         }

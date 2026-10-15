@@ -129,14 +129,16 @@ void AppController::start() {
     setupTray();
 }
 
-bool AppController::handOffToRunningInstance(const QString& data_directory) {
+bool AppController::handOffToRunningInstance(const QString& data_directory, bool show) {
     QLocalSocket socket;
     socket.connectToServer(instanceName(data_directory));
     if (!socket.waitForConnected(500)) {
         return false;
     }
-    socket.write("show\n");
-    socket.waitForBytesWritten(500);
+    if (show) {
+        socket.write("show\n");
+        socket.waitForBytesWritten(500);
+    }
     return true;
 }
 
@@ -147,10 +149,18 @@ void AppController::listenForOtherInstances(const QString& data_directory) {
     if (!instance_server_.listen(name)) {
         return;
     }
+    // Another start says "show"; one started in the tray only checks this one is here.
     connect(&instance_server_, &QLocalServer::newConnection, this, [this] {
         while (auto* socket = instance_server_.nextPendingConnection()) {
+            const auto read = [this, socket] {
+                if (socket->readAll().contains("show")) {
+                    emit showRequested();
+                }
+            };
+            connect(socket, &QLocalSocket::readyRead, this, read);
+            // A start that wrote and quit at once may only be read as it goes.
+            connect(socket, &QLocalSocket::disconnected, this, read);
             connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
-            emit showRequested();
         }
     });
 }

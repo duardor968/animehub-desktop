@@ -1,6 +1,11 @@
 #include "app_settings.h"
 
+#include "platform/autostart.h"
+
+#include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
+#include <QStandardPaths>
 
 namespace animehub::app {
 namespace {
@@ -93,6 +98,30 @@ bool AppSettings::notifications() const {
 
 void AppSettings::setNotifications(bool enabled) {
     write(kNotifications, enabled);
+}
+
+QString AppSettings::startCommand() const {
+    auto command = QLatin1Char('"') +
+                   QDir::toNativeSeparators(QCoreApplication::applicationFilePath()) +
+                   QStringLiteral("\" --tray");
+    const QDir data = QFileInfo(settings_.fileName()).absoluteDir();
+    if (data != QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))) {
+        command += QStringLiteral(" --data-dir \"") +
+                   QDir::toNativeSeparators(data.absolutePath()) + QLatin1Char('"');
+    }
+    return command;
+}
+
+bool AppSettings::startWithWindows() const {
+    return platform::autostartCommand().compare(startCommand(), Qt::CaseInsensitive) == 0;
+}
+
+void AppSettings::setStartWithWindows(bool enabled) {
+    if (enabled == startWithWindows()) {
+        return;
+    }
+    platform::setAutostartCommand(enabled ? startCommand() : QString());
+    emit changed();
 }
 
 AppSettings::CloseAction AppSettings::closeAction() const {

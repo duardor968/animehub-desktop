@@ -58,8 +58,8 @@ public:
     [[nodiscard]] QNetworkAccessManager& network() {
         return network_;
     }
-    // Another AnimeHub with the same data folder already runs: it was asked to show itself.
-    [[nodiscard]] static bool handOffToRunningInstance(const QString& data_directory);
+    // Another AnimeHub with this library already runs: it shows its window, if asked to.
+    [[nodiscard]] static bool handOffToRunningInstance(const QString& data_directory, bool show);
     void listenForOtherInstances(const QString& data_directory);
 
     [[nodiscard]] AppSettings* settings() {

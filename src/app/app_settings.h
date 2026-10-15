@@ -23,6 +23,7 @@ class AppSettings final : public QObject {
     Q_PROPERTY(int maxConcurrent READ maxConcurrent WRITE setMaxConcurrent NOTIFY changed)
     Q_PROPERTY(bool systemPlayer READ systemPlayer WRITE setSystemPlayer NOTIFY changed)
     Q_PROPERTY(bool notifications READ notifications WRITE setNotifications NOTIFY changed)
+    Q_PROPERTY(bool startWithWindows READ startWithWindows WRITE setStartWithWindows NOTIFY changed)
     Q_PROPERTY(CloseAction closeAction READ closeAction WRITE setCloseAction NOTIFY changed)
     Q_PROPERTY(JDownloader jdownloader READ jdownloader WRITE setJdownloader NOTIFY changed)
     Q_PROPERTY(
@@ -48,6 +49,10 @@ public:
     void setSystemPlayer(bool system);
     [[nodiscard]] bool notifications() const;
     void setNotifications(bool enabled);
+    // Windows starts this AnimeHub, in the tray, when the user signs in. An entry left by a moved
+    // copy or by another library does not count: turning it on writes this one.
+    [[nodiscard]] bool startWithWindows() const;
+    void setStartWithWindows(bool enabled);
     [[nodiscard]] CloseAction closeAction() const;
     void setCloseAction(CloseAction action);
     [[nodiscard]] JDownloader jdownloader() const;
@@ -71,6 +76,8 @@ signals:
 
 private:
     void write(const QString& key, const QVariant& value);
+    // "C:\…\AnimeHub.exe" --tray, with this library's folder when it is not the default one.
+    [[nodiscard]] QString startCommand() const;
 
     mutable QSettings settings_;
     QString default_download_directory_;

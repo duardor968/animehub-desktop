@@ -12,6 +12,7 @@
 #include <QQuickStyle>
 #include <QStandardPaths>
 #include <QStyleHints>
+#include <QSystemTrayIcon>
 #include <QThread>
 
 namespace {
@@ -55,7 +56,12 @@ int main(int argc, char* argv[]) {
         QStringLiteral("Carpeta para la biblioteca, los ajustes y las cachés."),
         QStringLiteral("carpeta"));
     parser.addOption(data_dir);
+    // How Windows starts it at sign-in: in the tray, without the window.
+    const QCommandLineOption tray(QStringLiteral("tray"),
+                                  QStringLiteral("Empezar en la bandeja, sin abrir la ventana."));
+    parser.addOption(tray);
     parser.process(app);
+    const bool hidden = parser.isSet(tray) && QSystemTrayIcon::isSystemTrayAvailable();
 
     animehub::app::AppPaths paths;
     paths.data = parser.isSet(data_dir)
@@ -66,7 +72,7 @@ int main(int argc, char* argv[]) {
     paths.downloads = QDir(QStandardPaths::writableLocation(QStandardPaths::DownloadLocation))
                           .filePath(QStringLiteral("AnimeHub"));
 
-    if (animehub::app::AppController::handOffToRunningInstance(paths.data)) {
+    if (animehub::app::AppController::handOffToRunningInstance(paths.data, !hidden)) {
         return 0;
     }
 
@@ -85,7 +91,8 @@ int main(int argc, char* argv[]) {
     QQmlApplicationEngine engine;
     engine.setNetworkAccessManagerFactory(&images);
     engine.addImageProvider(QStringLiteral("glyph"), new animehub::app::GlyphProvider);
-    engine.setInitialProperties({{QStringLiteral("app"), QVariant::fromValue(&controller)}});
+    engine.setInitialProperties({{QStringLiteral("app"), QVariant::fromValue(&controller)},
+                                 {QStringLiteral("visible"), !hidden}});
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
         [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);

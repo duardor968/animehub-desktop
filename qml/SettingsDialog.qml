@@ -144,6 +144,14 @@ ModalDialog {
                 onToggled: dialog.settings.notifications = checked
             }
 
+            FieldLabel { text: "Al iniciar Windows" }
+            Switch {
+                leftPadding: 0
+                text: "Abrir AnimeHub en la bandeja"
+                checked: dialog.settings.startWithWindows
+                onToggled: dialog.settings.startWithWindows = checked
+            }
+
             FieldLabel { text: "Al cerrar la ventana" }
             ComboBox {
                 Layout.fillWidth: true
