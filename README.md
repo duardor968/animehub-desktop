@@ -26,9 +26,16 @@ La primera configuración descarga **aria2 1.37.0** y **mpv 0.41.0** desde sus v
 
 ## Instalación
 
-No hay instalador: la carpeta `out/build/windows-release` es la aplicación. Incluye `AnimeHub.exe`, las bibliotecas de Qt, el runtime de MSVC y los motores en `engines/`, así que funciona en un Windows sin Qt ni Visual C++ instalados. Se puede copiar a cualquier sitio.
+Cada versión está en [Releases](https://github.com/duardor968/animehub-desktop/releases), en dos formas:
 
-Los datos (biblioteca, ajustes y cachés) van en `%LOCALAPPDATA%\AnimeHub`; las descargas, por defecto, en `Descargas\AnimeHub`. Para probar sin tocar tu biblioteca:
+- `AnimeHub-<versión>-setup.exe`: instalador para tu usuario, sin permisos de administrador, en `%LOCALAPPDATA%\Programs\AnimeHub`. Añade AnimeHub al menú Inicio y se desinstala desde Configuración → Aplicaciones; desinstalar pregunta antes de borrar la biblioteca y nunca toca los vídeos descargados.
+- `AnimeHub-<versión>-win64.zip`: la misma carpeta para usar desde cualquier sitio, sin instalar.
+
+Las dos funcionan en Windows 10 (1809) o posterior sin Qt ni Visual C++ instalados; `SHA256SUMS.txt` trae sus sumas. Al no estar firmadas, Windows avisa la primera vez que se abren.
+
+Los datos (biblioteca, ajustes y cachés) van en `%LOCALAPPDATA%\AnimeHub`; las descargas, por defecto, en `Descargas\AnimeHub`. Con *Ajustes → General → Al iniciar Windows*, AnimeHub se abre en la bandeja al iniciar sesión.
+
+Compilada aquí, la carpeta `out/build/windows-release` es la aplicación y `.\scripts\package.ps1` la empaqueta como una release. Para probar sin tocar tu biblioteca:
 
 ```powershell
 .\out\build\windows-release\AnimeHub.exe --data-dir "$env:TEMP\animehub-prueba"

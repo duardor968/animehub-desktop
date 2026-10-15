@@ -34,7 +34,7 @@ AnimeHub Desktop es una aplicación nativa C++26 con Qt Quick para Windows: bibl
 ## Toolchain y calidad
 
 - MSVC 2022 x64 y Qt 6.11 MSVC con Qt Image Formats; `scripts/build.ps1` prepara el entorno solo para su proceso (`-Fresh`, `-Configuration Release`, `-SkipTests`).
-- La carpeta Release es la instalación: `cmake/Deploy.cmake` despliega Qt y el runtime de MSVC y quita los plugins que no se usan.
+- La carpeta Release es la instalación: `cmake/Deploy.cmake` despliega Qt y el runtime de MSVC y quita los plugins que no se usan. `scripts/package.ps1` la empaqueta (zip portable e instalador por usuario de Inno Setup, `installer/AnimeHub.iss`) y un tag anotado `vX.Y.Z` igual a la versión de `CMakeLists.txt` la publica desde `.github/workflows/release.yml`; el mensaje del tag son las notas.
 - Formato con `.clang-format` (`clang-format` de Qt Creator); pruebas con Qt Test. Las de descargas y reproducción usan aria2 y mpv reales contra un servidor local: no requieren red.
 - Antes de entregar cambios transversales: formato, `.\scripts\build.ps1` (Debug con `ctest`) y la Release arrancada sin Qt en el `PATH`.
 

@@ -1,0 +1,82 @@
+name: Release
+
+# A tag vX.Y.Z (annotated; its message is the release notes) builds the Release on GitHub,
+# checks the package and its installer, and publishes them. Run by hand, it checks without
+# publishing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: 4.4.1
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.0
+          arch: win64_msvc2022_64
+          modules: qtimageformats
+          cache: true
+          use-official: true
+          email: ${{ secrets.QT_EMAIL }}
+          pw: ${{ secrets.QT_PW }}
+      - name: Check the version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path CMakeLists.txt -Pattern '^\s+VERSION\s+(\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
+          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+            throw "The tag $env:GITHUB_REF_NAME does not match the project version $version."
+          }
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build
+        shell: pwsh
+        run: |
+          $env:QT_ROOT = $env:QT_ROOT_DIR
+          cmake --fresh --preset windows-release
+          cmake --build --preset windows-release
+      - name: Package
+        shell: pwsh
+        run: ./scripts/package.ps1 -Smoke
+      - name: Check the installer
+        shell: pwsh
+        run: |
+          $setup = Get-Item out/package/AnimeHub-*-setup.exe
+          $dir = Join-Path $env:RUNNER_TEMP "AnimeHub"
+          $install = Start-Process -FilePath $setup -Wait -PassThru `
+            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$dir`""
+          if ($install.ExitCode -ne 0) { throw "The installer failed with exit code $($install.ExitCode)." }
+          foreach ($file in "AnimeHub.exe", "LICENSE.txt", "THIRD-PARTY.txt", "engines\aria2\aria2c.exe", "engines\mpv\mpv.exe") {
+            if (-not (Test-Path (Join-Path $dir $file))) { throw "The installer left out $file." }
+          }
+          $uninstall = Start-Process -FilePath (Join-Path $dir "unins000.exe") -Wait -PassThru `
+            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          if ($uninstall.ExitCode -ne 0) { throw "The uninstaller failed with exit code $($uninstall.ExitCode)." }
+          # The uninstaller finishes in a copy of itself; give it a moment to remove the files.
+          $deadline = (Get-Date).AddSeconds(30)
+          while ((Test-Path (Join-Path $dir "AnimeHub.exe")) -and (Get-Date) -lt $deadline) { Start-Sleep 1 }
+          if (Test-Path (Join-Path $dir "AnimeHub.exe")) { throw "The uninstaller left AnimeHub.exe behind." }
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          gh release create $env:GITHUB_REF_NAME --verify-tag --notes-from-tag --title "AnimeHub $version" `
+            (Get-Item out/package/AnimeHub-*-win64.zip).FullName `
+            (Get-Item out/package/AnimeHub-*-setup.exe).FullName `
+            (Get-Item out/package/SHA256SUMS.txt).FullName

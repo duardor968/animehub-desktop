@@ -1,0 +1,32 @@
+AnimeHub Desktop
+https://github.com/duardor968/animehub-desktop
+
+AnimeHub Desktop es software libre bajo la GNU General Public License, versión 3 o
+posterior (LICENSE.txt). El código fuente de cada versión está en el repositorio, en la
+etiqueta de esa versión.
+
+Este paquete incluye software de terceros, cada uno con su licencia:
+
+Qt 6.11.0
+  The Qt Company Ltd. y otros colaboradores.
+  Licencia: GNU Lesser General Public License, versión 3 (licenses/Qt/LGPL-3.0.txt, que
+  remite a la GPL-3.0 de LICENSE.txt).
+  Código fuente: https://download.qt.io/official_releases/qt/6.11/6.11.0/single/
+  Los componentes de terceros que Qt incorpora (PCRE2, HarfBuzz, libpng, libjpeg, libwebp,
+  zlib y otros) y sus licencias: https://doc.qt.io/qt-6/licenses-used-in-qt.html
+
+aria2 1.37.0 (engines/aria2)
+  Tatsuhiro Tsujikawa y otros colaboradores.
+  Licencia: GNU General Public License, versión 2 o posterior, con la excepción para
+  OpenSSL (engines/aria2/COPYING y engines/aria2/LICENSE.OpenSSL).
+  Código fuente: https://github.com/aria2/aria2/releases/tag/release-1.37.0
+
+mpv 0.41.0 (engines/mpv)
+  Los colaboradores de mpv y de las bibliotecas que incluye su compilación para Windows.
+  Licencia: GNU General Public License, versión 2 o posterior (engines/mpv/LICENSE.GPL.txt);
+  autoría y licencias de sus componentes en engines/mpv/Copyright.txt.
+  Código fuente: https://github.com/mpv-player/mpv/releases/tag/v0.41.0
+
+Biblioteca de ejecución de Microsoft Visual C++
+  Microsoft Corporation. Se redistribuye según los términos de redistribución de
+  Visual Studio.

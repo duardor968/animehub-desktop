@@ -1,6 +1,6 @@
 # Makes the Release build folder a complete installation: Qt libraries, plugins and QML modules
 # next to AnimeHub.exe (windeployqt), plus the MSVC runtime, so it runs without Qt or a Visual C++
-# redistributable installed. There is no installer: this folder is what gets copied.
+# redistributable installed. scripts/package.ps1 packs it into the release zip and installer.
 
 function(animehub_deploy_runtime target)
   get_target_property(qmake Qt6::qmake IMPORTED_LOCATION)
