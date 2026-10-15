@@ -295,6 +295,7 @@ private:
     [[nodiscard]] QList<SavedState>
     saveStates(const std::function<bool(const library::EpisodeRecord&)>& chosen) const;
     void offerUndo(const QString& text, QList<SavedState> saved);
+    void offerRestore(const QString& text, QList<library::TrashedFile> files);
     void restore(const QString& slug, const QList<SavedState>& saved);
 
     Services services_;

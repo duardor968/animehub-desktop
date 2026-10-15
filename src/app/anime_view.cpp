@@ -1086,7 +1086,7 @@ void AnimeView::trashFile(double number) {
         emit message(QStringLiteral("No se pudo mover el archivo a la Papelera: está en uso."),
                      true);
     } else {
-        emit message(display::episode(number) + QStringLiteral(" en la Papelera"), false);
+        offerRestore(display::episode(number) + QStringLiteral(" en la Papelera"), trashed->files);
     }
 }
 
@@ -1106,12 +1106,35 @@ void AnimeView::trashWatched() {
         return;
     }
     if (trashed->count > 0) {
-        emit message((trashed->count == 1
+        offerRestore((trashed->count == 1
                           ? QStringLiteral("1 episodio en la Papelera · ")
                           : QStringLiteral("%1 episodios en la Papelera · ").arg(trashed->count)) +
                          display::bytes(trashed->bytes),
-                     false);
+                     trashed->files);
     }
+}
+
+// Files the bin said where it keeps can come back with "Deshacer".
+void AnimeView::offerRestore(const QString& text, QList<library::TrashedFile> files) {
+    files.removeIf([](const library::TrashedFile& file) { return file.trashPath.isEmpty(); });
+    if (files.isEmpty()) {
+        emit message(text, false);
+        return;
+    }
+    undo_ = [this, slug = slug_, files = std::move(files)] {
+        const auto restored = services_.library.restore(slug, files);
+        if (!restored) {
+            emit message(
+                QStringLiteral("No se pudo guardar el cambio: ") + restored.error().message, true);
+        } else if (const auto missing = files.size() - *restored; missing > 0) {
+            emit message(
+                missing == 1
+                    ? QStringLiteral("Un archivo ya no está en la Papelera.")
+                    : QStringLiteral("%1 archivos ya no están en la Papelera.").arg(missing),
+                true);
+        }
+    };
+    emit undoable(text);
 }
 
 void AnimeView::showFile(double number) {

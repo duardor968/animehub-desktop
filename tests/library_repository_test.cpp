@@ -2,6 +2,7 @@
 #include "library/library_service.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QNetworkAccessManager>
 #include <QSignalSpy>
 #include <QSqlError>
@@ -338,17 +339,25 @@ private slots:
         }
         QVERIFY(repository_->setWatchedThrough(slug, 2));
 
-        // The real Recycle Bin stays out of the tests: "moving" deletes, and episode 3 is in use.
+        // The real Recycle Bin stays out of the tests: a folder stands in for it, and episode 3
+        // is in use.
         QNetworkAccessManager network;
         api::ApiClient api(network, {.baseUrl = QUrl(QStringLiteral("http://127.0.0.1:9/"))});
+        QTemporaryDir bin;
         QStringList moved;
-        LibraryService service(*repository_, api, nullptr, [&](const QString& path) {
-            if (path == paths[2]) {
-                return false;
-            }
-            moved.append(path);
-            return QFile::remove(path);
-        });
+        LibraryService service(
+            *repository_, api, nullptr,
+            [&](const QString& path) -> std::optional<QString> {
+                if (path == paths[2]) {
+                    return std::nullopt;
+                }
+                moved.append(path);
+                const auto trash_path = bin.filePath(QFileInfo(path).fileName());
+                return QFile::rename(path, trash_path) ? std::optional(trash_path) : std::nullopt;
+            },
+            [](const QString& trash_path, const QString& path) {
+                return QFile::rename(trash_path, path);
+            });
         QSignalSpy changed(&service, &LibraryService::animeChanged);
 
         const auto watched = service.trashWatched(slug);
@@ -362,6 +371,23 @@ private slots:
         QCOMPARE((*repository_->entry(slug))->downloadedBytes, 700);
         QCOMPARE(changed.size(), 1);
 
+        // Undone: the files and their episodes are back; one already gone from the bin stays out.
+        const auto restored = service.restore(slug, watched->files);
+        QVERIFY2(restored, why(restored));
+        QCOMPARE(*restored, 2);
+        QVERIFY(QFile::exists(paths[0]));
+        QCOMPARE((*repository_->episode(slug, 1))->filePath, paths[0]);
+        QCOMPARE((*repository_->entry(slug))->downloadedBytes, 1000);
+        QCOMPARE(changed.size(), 2);
+        const auto again_trashed = service.trashFiles(slug, {1});
+        QVERIFY(QFile::remove(again_trashed->files.first().trashPath));
+        QCOMPARE(*service.restore(slug, again_trashed->files), 0);
+        QVERIFY((*repository_->episode(slug, 1))->filePath.isEmpty());
+        moved.clear();
+        QCOMPARE(service.trashWatched(slug)->count, 1);
+        QCOMPARE(moved, QStringList{paths[1]});
+        changed.clear();
+
         // Episode 4 was deleted outside AnimeHub: it only loses its path.
         QVERIFY(QFile::remove(paths[3]));
         const auto chosen = service.trashFiles(slug, {3, 4, 9});
@@ -371,12 +397,12 @@ private slots:
         QCOMPARE(chosen->failed, 1);
         QCOMPARE((*repository_->episode(slug, 3))->filePath, paths[2]);
         QVERIFY((*repository_->episode(slug, 4))->filePath.isEmpty());
-        QCOMPARE(moved.size(), 2);
+        QCOMPARE(moved.size(), 1);
 
         // Nothing left to move: nothing changes.
         const auto again = service.trashWatched(slug);
         QCOMPARE(again->count, 0);
-        QCOMPARE(changed.size(), 2);
+        QCOMPARE(changed.size(), 1);
     }
 
     void listsOnlyTheLibrary() {

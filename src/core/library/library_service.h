@@ -9,14 +9,24 @@
 #include <QTimer>
 
 #include <functional>
+#include <optional>
 
 namespace animehub::library {
+
+// An episode's file in the Recycle Bin, and where it goes back to.
+struct TrashedFile {
+    double number = 0;
+    QString path;
+    QString trashPath; // empty when the bin did not say
+    qint64 size = 0;
+};
 
 // Files moved to the Recycle Bin. `failed` ones are still on disk (in use, no permission).
 struct Trashed {
     int count = 0;
     qint64 bytes = 0;
     int failed = 0;
+    QList<TrashedFile> files;
 };
 
 // The library's rules on top of its storage: keeping snapshots and episode lists in sync with
@@ -25,11 +35,13 @@ class LibraryService final : public QObject {
     Q_OBJECT
 
 public:
-    // Moves a file to the Recycle Bin; tests put something harmless in its place.
-    using MoveToTrash = std::function<bool(const QString& path)>;
+    // Moving a file to the Recycle Bin (where it went, nothing when it stays) and back; tests
+    // put something harmless in their place.
+    using MoveToTrash = std::function<std::optional<QString>(const QString& path)>;
+    using RestoreFromTrash = std::function<bool(const QString& trash_path, const QString& path)>;
 
     LibraryService(LibraryRepository& repository, api::ApiClient& api, QObject* parent = nullptr,
-                   MoveToTrash move_to_trash = {});
+                   MoveToTrash move_to_trash = {}, RestoreFromTrash restore_from_trash = {});
 
     [[nodiscard]] LibraryRepository& repository() const {
         return repository_;
@@ -52,6 +64,8 @@ public:
     // episodes no longer have a file. Files already gone only lose their path.
     Stored<Trashed> trashWatched(const QString& slug);
     Stored<Trashed> trashFiles(const QString& slug, const QList<double>& numbers);
+    // Brings trashed files back to their episodes; says how many came back.
+    Stored<int> restore(const QString& slug, const QList<TrashedFile>& files);
 
     // Refreshes metadata and episodes from the API. With `flag_new`, episodes unknown so far are
     // new arrivals (the watcher); otherwise they are simply stored (first sync, browsing).
@@ -89,6 +103,7 @@ private:
     LibraryRepository& repository_;
     api::ApiClient& api_;
     MoveToTrash move_to_trash_;
+    RestoreFromTrash restore_from_trash_;
     QSet<QString> refreshing_;
     QTimer recent_timer_;
     QTimer sweep_timer_;

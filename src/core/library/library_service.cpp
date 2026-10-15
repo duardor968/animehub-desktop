@@ -1,6 +1,7 @@
 #include "library_service.h"
 
-#include <QFile>
+#include "platform/trash.h"
+
 #include <QFileInfo>
 
 namespace animehub::library {
@@ -13,10 +14,11 @@ constexpr int kEpisodesPerPage = 50;
 } // namespace
 
 LibraryService::LibraryService(LibraryRepository& repository, api::ApiClient& api, QObject* parent,
-                               MoveToTrash move_to_trash)
+                               MoveToTrash move_to_trash, RestoreFromTrash restore_from_trash)
     : QObject(parent), repository_(repository), api_(api),
-      move_to_trash_(move_to_trash ? std::move(move_to_trash)
-                                   : [](const QString& path) { return QFile::moveToTrash(path); }) {
+      move_to_trash_(move_to_trash ? std::move(move_to_trash) : platform::moveToTrash),
+      restore_from_trash_(restore_from_trash ? std::move(restore_from_trash)
+                                             : platform::restoreFromTrash) {
     recent_timer_.setInterval(20min);
     connect(&recent_timer_, &QTimer::timeout, this, &LibraryService::checkNow);
     sweep_timer_.setInterval(6h);
@@ -121,12 +123,17 @@ Stored<Trashed> LibraryService::trash(const QString& slug,
         const QFileInfo file(episode.filePath);
         if (file.exists()) {
             const auto size = file.size();
-            if (!move_to_trash_(episode.filePath)) {
+            const auto trash_path = move_to_trash_(episode.filePath);
+            if (!trash_path) {
                 ++trashed.failed;
                 continue;
             }
             ++trashed.count;
             trashed.bytes += size;
+            trashed.files.append({.number = episode.number,
+                                  .path = episode.filePath,
+                                  .trashPath = *trash_path,
+                                  .size = size});
         }
         touched = true;
         if (auto cleared = repository_.clearEpisodeFile(slug, episode.number); !cleared) {
@@ -142,6 +149,30 @@ Stored<Trashed> LibraryService::trash(const QString& slug,
         return std::unexpected(*error);
     }
     return trashed;
+}
+
+Stored<int> LibraryService::restore(const QString& slug, const QList<TrashedFile>& files) {
+    int restored = 0;
+    std::optional<storage::StorageError> error;
+    for (const auto& file : files) {
+        if (file.trashPath.isEmpty() || !restore_from_trash_(file.trashPath, file.path)) {
+            continue;
+        }
+        ++restored;
+        if (auto stored = repository_.setEpisodeFile(slug, file.number, file.path, file.size);
+            !stored) {
+            error = stored.error();
+            break;
+        }
+    }
+    if (restored > 0) {
+        emit animeChanged(slug);
+        emit listChanged();
+    }
+    if (error) {
+        return std::unexpected(*error);
+    }
+    return restored;
 }
 
 void LibraryService::refresh(const QString& slug, bool flag_new) {
