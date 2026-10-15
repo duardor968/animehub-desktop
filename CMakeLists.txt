@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.0)
 
 project(
   AnimeHubDesktop
-  VERSION 0.2.0
+  VERSION 0.2.1
   DESCRIPTION "Native AnimeHub desktop application"
   HOMEPAGE_URL "https://github.com/duardor968/animehub-desktop"
   LANGUAGES CXX
