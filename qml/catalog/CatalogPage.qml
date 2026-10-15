@@ -247,6 +247,7 @@ StackView {
     Shortcut {
         sequences: [StandardKey.Back, "Esc"]
         enabled: stack.active && stack.depth > 1
-        onActivated: stack.pop()
+        // As on the anime's own page, a selection of episodes is emptied first.
+        onActivated: stack.currentItem.selecting ? stack.currentItem.clearSelection() : stack.pop()
     }
 }
