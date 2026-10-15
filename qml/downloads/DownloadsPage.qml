@@ -88,20 +88,6 @@ Item {
         cancelDialog.consequence = "Se borrarán los " + partial + " descargados."
         cancelDialog.open()
     }
-    // Opens a menu under its button, right edges aligned, as wide as its widest visible entry.
-    function popupUnder(menu, anchor) {
-        // As ActionMenu sizes it when shown: never narrower than its own implicit width.
-        let widest = menu.implicitWidth - menu.leftPadding - menu.rightPadding
-        for (let i = 0; i < menu.count; ++i) {
-            const item = menu.itemAt(i)
-            if (item && item.visible)
-                widest = Math.max(widest, item.implicitWidth)
-        }
-        const width = widest + menu.leftPadding + menu.rightPadding
-        // Fluent draws the menu past its box by its (negative) inset: the drawn edges align.
-        menu.popup(anchor, anchor.width - width + menu.rightInset, anchor.height)
-    }
-
     function askRemove(slug, title, files, diskText) {
         if (files === 0) {
             downloads.forgetSeries(slug)
@@ -238,7 +224,7 @@ Item {
                     barWidth: page.barWidth
                     displacement: page.displacement(index)
                     onToggled: page.toggle(slug)
-                    onMenuRequested: anchor => queueMenu.show(row, anchor)
+                    onMenuRequested: anchor => queueMenu.showFor(row, anchor)
                     onEpisodeCancelRequested: (taskId, label, partial) =>
                         page.askCancelEpisode(taskId, label, title, partial)
                     onMoveRequested: step => page.downloads.moveSeries(index, index + step)
@@ -284,7 +270,7 @@ Item {
                     expanded: page.expanded[slug] === true
                     barWidth: page.barWidth
                     onToggled: page.toggle(slug)
-                    onMenuRequested: anchor => completedMenu.show(done, anchor)
+                    onMenuRequested: anchor => completedMenu.showFor(done, anchor)
                 }
             }
         }
@@ -300,34 +286,43 @@ Item {
         property bool hasFolder
         property string consequence
 
-        function show(row, anchor) {
+        entries: [nowEntry, folderEntry, animeEntry, cancelSeparator, cancelEntry]
+
+        function showFor(row, anchor) {
             slug = row.slug
             name = row.title
             first = row.first
             hasFolder = row.hasFolder
             consequence = row.cancelText
-            page.popupUnder(queueMenu, anchor)
+            queueMenu.show(anchor, true)
         }
 
         MenuEntry {
+            id: nowEntry
+            property bool wanted: !queueMenu.first
             text: "Descargar ahora"
-            visible: !queueMenu.first
             glyph: Theme.icon.download
             onTriggered: page.downloads.prioritize(queueMenu.slug)
         }
         MenuEntry {
+            id: folderEntry
             text: "Abrir la carpeta"
             enabled: queueMenu.hasFolder
             glyph: Theme.icon.folder
             onTriggered: page.downloads.openSeriesFolder(queueMenu.slug)
         }
         MenuEntry {
+            id: animeEntry
             text: "Ir al anime"
             glyph: Theme.icon.library
             onTriggered: page.openAnime(queueMenu.slug)
         }
-        MenuSeparator {}
+        MenuSeparator {
+            id: cancelSeparator
+            property bool separator: true
+        }
         MenuEntry {
+            id: cancelEntry
             text: queueMenu.consequence !== "" ? "Cancelar la descarga…" : "Cancelar la descarga"
             glyph: Theme.icon.cancel
             onTriggered: page.askCancel(queueMenu.slug, queueMenu.name, queueMenu.consequence)
@@ -343,12 +338,12 @@ Item {
         property int files
         property string diskText
 
-        function show(row, anchor) {
+        function showFor(row, anchor) {
             slug = row.slug
             name = row.title
             files = row.filesOnDisk
             diskText = row.diskText
-            page.popupUnder(completedMenu, anchor)
+            completedMenu.show(anchor, true)
         }
 
         MenuEntry {

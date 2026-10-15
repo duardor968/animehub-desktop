@@ -33,7 +33,7 @@ Item {
         continueDialog.open()
     }
 
-    OptionsMenu {
+    ActionMenu {
         id: menu
 
         entries: [watchedEntry, throughEntry, positionEntry, fileSeparator, cancelEntry, revealEntry,

@@ -3,7 +3,7 @@ import QtQuick.Controls
 import AnimeHub
 
 // A menu item laid out like WinUI's MenuFlyout: its icon, or its check mark, in one column and
-// every text in the next, whatever the item carries. Hidden entries take no room.
+// every text in the next, whatever the item carries.
 MenuItem {
     id: entry
 
@@ -12,7 +12,6 @@ MenuItem {
 
     // Qt aligns the text of a menu's items to the widest padding; this one leaves the icon column.
     implicitTextPadding: 16 + spacing
-    height: visible ? implicitHeight : 0
 
     indicator: Glyph {
         x: entry.mirrored ? entry.width - width - entry.rightPadding : entry.leftPadding

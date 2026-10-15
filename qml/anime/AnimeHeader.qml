@@ -300,7 +300,7 @@ Item {
         }
     }
 
-    OptionsMenu {
+    ActionMenu {
         id: moreMenu
 
         // Checked when the menu opens: the folder appears with the first download.

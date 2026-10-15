@@ -103,7 +103,7 @@ Row {
         onClicked: downloadMenu.show(more)
     }
 
-    OptionsMenu {
+    ActionMenu {
         id: downloadMenu
 
         entries: [missingEntry, unwatchedEntry, rangeEntry, chooseEntry]
