@@ -48,6 +48,9 @@ ItemDelegate {
     height: 76
     leftPadding: 32
     rightPadding: 24
+    // The hover and focus marks start next to the content, not at the panel's edge.
+    leftInset: 16
+    rightInset: 8
     Accessible.name: label + (title ? ", " + title : "") + (status ? ", " + status : "")
                      + (selected ? ", seleccionado" : "")
     onDoubleClicked: if (hasFile) view.play(number)
