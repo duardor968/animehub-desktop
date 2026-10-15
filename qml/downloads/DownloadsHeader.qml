@@ -153,12 +153,12 @@ Rectangle {
                 display: AbstractButton.IconOnly
                 // The icon and Fluent's own side padding; narrower squeezes the icon.
                 implicitWidth: 40
-                text: root.paused ? "Reanudar" : "Pausar"
+                // As Steam's, and as the bottom bar's and the tray's: every download.
+                text: root.paused ? "Reanudar las descargas" : "Pausar las descargas"
                 icon.source: Theme.source(root.paused ? Theme.icon.download : Theme.icon.pause)
                 ToolTip.visible: hovered
                 ToolTip.text: text
-                onClicked: root.paused ? root.downloads.resumeSeries(root.downloads.headerSlug)
-                                       : root.downloads.pauseSeries(root.downloads.headerSlug)
+                onClicked: root.paused ? root.downloads.resumeAll() : root.downloads.pauseAll()
             }
 
             ColumnLayout {
@@ -195,14 +195,11 @@ Rectangle {
 
                     spacing: 4
 
-                    // A tool button: as narrow as its chevron alone, which says it in narrow windows.
+                    // One label for both states, so nothing beside it moves; the chevron turns.
                     ToolButton {
-                        display: subject.width >= 440 ? AbstractButton.TextBesideIcon
-                                                      : AbstractButton.IconOnly
-                        text: root.expanded ? "Ocultar episodios" : "Ver episodios"
+                        text: "Episodios"
                         icon.source: Theme.source(root.expanded ? "e70e" : "e70d")
-                        ToolTip.visible: hovered && display === AbstractButton.IconOnly
-                        ToolTip.text: text
+                        Accessible.description: root.expanded ? "Desplegados" : "Plegados"
                         onClicked: root.toggled(actions.slug)
                     }
                     ToolButton {
@@ -227,7 +224,9 @@ Rectangle {
         anchors.bottomMargin: 28
         spacing: 28
 
+        // Narrow windows keep the series' line whole: the figures stay, the graph goes.
         SpeedGraph {
+            visible: root.width >= 1000
             Layout.preferredWidth: root.wide ? 260 : 160
             Layout.preferredHeight: 88
             samples: root.downloads.speedSamples

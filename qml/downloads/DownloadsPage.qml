@@ -110,26 +110,15 @@ Item {
     }
 
     // In the header's corner; the window's gear, right above, opens the download settings.
-    RowLayout {
+    Button {
         id: toolbar
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.rightMargin: 32
         anchors.topMargin: 16
-        spacing: 8
-
-        Button {
-            visible: page.downloads.activeCount > 0 || page.downloads.anyPaused
-            text: page.downloads.activeCount > 0 ? "Pausar todo" : "Reanudar todo"
-            icon.source: Theme.source(page.downloads.activeCount > 0 ? Theme.icon.pause : Theme.icon.download)
-            onClicked: page.downloads.activeCount > 0 ? page.downloads.pauseAll() : page.downloads.resumeAll()
-        }
-
-        Button {
-            text: "Abrir la carpeta"
-            icon.source: Theme.source(Theme.icon.folder)
-            onClicked: page.app.openDownloadFolder()
-        }
+        text: "Abrir la carpeta de descargas"
+        icon.source: Theme.source(Theme.icon.folder)
+        onClicked: page.app.openDownloadFolder()
     }
 
     Flickable {

@@ -34,6 +34,8 @@ Item {
     // How far it steps aside while another row is dragged over it.
     property real displacement
     readonly property int actionsWidth: 84
+    // Narrow windows: actions keep their icon and say their name in a tooltip.
+    readonly property bool compact: barWidth < 160
     // Where episodes start: under the title, past the art.
     readonly property int indent: 32 + 128 + 16
 
@@ -206,12 +208,17 @@ Item {
                             height: 1
                         }
 
-                        Button {
+                        // A tool button: as narrow as its icon alone in narrow windows.
+                        ToolButton {
                             id: retry
                             anchors.verticalCenter: parent.verticalCenter
                             visible: root.failed > 0
-                            flat: true
+                            display: root.compact ? AbstractButton.IconOnly
+                                                  : AbstractButton.TextOnly
                             text: "Reintentar fallidos"
+                            icon.source: Theme.source(Theme.icon.retry)
+                            ToolTip.visible: hovered && root.compact
+                            ToolTip.text: text
                             onClicked: root.downloads.retryFailed(root.slug)
                         }
                     }
@@ -236,10 +243,21 @@ Item {
                 Button {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Math.min(implicitWidth, parent.width)
-                    visible: !root.queued && root.watchText !== ""
+                    visible: !root.queued && root.watchText !== "" && !root.compact
                     text: root.watchText
                     icon.source: Theme.source(Theme.icon.play)
+                    onClicked: root.downloads.watchNext(root.slug)
+                }
+
+                ToolButton {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: !root.queued && root.watchText !== "" && root.compact
+                    display: AbstractButton.IconOnly
+                    text: root.watchText
+                    icon.source: Theme.source(Theme.icon.play)
+                    ToolTip.visible: hovered
+                    ToolTip.text: text
                     onClicked: root.downloads.watchNext(root.slug)
                 }
             }
