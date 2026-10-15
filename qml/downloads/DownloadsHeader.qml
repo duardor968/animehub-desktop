@@ -198,6 +198,7 @@ Rectangle {
                     // One label for both states, so nothing beside it moves; the chevron turns.
                     ToolButton {
                         text: "Episodios"
+                        font.pixelSize: Theme.body
                         icon.source: Theme.source(root.expanded ? "e70e" : "e70d")
                         Accessible.description: root.expanded ? "Desplegados" : "Plegados"
                         onClicked: root.toggled(actions.slug)

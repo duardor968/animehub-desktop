@@ -170,6 +170,7 @@ void DownloadsView::rebuild() {
         int waiting = 0;
         int active = 0;
         qint64 bytes = 0;
+        qint64 done_bytes = 0;
         qint64 total = 0;
         qint64 partial = 0;
         QList<double> partial_numbers; // episodes cancelling would delete bytes of
@@ -187,6 +188,7 @@ void DownloadsView::rebuild() {
             switch (task.state) {
             case TaskState::Completed:
                 ++done;
+                done_bytes += bytesOf(task);
                 break;
             case TaskState::Failed:
                 ++failed;
@@ -249,11 +251,13 @@ void DownloadsView::rebuild() {
             }
         }
         summary.append(QStringLiteral("%1 de %2").arg(done).arg(episodes));
+        // Next to a count of finished episodes, their size; what is half done only shows in
+        // the proportion of the whole.
         QString size;
         if (group.inLine && totals_known && total > 0) {
             size = display::bytes(bytes) + QStringLiteral(" de ") + display::bytes(total);
-        } else if (bytes > 0) {
-            size = display::bytes(bytes);
+        } else if (done_bytes > 0) {
+            size = display::bytes(done_bytes);
         }
         if (!size.isEmpty()) {
             summary.append(size);

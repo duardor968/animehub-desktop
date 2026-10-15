@@ -216,6 +216,7 @@ Item {
                             display: root.compact ? AbstractButton.IconOnly
                                                   : AbstractButton.TextOnly
                             text: "Reintentar fallidos"
+                            font.pixelSize: Theme.body
                             icon.source: Theme.source(Theme.icon.retry)
                             ToolTip.visible: hovered && root.compact
                             ToolTip.text: text
