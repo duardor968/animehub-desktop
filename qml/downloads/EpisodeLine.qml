@@ -16,6 +16,14 @@ Item {
     required property string detail
     required property bool problem
     required property bool hasFile
+    required property string source
+    required property string engine
+    required property string connection
+    required property string destination
+    required property string phase
+    required property bool canPause
+    required property bool canResume
+    required property bool canRetry
     required property string partial
 
     required property DownloadsView downloads
@@ -27,14 +35,13 @@ Item {
 
     readonly property bool completed: taskState === "completed"
     readonly property bool failed: taskState === "failed"
-    readonly property bool pausable: taskState === "queued" || taskState === "resolving"
-                                     || taskState === "downloading" || taskState === "waiting"
+    readonly property bool pausable: canPause
     readonly property bool running: taskState === "resolving" || taskState === "downloading"
                                     || taskState === "verifying"
 
-    implicitHeight: 52
+    implicitHeight: 72
     Accessible.role: Accessible.ListItem
-    Accessible.name: label + ", " + detail
+    Accessible.name: label + ", " + engine + ", " + connection + ", " + detail + ", " + destination
 
     RowLayout {
         anchors.fill: parent
@@ -65,10 +72,23 @@ Item {
 
             Label {
                 Layout.fillWidth: true
-                text: root.detail
+                text: root.engine + (root.source ? " · " + root.source : "") + (root.connection ? " · " + root.connection : "") + " · " + root.detail
                 color: root.problem ? Theme.danger : Theme.muted
                 font.pixelSize: Theme.caption
                 elide: Text.ElideRight
+                ToolTip.visible: detailHover.hovered
+                ToolTip.text: text
+                HoverHandler { id: detailHover }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: root.destination
+                color: Theme.muted
+                font.pixelSize: Theme.caption
+                elide: Text.ElideMiddle
+                ToolTip.visible: destinationHover.hovered
+                ToolTip.text: root.destination
+                HoverHandler { id: destinationHover }
             }
         }
 
@@ -82,7 +102,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
                 // Only what has started: a column of empty tracks says nothing.
-                visible: !root.completed && !root.failed && (root.progress > 0 || root.running)
+                visible: !root.completed && (root.progress > 0 || root.running)
                 value: root.progress
             }
         }
@@ -95,7 +115,7 @@ Item {
             spacing: 4
 
             ToolButton {
-                visible: root.completed ? root.hasFile : true
+                visible: root.completed ? root.hasFile : !(root.failed && root.engine === "JDownloader" && !root.canRetry)
                 icon.source: Theme.source(root.completed ? Theme.icon.folder : Theme.icon.cancel)
                 display: AbstractButton.IconOnly
                 text: root.completed ? "Mostrar en la carpeta"
@@ -113,7 +133,7 @@ Item {
             }
 
             ToolButton {
-                visible: root.pausable || root.taskState === "paused" || root.failed
+                visible: root.pausable || root.canResume || root.canRetry
                          || (root.completed && root.hasFile)
                 icon.source: Theme.source(root.completed ? Theme.icon.play
                                           : root.failed ? Theme.icon.retry

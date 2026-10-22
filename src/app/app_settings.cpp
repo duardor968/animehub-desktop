@@ -37,11 +37,15 @@ void AppSettings::write(const QString& key, const QVariant& value) {
 }
 
 QString AppSettings::downloadDirectory() const {
+    if (isolated_)
+        return QDir::cleanPath(default_download_directory_);
     return QDir::cleanPath(
         settings_.value(kDownloadDirectory, default_download_directory_).toString());
 }
 
 void AppSettings::setDownloadDirectory(const QString& directory) {
+    if (isolated_)
+        return;
     if (!directory.isEmpty()) {
         write(kDownloadDirectory, QDir::cleanPath(directory));
     }
@@ -113,10 +117,14 @@ QString AppSettings::startCommand() const {
 }
 
 bool AppSettings::startWithWindows() const {
+    if (isolated_)
+        return false;
     return platform::autostartCommand().compare(startCommand(), Qt::CaseInsensitive) == 0;
 }
 
 void AppSettings::setStartWithWindows(bool enabled) {
+    if (isolated_)
+        return;
     if (enabled == startWithWindows()) {
         return;
     }
@@ -181,6 +189,10 @@ QList<api::Provider> AppSettings::providers() const {
             providers.append(*provider);
         }
     }
+    if (preferredJDownloader()) {
+        providers.append(api::Provider::Mp4Upload);
+        providers.append(api::Provider::OneFichier);
+    }
     return providers;
 }
 
@@ -188,7 +200,54 @@ downloads::DownloadSettings AppSettings::downloads() const {
     return {.directory = downloadDirectory(),
             .providers = providers(),
             .audio = dubbed() ? api::Audio::Dub : api::Audio::Sub,
-            .maxConcurrent = maxConcurrent()};
+            .maxConcurrent = maxConcurrent(),
+            .engine = !preferredJDownloader() ? downloads::DownloadEngine::Native
+                      : cloudJDownloader()    ? downloads::DownloadEngine::JDownloaderCloud
+                                              : downloads::DownloadEngine::JDownloaderLocal,
+            .jdEndpoint = QUrl(jdEndpoint()),
+            .jdDeviceId = jdownloaderDevice()};
+}
+
+bool AppSettings::preferredJDownloader() const {
+    return settings_.value(QStringLiteral("downloads/jdownloader"), false).toBool();
+}
+void AppSettings::setPreferredJDownloader(bool value) {
+    write(QStringLiteral("downloads/jdownloader"), value);
+}
+bool AppSettings::cloudJDownloader() const {
+    return settings_.value(QStringLiteral("jdownloader/cloudEngine"), false).toBool();
+}
+void AppSettings::setCloudJDownloader(bool value) {
+    write(QStringLiteral("jdownloader/cloudEngine"), value);
+}
+QString AppSettings::jdEndpoint() const {
+    return settings_
+        .value(QStringLiteral("jdownloader/endpoint"), QStringLiteral("http://127.0.0.1:3128"))
+        .toString();
+}
+void AppSettings::setJdEndpoint(const QString& value) {
+    const QUrl url(value.trimmed());
+    if (url.scheme() == QStringLiteral("http") &&
+        (url.host() == QStringLiteral("127.0.0.1") || url.host() == QStringLiteral("::1")) &&
+        url.userInfo().isEmpty())
+        write(QStringLiteral("jdownloader/endpoint"), url.toString());
+}
+QString AppSettings::jdExecutable() const {
+    return settings_.value(QStringLiteral("jdownloader/executable")).toString();
+}
+void AppSettings::setJdExecutable(const QString& value) {
+    write(QStringLiteral("jdownloader/executable"), value);
+}
+int AppSettings::remoteProfileRevision(const QByteArray& fingerprint) {
+    auto revision = settings_.value(QStringLiteral("remote/profileRevision"), 0).toInt();
+    if (settings_.value(QStringLiteral("remote/profileFingerprint")).toByteArray() != fingerprint ||
+        revision < 1) {
+        ++revision;
+        settings_.setValue(QStringLiteral("remote/profileRevision"), revision);
+        settings_.setValue(QStringLiteral("remote/profileFingerprint"), fingerprint);
+        settings_.sync();
+    }
+    return revision;
 }
 
 QVariant AppSettings::value(const QString& key, const QVariant& fallback) const {

@@ -51,7 +51,11 @@ Stored<void> LibraryService::add(const AnimeRecord& snapshot) {
 }
 
 Stored<void> LibraryService::remove(const QString& slug) {
-    return changed(repository_.setInLibrary(slug, false), slug, true);
+    return changed(repository_.removePersonalRecord(slug), slug, true);
+}
+
+Stored<void> LibraryService::archive(const QString& slug, bool archived) {
+    return changed(repository_.setArchived(slug, archived), slug, true);
 }
 
 Stored<void> LibraryService::setFlag(const QString& slug, Flag flag, bool value) {
@@ -97,8 +101,9 @@ Stored<void> LibraryService::seen(const QString& slug) {
 }
 
 Stored<Trashed> LibraryService::trashWatched(const QString& slug) {
-    return trash(slug,
-                 [](const EpisodeRecord& episode) { return episode.state == WatchState::Watched; });
+    return trash(
+        slug, [](const EpisodeRecord& episode) { return episode.state == WatchState::Watched; },
+        true);
 }
 
 Stored<Trashed> LibraryService::trashFiles(const QString& slug, const QList<double>& numbers) {
@@ -108,38 +113,90 @@ Stored<Trashed> LibraryService::trashFiles(const QString& slug, const QList<doub
 }
 
 Stored<Trashed> LibraryService::trash(const QString& slug,
-                                      const std::function<bool(const EpisodeRecord&)>& chosen) {
+                                      const std::function<bool(const EpisodeRecord&)>& chosen,
+                                      bool skip_shared) {
     const auto episodes = repository_.episodes(slug);
     if (!episodes) {
         return std::unexpected(episodes.error());
+    }
+    // Preflight the entire request before touching disk: a physical edition may represent
+    // several episodes or works, and the selection must cover every one of its mappings.
+    QSet<QString> protected_paths;
+    QSet<QString> checked_paths;
+    for (const auto& episode : *episodes) {
+        if (!chosen(episode))
+            continue;
+        const auto locations = repository_.episodeLocations(slug, episode.number);
+        if (!locations)
+            return std::unexpected(locations.error());
+        for (const auto& location : *locations) {
+            if (checked_paths.contains(location.path))
+                continue;
+            checked_paths.insert(location.path);
+            const auto mappings = repository_.episodeFileMappings(location.path);
+            if (!mappings)
+                return std::unexpected(mappings.error());
+            for (const auto& [mapped_slug, mapped_number] : *mappings) {
+                const auto mapped = repository_.episode(mapped_slug, mapped_number);
+                if (!mapped)
+                    return std::unexpected(mapped.error());
+                if (mapped_slug != slug || !*mapped || !chosen(**mapped)) {
+                    if (!skip_shared) {
+                        return std::unexpected(storage::StorageError{
+                            QStringLiteral(
+                                "El archivo %1 contiene otros episodios fuera de la selección. "
+                                "Selecciona todos sus episodios para moverlo a la papelera.")
+                                .arg(QFileInfo(location.path).fileName())});
+                    }
+                    protected_paths.insert(location.path);
+                    break;
+                }
+            }
+        }
     }
     Trashed trashed;
     std::optional<storage::StorageError> error;
     bool touched = false;
     for (const auto& episode : *episodes) {
-        if (episode.filePath.isEmpty() || !chosen(episode)) {
+        if (!chosen(episode))
             continue;
-        }
-        const QFileInfo file(episode.filePath);
-        if (file.exists()) {
-            const auto size = file.size();
-            const auto trash_path = move_to_trash_(episode.filePath);
-            if (!trash_path) {
-                ++trashed.failed;
+        const auto locations = repository_.episodeLocations(slug, episode.number);
+        if (!locations)
+            return std::unexpected(locations.error());
+        for (const auto& location : *locations) {
+            if (protected_paths.contains(location.path))
                 continue;
+            const QFileInfo file(location.path);
+            const auto already_moved =
+                std::ranges::find(trashed.files, location.path, &TrashedFile::path);
+            if (already_moved != trashed.files.end()) {
+                auto mapping = *already_moved;
+                mapping.number = episode.number;
+                trashed.files.append(std::move(mapping));
             }
-            ++trashed.count;
-            trashed.bytes += size;
-            trashed.files.append({.number = episode.number,
-                                  .path = episode.filePath,
-                                  .trashPath = *trash_path,
-                                  .size = size});
+            if (file.exists()) {
+                const auto size = file.size();
+                const auto trash_path = move_to_trash_(location.path);
+                if (!trash_path) {
+                    ++trashed.failed;
+                    continue;
+                }
+                ++trashed.count;
+                trashed.bytes += size;
+                trashed.files.append({.number = episode.number,
+                                      .path = location.path,
+                                      .trashPath = *trash_path,
+                                      .size = size});
+            }
+            touched = true;
+            if (auto cleared = repository_.removeEpisodeFile(slug, episode.number, location.path);
+                !cleared) {
+                error = cleared.error();
+                break;
+            }
         }
-        touched = true;
-        if (auto cleared = repository_.clearEpisodeFile(slug, episode.number); !cleared) {
-            error = cleared.error();
+        if (error)
             break;
-        }
     }
     if (touched) {
         emit animeChanged(slug);
@@ -153,12 +210,18 @@ Stored<Trashed> LibraryService::trash(const QString& slug,
 
 Stored<int> LibraryService::restore(const QString& slug, const QList<TrashedFile>& files) {
     int restored = 0;
+    QSet<QString> restored_paths;
     std::optional<storage::StorageError> error;
     for (const auto& file : files) {
-        if (file.trashPath.isEmpty() || !restore_from_trash_(file.trashPath, file.path)) {
+        if (file.trashPath.isEmpty()) {
             continue;
         }
-        ++restored;
+        if (!restored_paths.contains(file.path)) {
+            if (!restore_from_trash_(file.trashPath, file.path))
+                continue;
+            restored_paths.insert(file.path);
+            ++restored;
+        }
         if (auto stored = repository_.setEpisodeFile(slug, file.number, file.path, file.size);
             !stored) {
             error = stored.error();
@@ -203,10 +266,22 @@ void LibraryService::refresh(const api::AnimeDetail& detail, bool flag_new) {
 
 void LibraryService::store(const api::AnimeDetail& detail, bool flag_new) {
     const auto& slug = detail.slug;
-    if (auto saved = repository_.saveSnapshot(snapshotOf(detail)); !saved) {
-        qWarning("library: %s", qPrintable(saved.error().message));
+    const auto discovered = repository_.discoverFranchiseRelations(detail);
+    if (!discovered) {
+        qWarning("library: %s", qPrintable(discovered.error().message));
+    } else if (!discovered->isEmpty()) {
+        QStringList notify;
+        for (const auto& added : *discovered) {
+            emit animeChanged(added);
+            const auto record = repository_.anime(added);
+            if (record && *record && (*record)->notify)
+                notify.append(added);
+        }
+        if (!notify.isEmpty())
+            emit newFranchiseMembers(notify);
     }
     emit animeChanged(slug);
+    emit listChanged();
     // Episodes arrive in ascending pages of fifty; a known list only needs its tail.
     const auto record = repository_.anime(slug);
     const bool synced = record && *record && (*record)->episodesSyncedAt.isValid();
@@ -269,7 +344,7 @@ void LibraryService::checkNow() {
             if (!home) {
                 return;
             }
-            const auto entries = repository_.entries();
+            const auto entries = repository_.followedEntries();
             if (!entries) {
                 return;
             }
@@ -289,14 +364,23 @@ void LibraryService::checkNow() {
 }
 
 void LibraryService::sweep() {
-    const auto entries = repository_.entries();
+    const auto entries = repository_.followedEntries();
     if (!entries) {
         return;
     }
     int delay = 0;
+    QStringList grouped;
+    const auto groups = repository_.franchises();
+    if (groups) {
+        for (const auto& group : *groups)
+            grouped.append(group.members);
+    }
+    QStringList finished;
     for (const auto& entry : *entries) {
         if (entry.status != api::AnimeStatus::Airing &&
             entry.status != api::AnimeStatus::Upcoming) {
+            if (grouped.contains(entry.slug))
+                finished.append(entry.slug);
             continue;
         }
         // Spread the requests out; the API is shared with everyone.
@@ -304,6 +388,19 @@ void LibraryService::sweep() {
                            [this, slug = entry.slug] { refresh(slug, true); });
         delay += 3000;
     }
+    // Bound catalog checks for finished franchises; rotate so a large library is not starved.
+    const auto count = std::min<qsizetype>(finished.size(), 8);
+    for (qsizetype index = 0; index < count; ++index) {
+        const auto slug = finished.at((finished_sweep_offset_ + index) % finished.size());
+        QTimer::singleShot(std::chrono::milliseconds(delay), this, [this, slug] {
+            const auto current = repository_.anime(slug);
+            if (current && *current && (*current)->inLibrary && (*current)->notify)
+                refresh(slug, true);
+        });
+        delay += 3000;
+    }
+    if (!finished.isEmpty())
+        finished_sweep_offset_ = (finished_sweep_offset_ + count) % finished.size();
 }
 
 void LibraryService::announce(const QString& slug) {
@@ -318,7 +415,7 @@ void LibraryService::verifyFiles() {
     }
     QSet<QString> touched;
     for (const auto& [slug, number, path] : *files) {
-        if (!QFileInfo::exists(path) && repository_.clearEpisodeFile(slug, number)) {
+        if (!QFileInfo::exists(path) && repository_.removeEpisodeFile(slug, number, path)) {
             touched.insert(slug);
         }
     }

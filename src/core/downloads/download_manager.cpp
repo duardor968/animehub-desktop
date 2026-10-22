@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QNetworkProxy>
 #include <QPointer>
 #include <QStorageInfo>
 #include <QThreadPool>
@@ -70,6 +71,7 @@ QString episodeLabel(double number) {
 DownloadManager::DownloadManager(Services services, std::function<DownloadSettings()> settings,
                                  QObject* parent)
     : QObject(parent), services_(services), settings_(std::move(settings)) {
+    jd_network_.setProxy(QNetworkProxy::NoProxy);
     poll_timer_.setInterval(700);
     connect(&poll_timer_, &QTimer::timeout, this, &DownloadManager::poll);
     wake_timer_.setSingleShot(true);
@@ -81,7 +83,7 @@ DownloadManager::DownloadManager(Services services, std::function<DownloadSettin
         }
         // Transfers in flight died with the engine; they resume once it is back.
         for (auto it = tasks_.begin(); it != tasks_.end(); ++it) {
-            if (it->state == TaskState::Downloading) {
+            if (it->state == TaskState::Downloading && it->engine == DownloadEngine::Native) {
                 live_[it.key()].gid.clear();
                 retryLater(it.key(), TaskIssue::Engine, message);
             }
@@ -107,13 +109,16 @@ bool DownloadManager::isNative(api::Provider provider) {
     return provider == api::Provider::Mega || provider == api::Provider::Pixeldrain;
 }
 
-void DownloadManager::start() {
+void DownloadManager::start(bool transfers) {
     if (started_) {
         return;
     }
     started_ = true;
-    if (auto requeued = services_.repository.requeueInterrupted(); !requeued) {
-        qWarning("download queue: %s", qPrintable(requeued.error().message));
+    transfers_enabled_ = transfers;
+    if (transfers_enabled_) {
+        if (auto requeued = services_.repository.requeueInterrupted(); !requeued) {
+            qWarning("download queue: %s", qPrintable(requeued.error().message));
+        }
     }
     if (auto all = services_.repository.all()) {
         for (const auto& task : *all) {
@@ -121,13 +126,21 @@ void DownloadManager::start() {
         }
     }
     // Earlier versions numbered every task on its own; a series now shares one place.
-    applySeriesOrder(seriesOrder(), false);
+    if (transfers_enabled_)
+        applySeriesOrder(seriesOrder(), false);
     emit loaded();
+    if (!transfers_enabled_)
+        return;
     services_.aria2.start();
     pump();
 }
 
 void DownloadManager::shutdown(std::function<void()> done) {
+    if (!transfers_enabled_) {
+        stopping_ = true;
+        done();
+        return;
+    }
     stopping_ = true;
     poll_timer_.stop();
     wake_timer_.stop();
@@ -244,6 +257,8 @@ QString DownloadManager::basePathFor(const QString& directory, const QString& an
 std::expected<qint64, QString> DownloadManager::enqueue(const QString& slug, double number,
                                                         const QString& anime_title,
                                                         TaskOrigin origin) {
+    if (!transfers_enabled_)
+        return std::unexpected(QStringLiteral("Las descargas están desactivadas en este perfil."));
     if (const auto existing = activeTaskFor(slug, number)) {
         if (existing->state == TaskState::Failed) {
             retry(existing->id);
@@ -256,9 +271,10 @@ std::expected<qint64, QString> DownloadManager::enqueue(const QString& slug, dou
     if (settings.directory.isEmpty() || !QDir().mkpath(settings.directory)) {
         return std::unexpected(QStringLiteral("La carpeta de descargas no está disponible."));
     }
-    auto created =
-        services_.repository.create(slug, number, anime_title, settings.audio, origin,
-                                    basePathFor(settings.directory, anime_title, number));
+    auto created = services_.repository.create(slug, number, anime_title, settings.audio, origin,
+                                               basePathFor(settings.directory, anime_title, number),
+                                               settings.engine, settings.jdEndpoint.toString(),
+                                               settings.jdDeviceId);
     if (!created) {
         return std::unexpected(created.error().message);
     }
@@ -268,13 +284,45 @@ std::expected<qint64, QString> DownloadManager::enqueue(const QString& slug, dou
     return created->id;
 }
 
-std::expected<Enqueued, QString> DownloadManager::enqueueMany(const QString& slug,
-                                                              const QList<double>& numbers,
-                                                              const QString& anime_title,
-                                                              TaskOrigin origin) {
+std::expected<Enqueued, QString>
+DownloadManager::enqueueMany(const QString& slug, const QList<double>& numbers,
+                             const QString& anime_title, TaskOrigin origin,
+                             const QString& sourceRequestId,
+                             std::optional<DownloadSettings> fixedSettings) {
+    if (!transfers_enabled_)
+        return std::unexpected(QStringLiteral("Las descargas están desactivadas en este perfil."));
     auto wanted = numbers;
     std::ranges::sort(wanted);
     wanted.erase(std::ranges::unique(wanted).begin(), wanted.end());
+    const auto settings = fixedSettings.value_or(settings_());
+    if (!sourceRequestId.isEmpty()) {
+        if (settings.directory.isEmpty())
+            return std::unexpected(QStringLiteral("El pedido no tiene un destino local fijado."));
+        QList<std::pair<double, QString>> episodes;
+        for (const auto number : wanted)
+            episodes.append({number, basePathFor(settings.directory, anime_title, number)});
+        auto created = services_.repository.createMany(
+            slug, episodes, anime_title, settings.audio, origin, settings.engine,
+            settings.jdEndpoint.toString(), settings.jdDeviceId, sourceRequestId);
+        if (!created)
+            return std::unexpected(created.error().message);
+        auto ids = services_.repository.remoteTaskIds(sourceRequestId);
+        if (!ids)
+            return std::unexpected(ids.error().message);
+        for (const auto id : *ids) {
+            if (tasks_.contains(id))
+                continue;
+            const auto saved = services_.repository.task(id);
+            if (!saved)
+                return std::unexpected(saved.error().message);
+            if (*saved) {
+                tasks_.insert(id, **saved);
+                emit taskAdded(id);
+            }
+        }
+        pump();
+        return Enqueued{.added = static_cast<int>(created->size()), .taskIds = *ids};
+    }
     QList<qint64> stopped;
     QList<double> fresh;
     for (const auto number : wanted) {
@@ -288,7 +336,6 @@ std::expected<Enqueued, QString> DownloadManager::enqueueMany(const QString& slu
     }
     Enqueued result;
     if (!fresh.isEmpty()) {
-        const auto settings = settings_();
         if (settings.directory.isEmpty() || !QDir().mkpath(settings.directory)) {
             return std::unexpected(QStringLiteral("La carpeta de descargas no está disponible."));
         }
@@ -296,12 +343,13 @@ std::expected<Enqueued, QString> DownloadManager::enqueueMany(const QString& slu
         for (const auto number : fresh) {
             episodes.append({number, basePathFor(settings.directory, anime_title, number)});
         }
-        auto created =
-            services_.repository.createMany(slug, episodes, anime_title, settings.audio, origin);
+        auto created = services_.repository.createMany(
+            slug, episodes, anime_title, settings.audio, origin, settings.engine,
+            settings.jdEndpoint.toString(), settings.jdDeviceId);
         if (!created) {
             return std::unexpected(created.error().message);
         }
-        for (const auto& task : *created) {
+        for (auto& task : *created) {
             tasks_.insert(task.id, task);
             emit taskAdded(task.id);
         }
@@ -324,7 +372,7 @@ int DownloadManager::running() const {
 }
 
 void DownloadManager::pump() {
-    if (stopping_ || !started_) {
+    if (stopping_ || !started_ || !transfers_enabled_) {
         return;
     }
     const auto now = QDateTime::currentDateTimeUtc();
@@ -344,7 +392,7 @@ void DownloadManager::pump() {
         wake_timer_.start(std::clamp<qint64>(now.msecsTo(next_wake) + 50, 50, 3'600'000));
     }
 
-    if (services_.aria2.isReady()) {
+    {
         const int limit = std::max(1, settings_().maxConcurrent);
         auto queued = tasks_.values();
         queued.removeIf([](const Task& task) { return task.state != TaskState::Queued; });
@@ -353,6 +401,8 @@ void DownloadManager::pump() {
             if (running() >= limit) {
                 break;
             }
+            if (task.engine == DownloadEngine::Native && !services_.aria2.isReady())
+                continue;
             resolve(task.id);
         }
     }
@@ -381,10 +431,16 @@ void DownloadManager::resolve(qint64 id) {
     task.issueDetail.clear();
     store(task);
 
+    if (task.engine != DownloadEngine::Native && !task.engineSubmission.isEmpty()) {
+        task.state = TaskState::Downloading;
+        store(task);
+        pollJd(id);
+        return;
+    }
     const auto settings = settings_();
     QList<api::Provider> providers;
     for (const auto provider : settings.providers) {
-        if (isNative(provider)) {
+        if (task.engine != DownloadEngine::Native || isNative(provider)) {
             providers.append(provider);
         }
     }
@@ -439,6 +495,10 @@ void DownloadManager::tryCandidate(qint64 id, quint64 generation,
         return;
     }
     const auto link = candidates[index];
+    if (tasks_[id].engine != DownloadEngine::Native) {
+        submitJd(id, link);
+        return;
+    }
     const auto next = [this, id, generation, candidates, index](TaskIssue issue) {
         tryCandidate(id, generation, candidates, index + 1, issue);
     };
@@ -512,7 +572,9 @@ void DownloadManager::startTransfer(qint64 id, api::Provider provider, const QSt
                                     std::optional<mega::FileLink> mega_link) {
     auto& task = tasks_[id];
     auto& live = live_[id];
-    const auto directory = settings_().directory;
+    const auto directory = task.engineDestination.isEmpty()
+                               ? QFileInfo(task.targetPath).absolutePath()
+                               : task.engineDestination;
 
     // A different source means the bytes on disk belong to another file.
     if (!task.sourceId.isEmpty() && (task.sourceId != source_id || task.provider != provider)) {
@@ -582,6 +644,10 @@ void DownloadManager::startTransfer(qint64 id, api::Provider provider, const QSt
 }
 
 void DownloadManager::poll() {
+    for (const auto& task : tasks_.values()) {
+        if (task.engine != DownloadEngine::Native && task.state == TaskState::Downloading)
+            pollJd(task.id);
+    }
     QStringList gids;
     QHash<QString, qint64> owners;
     for (auto it = live_.begin(); it != live_.end(); ++it) {
@@ -592,7 +658,6 @@ void DownloadManager::poll() {
         }
     }
     if (gids.isEmpty()) {
-        poll_timer_.stop();
         return;
     }
     services_.aria2.status(
@@ -900,10 +965,14 @@ void DownloadManager::pause(qint64 id) {
 }
 
 bool DownloadManager::pauseTask(qint64 id, bool with_all) {
+    if (!transfers_enabled_)
+        return false;
     const auto it = tasks_.find(id);
     if (it == tasks_.end()) {
         return false;
     }
+    if (it->engine != DownloadEngine::Native && !it->engineSubmission.isEmpty())
+        return false;
     switch (it->state) {
     case TaskState::Downloading:
         services_.aria2.pause(live_[id].gid);
@@ -930,6 +999,8 @@ void DownloadManager::resume(qint64 id) {
 }
 
 bool DownloadManager::resumeTask(qint64 id) {
+    if (!transfers_enabled_)
+        return false;
     const auto it = tasks_.find(id);
     if (it == tasks_.end() || it->state != TaskState::Paused) {
         return false;
@@ -956,7 +1027,22 @@ void DownloadManager::cancel(qint64 id) {
 }
 
 void DownloadManager::cancelTask(qint64 id) {
+    if (!transfers_enabled_)
+        return;
     auto& task = tasks_[id];
+    if (task.engine != DownloadEngine::Native && !task.engineSubmission.isEmpty()) {
+        if (task.engineJobId <= 0 || live_[id].jdBusy) {
+            task.enginePhase = QStringLiteral("cancel_requested");
+            store(task);
+            return;
+        }
+        task.enginePhase = QStringLiteral("cancelling");
+        store(task);
+        live_[id].jdBusy = true;
+        jdRequest(id, QStringLiteral("/linkgrabberv2/abort"), {task.engineJobId},
+                  [this, id](const auto&) { cancelJd(id); });
+        return;
+    }
     // The partial files go once aria2 has let go of them, unless the episode was asked for
     // again meanwhile: they are then that task's.
     dropTransfer(id, [this, id, path = task.targetPath] {
@@ -981,6 +1067,8 @@ void DownloadManager::retry(qint64 id) {
 }
 
 bool DownloadManager::retryTask(qint64 id) {
+    if (!transfers_enabled_)
+        return false;
     const auto it = tasks_.find(id);
     if (it == tasks_.end() || (it->state != TaskState::Failed && it->state != TaskState::Waiting)) {
         return false;
@@ -997,6 +1085,10 @@ bool DownloadManager::retryTask(qint64 id) {
 // The task gives up its slot. aria2 keeps the partial file and its control file, so the
 // transfer later continues where it stopped.
 void DownloadManager::requeue(qint64 id) {
+    if (!transfers_enabled_)
+        return;
+    if (tasks_[id].engine != DownloadEngine::Native)
+        return;
     dropTransfer(id);
     auto& task = tasks_[id];
     task.state = TaskState::Queued;
@@ -1005,6 +1097,8 @@ void DownloadManager::requeue(qint64 id) {
 }
 
 void DownloadManager::forget(qint64 id) {
+    if (!transfers_enabled_)
+        return;
     const auto it = tasks_.find(id);
     if (it == tasks_.end() || !finished(it->state)) {
         return;
@@ -1087,6 +1181,8 @@ void DownloadManager::forgetSeries(const QString& slug) {
 }
 
 void DownloadManager::reorder(const QStringList& slugs) {
+    if (!transfers_enabled_)
+        return;
     const auto current = seriesOrder();
     QStringList order;
     for (const auto& slug : slugs) {
@@ -1103,6 +1199,8 @@ void DownloadManager::reorder(const QStringList& slugs) {
 }
 
 void DownloadManager::prioritize(const QString& slug) {
+    if (!transfers_enabled_)
+        return;
     auto order = seriesOrder();
     if (!order.removeOne(slug)) {
         return;

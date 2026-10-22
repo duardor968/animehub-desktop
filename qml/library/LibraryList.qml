@@ -16,6 +16,21 @@ Rectangle {
     property string emptyText
 
     signal activated(string slug)
+    signal franchiseActivated(var groupId)
+    signal archiveActivated()
+    signal removeRequested(string slug, string title)
+    signal createFranchiseRequested(string slug, string title)
+    signal actionFailed(string text)
+    signal reviewCandidatesRequested()
+    property var selectedGroup: 0
+    function activateRow(index) {
+        const group = root.model.groupAt(index)
+        if (group) root.franchiseActivated(group)
+        else {
+            const slug = root.model.slugAt(index)
+            if (slug) root.activated(slug)
+        }
+    }
     signal searchCatalog(string text)
 
     function focusSearch() { search.forceActiveFocus() }
@@ -39,6 +54,17 @@ Rectangle {
         }
 
         ComboBox {
+            objectName: "libraryViewMode"
+            Layout.fillWidth: true
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
+            model: ["Colección", "Todos los animes", "Solo franquicias"]
+            currentIndex: root.model.viewMode
+            onActivated: index => root.model.viewMode = index
+            Accessible.name: "Vista de biblioteca"
+        }
+
+        ComboBox {
             Layout.fillWidth: true
             Layout.leftMargin: 12
             Layout.rightMargin: 12
@@ -54,15 +80,23 @@ Rectangle {
             Layout.fillHeight: true
             clip: true
             model: root.model
-            currentIndex: root.model.indexOf(root.selectedSlug)
+            currentIndex: root.selectedGroup ? root.model.indexOfGroup(root.selectedGroup) : root.model.indexOf(root.selectedSlug)
             keyNavigationEnabled: true
             highlightFollowsCurrentItem: false
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
             Accessible.name: "Biblioteca"
 
-            Keys.onReturnPressed: root.activated(root.model.slugAt(currentIndex))
-            Keys.onEnterPressed: root.activated(root.model.slugAt(currentIndex))
+            Keys.onReturnPressed: root.activateRow(currentIndex)
+            Keys.onEnterPressed: root.activateRow(currentIndex)
+            Keys.onRightPressed: {
+                const group = root.model.groupAt(currentIndex)
+                if (group && currentItem && !currentItem.expanded) root.model.toggleGroup(group)
+            }
+            Keys.onLeftPressed: {
+                const group = root.model.groupAt(currentIndex)
+                if (group && currentItem && currentItem.expanded) root.model.toggleGroup(group)
+            }
             onCurrentIndexChanged: {
                 // Arrow keys move the selection like a native list.
                 const slug = root.model.slugAt(currentIndex)
@@ -79,19 +113,74 @@ Rectangle {
                 required property string caption
                 required property real progress
                 required property bool fresh
+                required property bool isGroup
+                required property var groupId
+                required property int depth
+                required property bool expanded
 
                 width: ListView.view.width
                 height: 64
-                highlighted: slug === root.selectedSlug
+                highlighted: isGroup ? groupId === root.selectedGroup : slug === root.selectedSlug
                 onClicked: {
                     list.currentIndex = index
-                    root.activated(slug)
+                    root.activateRow(index)
                 }
                 Accessible.name: title + ", " + caption
 
+                TapHandler {
+                    acceptedButtons: Qt.RightButton
+                    onTapped: rowMenu.show(row)
+                }
+                Keys.onMenuPressed: rowMenu.show(row)
+                ActionMenu {
+                    id: rowMenu
+                    entries: [openRow, createRow, restoreRow, removeRow]
+                    MenuEntry {
+                        id: openRow
+                        text: row.isGroup ? "Abrir franquicia" : "Abrir anime"
+                        onTriggered: root.activateRow(row.index)
+                    }
+                    MenuEntry {
+                        id: createRow
+                        property bool wanted: !row.isGroup
+                        text: "Crear franquicia…"
+                        onTriggered: root.createFranchiseRequested(row.slug, row.title)
+                    }
+                    MenuEntry {
+                        id: restoreRow
+                        property bool wanted: !row.isGroup && root.model.archivedOnly
+                        text: "Restaurar a la biblioteca"
+                        onTriggered: {
+                            if (!root.model.archive([row.slug], false))
+                                root.actionFailed(root.model.error)
+                        }
+                    }
+                    MenuEntry {
+                        id: removeRow
+                        property bool wanted: !row.isGroup
+                        text: root.model.archivedOnly ? "Eliminar registro personal…" : "Quitar de la biblioteca…"
+                        onTriggered: root.removeRequested(row.slug, row.title)
+                    }
+                }
                 contentItem: RowLayout {
                     spacing: 12
 
+                    ToolButton {
+                        visible: row.isGroup && root.model.viewMode === LibraryModel.Collection
+                        Layout.preferredWidth: 32
+                        leftPadding: 0
+                        rightPadding: 0
+                        text: row.expanded ? "Contraer" : "Expandir"
+                        icon.source: "image://glyph/" + (row.expanded ? "E70D" : "E76C")
+                        icon.width: 16
+                        icon.height: 16
+                        display: AbstractButton.IconOnly
+                        onClicked: root.model.toggleGroup(row.groupId)
+                        Accessible.name: text + " " + row.title
+                        ToolTip.visible: hovered
+                        ToolTip.text: text
+                    }
+                    Item { visible: row.depth > 0; Layout.preferredWidth: 32 }
                     Poster {
                         Layout.preferredWidth: 34
                         Layout.preferredHeight: 48
@@ -172,6 +261,23 @@ Rectangle {
                     }
                 }
             }
+        }
+        ToolButton {
+            objectName: "libraryReviewRelations"
+            Layout.fillWidth: true
+            visible: root.model.pendingCandidates.length > 0
+            text: "Revisar relaciones (" + root.model.pendingCandidates.length + ")"
+            icon.source: "image://glyph/E946"
+            onClicked: root.reviewCandidatesRequested()
+            Accessible.name: text
+        }
+        ToolButton {
+            objectName: "libraryArchiveLink"
+            Layout.fillWidth: true
+            text: root.model.archivedOnly ? "Volver a la biblioteca" : "Archivo · " + root.model.archivedCount
+            icon.source: "image://glyph/E7B8"
+            onClicked: root.archiveActivated()
+            Accessible.name: text
         }
     }
 }

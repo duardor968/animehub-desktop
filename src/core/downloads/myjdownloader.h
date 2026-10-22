@@ -2,6 +2,7 @@
 #define ANIMEHUB_CORE_DOWNLOADS_MYJDOWNLOADER_H
 
 #include <QByteArray>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
@@ -64,6 +65,9 @@ public:
     void addLinks(const QString& device_id, const QString& package, const QList<QUrl>& links,
                   QObject* context, Callback<void> done);
     void disconnectAccount();
+    // Positional device API arguments. Result is the decrypted `data` value.
+    void request(const QString& device_id, const QString& path, const QJsonArray& params,
+                 QObject* context, Callback<QJsonValue> done);
     [[nodiscard]] bool isConnected() const {
         return !session_token_.isEmpty();
     }
@@ -74,7 +78,7 @@ private:
 
     void callServer(const QString& path, const QByteArray& key,
                     QList<std::pair<QString, QString>> params, QObject* context, Answer done);
-    void callDevice(const QString& device_id, const QString& path, const QJsonObject& params,
+    void callDevice(const QString& device_id, const QString& path, const QJsonArray& params,
                     QObject* context, Answer done, bool retried = false);
     void requestDevices(QObject* context, Callback<QList<Device>> done, bool retried);
     void reconnect(QObject* context, std::function<void(bool)> done);

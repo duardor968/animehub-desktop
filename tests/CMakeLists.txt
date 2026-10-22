@@ -10,7 +10,7 @@ animehub_configure_target(animehub-test-support)
 
 # One executable per suite keeps failures and timings readable in ctest.
 function(animehub_add_test name)
-  qt_add_executable(${name} ${ARGN})
+  qt_add_executable(${name} ${ARGN} support/noninteractive_guard.cpp)
   target_link_libraries(${name} PRIVATE animehub-core animehub-test-support Qt6::Test)
   target_compile_definitions(${name} PRIVATE
     ANIMEHUB_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
@@ -20,7 +20,7 @@ function(animehub_add_test name)
   # reach a pipe: console tests with TAP output let ctest show why one failed.
   set_target_properties(${name} PROPERTIES WIN32_EXECUTABLE FALSE)
   add_test(NAME ${name} COMMAND ${name} -o -,tap)
-  set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_QPA_FONTDIR=C:/Windows/Fonts")
 endfunction()
 
 animehub_add_test(api-json-test api_json_test.cpp)
@@ -29,10 +29,22 @@ animehub_add_test(api-client-test api_client_test.cpp)
 animehub_add_test(library-repository-test library_repository_test.cpp)
 animehub_add_test(mega-test mega_test.cpp)
 animehub_add_test(myjd-test myjd_test.cpp)
+animehub_add_test(jdownloader-test jdownloader_test.cpp)
+animehub_add_test(remote-service-test remote_service_test.cpp)
+animehub_add_test(remote-api-integration-test remote_api_integration_test.cpp)
+animehub_add_test(library-model-test library_model_test.cpp ../src/app/library_model.cpp ../src/app/card_model.cpp ../src/app/display.cpp ../src/app/schedule.cpp)
+target_include_directories(library-model-test PRIVATE ../src)
+target_link_libraries(library-model-test PRIVATE Qt6::Qml)
+animehub_add_test(downloads-view-test downloads_view_test.cpp ../src/app/downloads_view.cpp ../src/app/download_series_model.cpp ../src/app/display.cpp ../src/app/shell.cpp)
+target_include_directories(downloads-view-test PRIVATE ../src)
+target_link_libraries(downloads-view-test PRIVATE Qt6::Qml Qt6::Gui)
+if(WIN32)
+  target_link_libraries(downloads-view-test PRIVATE dwmapi)
+endif()
 
 # QML components on their own, as Qt Quick Test cases, in the style the app uses.
 find_package(Qt6 6.11 REQUIRED COMPONENTS QuickTest)
-qt_add_executable(qml-components-test qml_components_test.cpp)
+qt_add_executable(qml-components-test qml_components_test.cpp support/noninteractive_guard.cpp)
 target_link_libraries(qml-components-test PRIVATE Qt6::QuickTest)
 target_compile_definitions(qml-components-test PRIVATE
   QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
@@ -41,7 +53,7 @@ animehub_configure_target(qml-components-test)
 set_target_properties(qml-components-test PROPERTIES WIN32_EXECUTABLE FALSE)
 add_test(NAME qml-components-test COMMAND qml-components-test -o -,tap)
 set_tests_properties(qml-components-test PROPERTIES ENVIRONMENT
-  "QT_QPA_PLATFORM=offscreen;QT_QUICK_CONTROLS_STYLE=FluentWinUI3;QT_QUICK_BACKEND=software"
+  "QT_QPA_PLATFORM=offscreen;QT_QUICK_CONTROLS_STYLE=FluentWinUI3;QT_QUICK_BACKEND=software;QT_QPA_FONTDIR=C:/Windows/Fonts"
 )
 if(ANIMEHUB_BUNDLE_ENGINES)
   animehub_add_test(aria2-test aria2_test.cpp)

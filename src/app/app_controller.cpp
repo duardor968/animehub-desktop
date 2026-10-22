@@ -1,6 +1,7 @@
 #include "app_controller.h"
 
 #include "display.h"
+#include "platform/trash.h"
 #include "shell.h"
 
 #include <QApplication>
@@ -8,6 +9,9 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QLocalSocket>
 #include <QMenu>
 
@@ -37,6 +41,7 @@ AppController::AppController(AppPaths paths, QObject* parent)
     QDir().mkpath(paths_.data);
     settings_ = std::make_unique<AppSettings>(
         QDir(paths_.data).filePath(QStringLiteral("settings.ini")), paths_.downloads);
+    settings_->setIsolated(paths_.isolated);
     auto database =
         storage::Database::open(QDir(paths_.data).filePath(QStringLiteral("library.sqlite3")));
     if (!database) {
@@ -46,6 +51,18 @@ AppController::AppController(AppPaths paths, QObject* parent)
     database_ = std::move(*database);
     library_repository_ = std::make_unique<library::LibraryRepository>(*database_);
     download_repository_ = std::make_unique<downloads::DownloadRepository>(*database_);
+    if (paths_.isolated && paths_.transfers) {
+        const auto tasks = download_repository_->all();
+        const auto root = QDir::cleanPath(QDir(paths_.data).absolutePath()) + u'/';
+        if (!tasks || std::ranges::any_of(*tasks, [&root](const downloads::Task& task) {
+                return !QDir::cleanPath(QFileInfo(task.targetPath).absoluteFilePath())
+                            .startsWith(root, Qt::CaseInsensitive);
+            })) {
+            problem_ = QStringLiteral("El perfil de prueba contiene destinos externos. Usa un "
+                                      "perfil limpio para habilitar transferencias.");
+            return;
+        }
+    }
 
     api::ApiClient::Options api_options;
     api_options.cacheDirectory = QDir(paths_.data).filePath(QStringLiteral("cache/api"));
@@ -53,9 +70,20 @@ AppController::AppController(AppPaths paths, QObject* parent)
     if (const auto base = qEnvironmentVariable("ANIMEHUB_API_URL"); !base.isEmpty()) {
         api_options.baseUrl = QUrl(base);
     }
+    if (!paths_.apiBase.isEmpty())
+        api_options.baseUrl = paths_.apiBase;
     api_ = std::make_unique<api::ApiClient>(network_, api_options);
     api::ResponseCache(api_options.cacheDirectory).prune(std::chrono::hours(24 * 30));
-    library_ = std::make_unique<library::LibraryService>(*library_repository_, *api_);
+    library_ = std::make_unique<library::LibraryService>(
+        *library_repository_, *api_, nullptr,
+        [this](const QString& path) -> std::optional<QString> {
+            if (paths_.isolated)
+                return std::nullopt;
+            return platform::moveToTrash(path);
+        },
+        [this](const QString& source, const QString& destination) {
+            return !paths_.isolated && platform::restoreFromTrash(source, destination);
+        });
 
     aria2_ = std::make_unique<downloads::Aria2>(
         network_, QDir(paths_.engines).filePath(QStringLiteral("aria2/aria2c.exe")),
@@ -70,8 +98,36 @@ AppController::AppController(AppPaths paths, QObject* parent)
         std::make_unique<JDownloaderView>(*settings_, *click_n_load_, *myjd_, credential);
     downloads_ = std::make_unique<downloads::DownloadManager>(
         downloads::DownloadManager::Services{*api_, *aria2_, *mega_, *pixeldrain_,
-                                             *download_repository_, *library_repository_},
+                                             *download_repository_, *library_repository_,
+                                             myjd_.get()},
         [this] { return settings_->downloads(); });
+    remote_service_ = std::make_unique<remote::RemoteService>(
+        network_, api_options.baseUrl, paths_.data, [this](const remote::Submission& submission) {
+            if (!paths_.transfers)
+                return false;
+            auto fixed = settings_->downloads();
+            fixed.audio = submission.profile.audio == u"dub" ? api::Audio::Dub : api::Audio::Sub;
+            fixed.directory = submission.profile.destination;
+            fixed.engine = submission.profile.engine == u"direct"
+                               ? downloads::DownloadEngine::Native
+                           : submission.profile.connection == u"cloud"
+                               ? downloads::DownloadEngine::JDownloaderCloud
+                               : downloads::DownloadEngine::JDownloaderLocal;
+            if (fixed.engine == downloads::DownloadEngine::JDownloaderLocal)
+                fixed.jdEndpoint = QUrl(submission.profile.connection);
+            fixed.jdDeviceId = submission.profile.device;
+            auto title = submission.animeSlug;
+            if (const auto entry = library_repository_->entry(submission.animeSlug);
+                entry && *entry)
+                title = (*entry)->title;
+            return downloads_
+                ->enqueueMany(submission.animeSlug, submission.episodes, title,
+                              downloads::TaskOrigin::Manual, submission.requestId, fixed)
+                .has_value();
+        });
+    remote_view_ = std::make_unique<RemoteView>(*remote_service_);
+    publishRemoteProfiles();
+    connect(settings_.get(), &AppSettings::changed, this, &AppController::publishRemoteProfiles);
     player_ = std::make_unique<playback::Player>(
         *library_repository_,
         [this] {
@@ -95,6 +151,20 @@ AppController::AppController(AppPaths paths, QObject* parent)
 
     connect(library_.get(), &library::LibraryService::newEpisodes, this,
             &AppController::notifyNewEpisodes);
+    connect(library_.get(), &library::LibraryService::newFranchiseMembers, this,
+            [this](const QStringList& slugs) {
+                if (slugs.isEmpty())
+                    return;
+                QStringList titles;
+                for (const auto& slug : slugs) {
+                    if (const auto entry = library_repository_->entry(slug); entry && *entry)
+                        titles.append((*entry)->title);
+                }
+                if (!titles.isEmpty())
+                    notify(slugs.size() == 1 ? QStringLiteral("Nueva entrega en tu biblioteca")
+                                             : QStringLiteral("Nuevas entregas en tu biblioteca"),
+                           titles.join(QStringLiteral(" · ")), slugs.first());
+            });
     connect(downloads_.get(), &downloads::DownloadManager::taskCompleted, this, [this](qint64 id) {
         const auto task = downloads_->task(id);
         library_->announce(task->slug);
@@ -121,12 +191,41 @@ void AppController::start() {
     if (!ready()) {
         return;
     }
-    library_->verifyFiles();
-    library_->startWatching();
-    downloads_->start();
-    jdownloader_view_->start();
+    if (!paths_.smoke && paths_.transfers) {
+        library_->verifyFiles();
+        library_->startWatching();
+    }
+    downloads_->start(paths_.transfers);
+    if (!paths_.smoke)
+        jdownloader_view_->start();
     library_model_->start();
-    setupTray();
+    if (!paths_.smoke) {
+        remote_service_->start();
+        setupTray();
+    }
+}
+
+void AppController::publishRemoteProfiles() {
+    const auto config = settings_->downloads();
+    const bool jd = config.engine != downloads::DownloadEngine::Native;
+    const QString connection = !jd ? QString()
+                               : config.engine == downloads::DownloadEngine::JDownloaderCloud
+                                   ? QStringLiteral("cloud")
+                                   : config.jdEndpoint.toString();
+    const QString device = jd ? config.jdDeviceId : QString();
+    const auto audio =
+        config.audio == api::Audio::Dub ? QStringLiteral("dub") : QStringLiteral("sub");
+    const QJsonArray identity{jd, config.directory, connection, device, audio};
+    const auto fingerprint =
+        QCryptographicHash::hash(QJsonDocument(identity).toJson(QJsonDocument::Compact),
+                                 QCryptographicHash::Sha256)
+            .toHex();
+    const int revision = settings_->remoteProfileRevision(fingerprint);
+    remote_service_->setProfiles(
+        revision, {{QStringLiteral("default"),
+                    jd ? QStringLiteral("JDownloader") : QStringLiteral("Descargas incorporadas"),
+                    jd ? QStringLiteral("jdownloader") : QStringLiteral("direct"), config.directory,
+                    connection, device, true, audio}});
 }
 
 bool AppController::handOffToRunningInstance(const QString& data_directory, bool show) {
@@ -172,18 +271,19 @@ void AppController::setupTray() {
     tray_menu_ = std::make_unique<QMenu>();
     tray_menu_->setDefaultAction(tray_menu_->addAction(QStringLiteral("Abrir AnimeHub"), this,
                                                        &AppController::showRequested));
-    auto* pause = tray_menu_->addAction(QStringLiteral("Pausar las descargas"));
+    auto* pause = tray_menu_->addAction(QStringLiteral("Pausar descargas incorporadas"));
     connect(pause, &QAction::triggered, this, [this] {
-        if (downloads_view_->anyPaused()) {
-            downloads_->resumeAll();
+        if (downloads_view_->canResumeNative()) {
+            downloads_view_->resumeAll();
         } else {
-            downloads_->pauseAll();
+            downloads_view_->pauseAll();
         }
     });
     connect(tray_menu_.get(), &QMenu::aboutToShow, this, [this, pause] {
-        pause->setText(downloads_view_->anyPaused() ? QStringLiteral("Reanudar las descargas")
-                                                    : QStringLiteral("Pausar las descargas"));
-        pause->setEnabled(downloads_view_->activeCount() > 0 || downloads_view_->anyPaused());
+        pause->setText(downloads_view_->canResumeNative()
+                           ? QStringLiteral("Reanudar descargas incorporadas")
+                           : QStringLiteral("Pausar descargas incorporadas"));
+        pause->setEnabled(downloads_view_->canPauseNative() || downloads_view_->canResumeNative());
     });
     tray_menu_->addSeparator();
     tray_menu_->addAction(QStringLiteral("Salir"), this, &AppController::quit);

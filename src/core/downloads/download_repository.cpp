@@ -1,7 +1,12 @@
 #include "download_repository.h"
+#include "jdownloader.h"
 
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QSqlQuery>
 #include <QTimeZone>
+#include <QUuid>
 
 #include <array>
 
@@ -16,7 +21,9 @@ using storage::StorageError;
 constexpr auto kColumns =
     "id, slug, number, anime_title, audio, origin, state, provider, source_id, target_path, "
     "bytes_done, bytes_total, error_code, error_detail, attempts, retry_at, queue_order, "
-    "created_at, finished_at, paused_with_all";
+    "created_at, finished_at, paused_with_all, engine, engine_endpoint, engine_device, "
+    "engine_job_id, engine_link_ids, engine_submission, engine_phase, engine_destination, "
+    "remote_request_id";
 
 QDateTime timeAt(const QVariant& value) {
     return value.isNull() ? QDateTime()
@@ -57,6 +64,21 @@ Task readTask(const QSqlQuery& query) {
     task.createdAt = timeAt(query.value(17));
     task.finishedAt = timeAt(query.value(18));
     task.pausedWithAll = query.value(19).toBool();
+    const auto engine = query.value(20).toString();
+    task.engine = engine == u"jd_local"   ? DownloadEngine::JDownloaderLocal
+                  : engine == u"jd_cloud" ? DownloadEngine::JDownloaderCloud
+                                          : DownloadEngine::Native;
+    task.engineEndpoint = query.value(21).toString();
+    task.engineDevice = query.value(22).toString();
+    task.engineJobId = query.value(23).toLongLong();
+    for (const auto& id : QJsonDocument::fromJson(query.value(24).toByteArray()).array()) {
+        if (id.toInteger() > 0)
+            task.engineLinkIds.append(id.toInteger());
+    }
+    task.engineSubmission = query.value(25).toString();
+    task.enginePhase = query.value(26).toString();
+    task.engineDestination = query.value(27).toString();
+    task.remoteRequestId = query.value(28).toString();
     return task;
 }
 
@@ -138,18 +160,25 @@ DownloadRepository::DownloadRepository(storage::Database& database) : database_(
 
 Stored<Task> DownloadRepository::create(const QString& slug, double number,
                                         const QString& anime_title, api::Audio audio,
-                                        TaskOrigin origin, const QString& target_path) {
-    auto created = createMany(slug, {{number, target_path}}, anime_title, audio, origin);
+                                        TaskOrigin origin, const QString& target_path,
+                                        DownloadEngine engine, const QString& endpoint,
+                                        const QString& device) {
+    auto created = createMany(slug, {{number, target_path}}, anime_title, audio, origin, engine,
+                              endpoint, device);
     if (!created) {
         return std::unexpected(created.error());
     }
     return created->first();
 }
 
-Stored<QList<Task>>
-DownloadRepository::createMany(const QString& slug,
-                               const QList<std::pair<double, QString>>& episodes,
-                               const QString& anime_title, api::Audio audio, TaskOrigin origin) {
+Stored<QList<Task>> DownloadRepository::createMany(
+    const QString& slug, const QList<std::pair<double, QString>>& episodes,
+    const QString& anime_title, api::Audio audio, TaskOrigin origin, DownloadEngine engine,
+    const QString& endpoint, const QString& device, const QString& sourceRequestId) {
+    if (engine == DownloadEngine::JDownloaderLocal && !jd::isLocalEndpoint(QUrl(endpoint))) {
+        return std::unexpected(StorageError{
+            u"La API local debe ser HTTP de loopback, sin credenciales ni parámetros."_s});
+    }
     QList<qint64> ids;
     auto inserted = database_.transaction([&]() -> Stored<void> {
         auto order = database_.run(
@@ -164,18 +193,68 @@ DownloadRepository::createMany(const QString& slug,
         const auto queue_order = order->value(0).toLongLong();
         order->finish();
         const auto now = nowMs();
+        const auto audio_key = audio == api::Audio::Dub ? u"DUB"_s : u"SUB"_s;
+        const auto receipt = [&](double number, qint64 task_id) -> Stored<void> {
+            if (sourceRequestId.isEmpty())
+                return {};
+            auto saved = database_.run(
+                QStringLiteral("INSERT INTO download_request_receipt "
+                               "(remote_request_id,number,audio,slug,task_id) VALUES (?,?,?,?,?)"),
+                {sourceRequestId, number, audio_key, slug, task_id});
+            if (!saved)
+                return std::unexpected(saved.error());
+            return {};
+        };
         for (const auto& [number, target_path] : episodes) {
+            if (!sourceRequestId.isEmpty()) {
+                // A remote request identifies the accepted episode, independent of current
+                // audio preferences. Keep its receipt even when the queue row was removed.
+                auto seen =
+                    database_.run(QStringLiteral("SELECT slug FROM download_request_receipt WHERE "
+                                                 "remote_request_id=? AND number=?"),
+                                  {sourceRequestId, number});
+                if (!seen)
+                    return std::unexpected(seen.error());
+                if (seen->next()) {
+                    if (seen->value(0).toString() != slug)
+                        return std::unexpected(
+                            StorageError{u"El pedido remoto ya pertenece a otra obra."_s});
+                    continue;
+                }
+                seen->finish();
+                auto active = activeFor(slug, number, audio);
+                if (!active)
+                    return std::unexpected(active.error());
+                if (*active) {
+                    if (auto saved = receipt(number, (**active).id); !saved)
+                        return saved;
+                    continue;
+                }
+            }
             auto row = database_.run(
-                QStringLiteral("INSERT INTO download (slug, number, anime_title, audio, origin, "
-                               "state, target_path, queue_order, created_at, updated_at) "
-                               "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)"),
+                QStringLiteral(
+                    "INSERT INTO download (slug, number, anime_title, audio, origin, "
+                    "state, target_path, queue_order, created_at, updated_at, engine, "
+                    "engine_endpoint, engine_device, engine_destination, remote_request_id) "
+                    "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
                 {slug, number, anime_title, audio == api::Audio::Dub ? u"DUB"_s : u"SUB"_s,
                  origin == TaskOrigin::Automatic ? u"automatic"_s : u"manual"_s, target_path,
-                 queue_order, now, now});
+                 queue_order, now, now,
+                 engine == DownloadEngine::JDownloaderLocal   ? u"jd_local"_s
+                 : engine == DownloadEngine::JDownloaderCloud ? u"jd_cloud"_s
+                                                              : u"native"_s,
+                 engine == DownloadEngine::JDownloaderLocal ? endpoint : u""_s,
+                 device.isNull() ? u""_s : device,
+                 engine == DownloadEngine::Native
+                     ? QFileInfo(target_path).absolutePath()
+                     : target_path + u" - "_s + QUuid::createUuid().toString(QUuid::WithoutBraces),
+                 sourceRequestId.isNull() ? u""_s : sourceRequestId});
             if (!row) {
                 return std::unexpected(row.error());
             }
             ids.append(row->lastInsertId().toLongLong());
+            if (auto saved = receipt(number, ids.last()); !saved)
+                return saved;
         }
         return {};
     });
@@ -196,6 +275,18 @@ DownloadRepository::createMany(const QString& slug,
     return tasks;
 }
 
+Stored<QList<qint64>> DownloadRepository::remoteTaskIds(const QString& sourceRequestId) const {
+    auto rows = database_.run(QStringLiteral("SELECT task_id FROM download_request_receipt WHERE "
+                                             "remote_request_id=? ORDER BY number,audio"),
+                              {sourceRequestId});
+    if (!rows)
+        return std::unexpected(rows.error());
+    QList<qint64> ids;
+    while (rows->next())
+        ids.append(rows->value(0).toLongLong());
+    return ids;
+}
+
 Stored<void> DownloadRepository::save(const QList<Task>& tasks) {
     if (tasks.isEmpty()) {
         return {};
@@ -211,18 +302,43 @@ Stored<void> DownloadRepository::save(const QList<Task>& tasks) {
 }
 
 Stored<void> DownloadRepository::save(const Task& task) {
+    QJsonArray ids;
+    for (const auto id : task.engineLinkIds)
+        ids.append(id);
     auto result = database_.run(
-        QStringLiteral("UPDATE download SET state = ?, provider = ?, source_id = ?, "
-                       "target_path = ?, bytes_done = ?, bytes_total = ?, error_code = ?, "
-                       "error_detail = ?, attempts = ?, retry_at = ?, queue_order = ?, "
-                       "updated_at = ?, finished_at = ?, paused_with_all = ? WHERE id = ?"),
+        QStringLiteral(
+            "UPDATE download SET state = ?, provider = ?, source_id = ?, "
+            "target_path = ?, bytes_done = ?, bytes_total = ?, error_code = ?, "
+            "error_detail = ?, attempts = ?, retry_at = ?, queue_order = ?, "
+            "updated_at = ?, finished_at = ?, paused_with_all = ?, engine = ?, "
+            "engine_endpoint = ?, engine_device = ?, engine_job_id = ?, engine_link_ids = ?, "
+            "engine_submission = ?, engine_phase = ?, engine_destination = ? WHERE id = ?"),
         {stateKey(task.state),
          task.provider ? QVariant(api::providerKey(*task.provider))
                        : QVariant(QMetaType::fromType<QString>()),
-         nullableText(task.sourceId), task.targetPath, task.bytesDone, task.bytesTotal,
-         nullableText(issueKey(task.issue)), nullableText(task.issueDetail), task.attempts,
-         nullableTime(task.retryAt), task.queueOrder, nowMs(), nullableTime(task.finishedAt),
-         task.pausedWithAll ? 1 : 0, task.id});
+         nullableText(task.sourceId),
+         task.targetPath,
+         task.bytesDone,
+         task.bytesTotal,
+         nullableText(issueKey(task.issue)),
+         nullableText(task.issueDetail),
+         task.attempts,
+         nullableTime(task.retryAt),
+         task.queueOrder,
+         nowMs(),
+         nullableTime(task.finishedAt),
+         task.pausedWithAll ? 1 : 0,
+         task.engine == DownloadEngine::JDownloaderLocal   ? u"jd_local"_s
+         : task.engine == DownloadEngine::JDownloaderCloud ? u"jd_cloud"_s
+                                                           : u"native"_s,
+         task.engineEndpoint.isNull() ? u""_s : task.engineEndpoint,
+         task.engineDevice.isNull() ? u""_s : task.engineDevice,
+         task.engineJobId,
+         QString::fromUtf8(QJsonDocument(ids).toJson(QJsonDocument::Compact)),
+         task.engineSubmission.isNull() ? u""_s : task.engineSubmission,
+         task.enginePhase.isNull() ? u""_s : task.enginePhase,
+         task.engineDestination.isNull() ? u""_s : task.engineDestination,
+         task.id});
     if (!result) {
         return std::unexpected(result.error());
     }

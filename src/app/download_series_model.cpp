@@ -100,6 +100,22 @@ QVariant DownloadEpisodesModel::data(const QModelIndex& index, int role) const {
         return row.problem;
     case HasFileRole:
         return row.hasFile;
+    case SourceRole:
+        return row.source;
+    case EngineRole:
+        return row.engine;
+    case ConnectionRole:
+        return row.connection;
+    case DestinationRole:
+        return row.destination;
+    case PhaseRole:
+        return row.phase;
+    case CanPauseRole:
+        return row.canPause;
+    case CanResumeRole:
+        return row.canResume;
+    case CanRetryRole:
+        return row.canRetry;
     case PartialRole:
         return row.partial;
     default:
@@ -108,9 +124,23 @@ QVariant DownloadEpisodesModel::data(const QModelIndex& index, int role) const {
 }
 
 QHash<int, QByteArray> DownloadEpisodesModel::roleNames() const {
-    return {{IdRole, "taskId"},      {NumberRole, "number"},   {LabelRole, "label"},
-            {ImageRole, "image"},    {StateRole, "taskState"}, {ProgressRole, "progress"},
-            {DetailRole, "detail"},  {ProblemRole, "problem"}, {HasFileRole, "hasFile"},
+    return {{IdRole, "taskId"},
+            {NumberRole, "number"},
+            {LabelRole, "label"},
+            {ImageRole, "image"},
+            {StateRole, "taskState"},
+            {ProgressRole, "progress"},
+            {DetailRole, "detail"},
+            {ProblemRole, "problem"},
+            {HasFileRole, "hasFile"},
+            {SourceRole, "source"},
+            {EngineRole, "engine"},
+            {ConnectionRole, "connection"},
+            {DestinationRole, "destination"},
+            {PhaseRole, "phase"},
+            {CanPauseRole, "canPause"},
+            {CanResumeRole, "canResume"},
+            {CanRetryRole, "canRetry"},
             {PartialRole, "partial"}};
 }
 
@@ -193,6 +223,12 @@ QVariant DownloadSeriesModel::data(const QModelIndex& index, int role) const {
         return row.canPause;
     case CanResumeRole:
         return row.canResume;
+    case CanRetryRole:
+        return row.canRetry;
+    case EnginesRole:
+        return row.engines;
+    case DestinationsRole:
+        return row.destinations;
     case FirstRole:
         return row.first;
     case CancelTextRole:
@@ -222,6 +258,9 @@ QHash<int, QByteArray> DownloadSeriesModel::roleNames() const {
             {FailedTextRole, "failedText"},
             {CanPauseRole, "canPause"},
             {CanResumeRole, "canResume"},
+            {CanRetryRole, "canRetry"},
+            {EnginesRole, "engines"},
+            {DestinationsRole, "destinations"},
             {FirstRole, "first"},
             {CancelTextRole, "cancelText"},
             {FilesOnDiskRole, "filesOnDisk"},

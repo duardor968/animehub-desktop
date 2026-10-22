@@ -24,6 +24,12 @@ class AppSettings final : public QObject {
     Q_PROPERTY(bool systemPlayer READ systemPlayer WRITE setSystemPlayer NOTIFY changed)
     Q_PROPERTY(bool notifications READ notifications WRITE setNotifications NOTIFY changed)
     Q_PROPERTY(bool startWithWindows READ startWithWindows WRITE setStartWithWindows NOTIFY changed)
+    Q_PROPERTY(bool isolated READ isolated CONSTANT)
+    Q_PROPERTY(bool preferredJDownloader READ preferredJDownloader WRITE setPreferredJDownloader
+                   NOTIFY changed)
+    Q_PROPERTY(bool cloudJDownloader READ cloudJDownloader WRITE setCloudJDownloader NOTIFY changed)
+    Q_PROPERTY(QString jdEndpoint READ jdEndpoint WRITE setJdEndpoint NOTIFY changed)
+    Q_PROPERTY(QString jdExecutable READ jdExecutable WRITE setJdExecutable NOTIFY changed)
     Q_PROPERTY(CloseAction closeAction READ closeAction WRITE setCloseAction NOTIFY changed)
     Q_PROPERTY(JDownloader jdownloader READ jdownloader WRITE setJdownloader NOTIFY changed)
     Q_PROPERTY(
@@ -36,6 +42,21 @@ public:
     Q_ENUM(JDownloader)
 
     AppSettings(const QString& path, QString default_download_directory, QObject* parent = nullptr);
+    void setIsolated(bool value) {
+        isolated_ = value;
+    }
+    bool isolated() const {
+        return isolated_;
+    }
+    bool preferredJDownloader() const;
+    void setPreferredJDownloader(bool value);
+    bool cloudJDownloader() const;
+    void setCloudJDownloader(bool value);
+    QString jdEndpoint() const;
+    void setJdEndpoint(const QString& value);
+    QString jdExecutable() const;
+    void setJdExecutable(const QString& value);
+    int remoteProfileRevision(const QByteArray& fingerprint);
 
     [[nodiscard]] QString downloadDirectory() const;
     void setDownloadDirectory(const QString& directory);
@@ -81,6 +102,7 @@ private:
 
     mutable QSettings settings_;
     QString default_download_directory_;
+    bool isolated_ = false;
 };
 
 } // namespace animehub::app

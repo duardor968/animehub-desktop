@@ -98,6 +98,75 @@ QStringList leftovers(const QString& directory) {
     return found;
 }
 
+class FakeJd {
+public:
+    bool moved = false;
+    bool finished = false;
+    bool extracting = false;
+    QString destination;
+    int submissions = 0;
+    int removed = 0;
+    int submitDelay = 0;
+    bool scoped = true;
+    void install(HttpTestServer& server) {
+        server.route("GET", "/linkgrabberv2/addLinks", [this](const auto& r) {
+            ++submissions;
+            const auto object =
+                QJsonDocument::fromJson(QUrl::fromPercentEncoding(r.query).toUtf8()).object();
+            destination = object.value(u"destinationFolder").toString();
+            scoped = scoped && object.value(u"assignJobID").toBool() &&
+                     !object.value(u"autostart").toBool();
+            return HttpTestServer::Response{.body = "{\"data\":{\"id\":77}}",
+                                            .delayMs = submitDelay};
+        });
+        server.route("GET", "/downloadsV2/queryLinks", [this](const auto& r) {
+            scoped = scoped && QUrl::fromPercentEncoding(r.query).contains(
+                                   QStringLiteral("\"jobUUIDs\":[77]"));
+            QJsonArray links;
+            if (moved)
+                links.append(QJsonObject{{QStringLiteral("uuid"), 88},
+                                         {QStringLiteral("finished"), finished},
+                                         {QStringLiteral("running"), !finished},
+                                         {QStringLiteral("bytesLoaded"), finished ? 8 : 2},
+                                         {QStringLiteral("bytesTotal"), 8},
+                                         {QStringLiteral("extractionStatus"),
+                                          extracting ? QStringLiteral("RUNNING") : QString()}});
+            return HttpTestServer::Response{
+                .body = QJsonDocument(QJsonObject{{QStringLiteral("data"), links}}).toJson()};
+        });
+        server.json("/linkgrabberv2/queryLinkCrawlerJobs",
+                    "{\"data\":[{\"jobId\":77,\"checking\":false,\"crawling\":false}]}");
+        server.route("GET", "/linkgrabberv2/queryLinks", [this](const auto& r) {
+            scoped = scoped && QUrl::fromPercentEncoding(r.query).contains(
+                                   QStringLiteral("\"jobUUIDs\":[77]"));
+            return HttpTestServer::Response{
+                .body = moved
+                            ? QByteArray("{\"data\":[]}")
+                            : QByteArray("{\"data\":[{\"uuid\":88,\"availability\":\"ONLINE\"}]}")};
+        });
+        server.route("GET", "/linkgrabberv2/moveToDownloadlist", [this](const auto& r) {
+            scoped = scoped && QUrl::fromPercentEncoding(r.query) == QStringLiteral("[88]&[]");
+            moved = true;
+            return HttpTestServer::Response{.body = "{\"data\":null}"};
+        });
+        server.route("GET", "/downloadsV2/forceDownload", [this](const auto& r) {
+            scoped = scoped && QUrl::fromPercentEncoding(r.query) == QStringLiteral("[88]&[]");
+            return HttpTestServer::Response{.body = "{\"data\":null}"};
+        });
+        server.route("GET", "/linkgrabberv2/abort", [this](const auto& r) {
+            scoped = scoped && QUrl::fromPercentEncoding(r.query) == QStringLiteral("77");
+            return HttpTestServer::Response{.body = "{\"data\":true}"};
+        });
+        for (const auto& prefix : {QByteArray("/linkgrabberv2/"), QByteArray("/downloadsV2/")}) {
+            server.route("GET", prefix + "removeLinks", [this](const auto& r) {
+                scoped = scoped && QUrl::fromPercentEncoding(r.query) == QStringLiteral("[88]&[]");
+                ++removed;
+                return HttpTestServer::Response{.body = "{\"data\":null}"};
+            });
+        }
+    }
+};
+
 } // namespace
 
 class DownloadManagerTest final : public QObject {
@@ -117,6 +186,7 @@ class DownloadManagerTest final : public QObject {
     QString downloads_;
     int mega_calls_ = 0;
     int max_concurrent_ = 2;
+    DownloadEngine engine_ = DownloadEngine::Native;
 
     void serveMega(int bytes_per_tick = 0, int status = 200) {
         server_->route("POST", "/cs", [this](const HttpTestServer::Request&) {
@@ -209,16 +279,19 @@ class DownloadManagerTest final : public QObject {
                vectors().value(u"linkKey").toString();
     }
 
-    void makeManager() {
+    void makeManager(bool transfers = true) {
         aria2_ = std::make_unique<Aria2>(*network_, QStringLiteral(ANIMEHUB_ARIA2_EXECUTABLE),
                                          "AnimeHub-Desktop-Test");
         manager_ = std::make_unique<DownloadManager>(
             DownloadManager::Services{*api_, *aria2_, *mega_, *pixeldrain_, *repository_,
                                       *library_},
             [this] {
-                return DownloadSettings{.directory = downloads_, .maxConcurrent = max_concurrent_};
+                return DownloadSettings{.directory = downloads_,
+                                        .maxConcurrent = max_concurrent_,
+                                        .engine = engine_,
+                                        .jdEndpoint = server_->url()};
             });
-        manager_->start();
+        manager_->start(transfers);
     }
 
     std::optional<Task> taskOf(qint64 id) const {
@@ -251,6 +324,7 @@ private slots:
         pixeldrain_ = std::make_unique<pixeldrain::Api>(*network_, nullptr, server_->url());
         mega_calls_ = 0;
         max_concurrent_ = 2;
+        engine_ = DownloadEngine::Native;
         makeManager();
     }
 
@@ -269,6 +343,177 @@ private slots:
         network_.reset();
         server_.reset();
         root_.reset();
+    }
+
+    void readOnlyStartupLoadsQueueWithoutWorkersOrFileMutations() {
+        bool stopped = false;
+        manager_->shutdown([&] { stopped = true; });
+        QTRY_VERIFY_WITH_TIMEOUT(stopped, 8000);
+        manager_.reset();
+        aria2_.reset();
+        auto seed =
+            repository_->create(kFrieren, 1, titleOf(kFrieren), api::Audio::Sub, TaskOrigin::Manual,
+                                root_->filePath(QStringLiteral("keep")));
+        QVERIFY(seed);
+        seed->state = TaskState::Failed;
+        QVERIFY(repository_->save(*seed));
+        QFile partial(seed->targetPath + QStringLiteral(".part"));
+        QVERIFY(partial.open(QIODevice::WriteOnly));
+        partial.write("keep");
+        partial.close();
+        makeManager(false);
+        QCOMPARE(taskOf(seed->id)->state, TaskState::Failed);
+        manager_->retry(seed->id);
+        manager_->forget(seed->id);
+        manager_->cancel(seed->id);
+        manager_->prioritize(kFrieren);
+        QVERIFY(!manager_->enqueue(kFrieren, 2, titleOf(kFrieren), TaskOrigin::Manual));
+        QCoreApplication::processEvents();
+        QVERIFY(!aria2_->isReady());
+        QVERIFY(QFileInfo::exists(partial.fileName()));
+        QCOMPARE(taskOf(seed->id)->state, TaskState::Failed);
+        QCOMPARE(server_->requests().size(), 0);
+        QCOMPARE((**repository_->task(seed->id)).state, TaskState::Failed);
+    }
+
+    void remoteReplaySurvivesCancellationAndQueueCleanup() {
+        const auto request = QStringLiteral("remote-fixture-request");
+        DownloadSettings pinned{.directory = root_->filePath(QStringLiteral("Pinned")),
+                                .jdEndpoint = server_->url()};
+        const auto first = manager_->enqueueMany(kFrieren, {1, 2}, titleOf(kFrieren),
+                                                 TaskOrigin::Manual, request, pinned);
+        QVERIFY(first);
+        QCOMPARE(first->added, 2);
+        QCOMPARE(first->taskIds.size(), 2);
+        for (const auto id : first->taskIds)
+            manager_->cancel(id);
+        manager_->clearFinished();
+        QVERIFY(manager_->tasks().isEmpty());
+        pinned.directory = root_->filePath(QStringLiteral("Changed"));
+        pinned.engine = DownloadEngine::JDownloaderLocal;
+        pinned.audio = api::Audio::Dub; // replay after restart must retain the accepted SUB job
+        const auto replay = manager_->enqueueMany(kFrieren, {1, 2}, titleOf(kFrieren),
+                                                  TaskOrigin::Manual, request, pinned);
+        QVERIFY(replay);
+        QCOMPARE(replay->added, 0);
+        QCOMPARE(replay->restarted, 0);
+        QCOMPARE(replay->taskIds, first->taskIds);
+        QVERIFY(manager_->tasks().isEmpty());
+    }
+
+    void remoteCompletionReplayKeepsPinnedNativeDestination() {
+        serveMega();
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        const auto request = QStringLiteral("remote-completed-fixture");
+        DownloadSettings pinned{.directory = root_->filePath(QStringLiteral("RemotePinned")),
+                                .jdEndpoint = server_->url()};
+        const auto first = manager_->enqueueMany(kFrieren, {1}, titleOf(kFrieren),
+                                                 TaskOrigin::Manual, request, pinned);
+        QVERIFY(first);
+        QCOMPARE(first->taskIds.size(), 1);
+        const auto id = first->taskIds.first();
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->state, TaskState::Completed, kTimeout);
+        const auto original = taskOf(id)->targetPath;
+        QVERIFY(original.startsWith(pinned.directory));
+        QCOMPARE(taskOf(id)->remoteRequestId, request);
+        pinned.engine = DownloadEngine::JDownloaderLocal;
+        pinned.directory = root_->filePath(QStringLiteral("Changed"));
+        const auto replay = manager_->enqueueMany(kFrieren, {1}, titleOf(kFrieren),
+                                                  TaskOrigin::Manual, request, pinned);
+        QVERIFY(replay);
+        QCOMPARE(replay->added, 0);
+        QCOMPARE(replay->taskIds, first->taskIds);
+        QCOMPARE(taskOf(id)->state, TaskState::Completed);
+        QCOMPARE(taskOf(id)->targetPath, original);
+        QCOMPARE(taskOf(id)->engine, DownloadEngine::Native);
+        QCOMPARE(mega_calls_, 1);
+    }
+
+    void jdReconcilesAfterRestartAndWaitsForExtraction() {
+        engine_ = DownloadEngine::JDownloaderLocal;
+        FakeJd jd;
+        jd.install(*server_);
+        resolveTo(
+            resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
+        auto created = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(created);
+        const auto id = *created;
+        QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
+        QCOMPARE(taskOf(id)->engineJobId, 77);
+        QCOMPARE(taskOf(id)->engineLinkIds, QList<qint64>{88});
+        const auto destination = taskOf(id)->engineDestination;
+        engine_ = DownloadEngine::Native; // settings changes cannot reroute the persisted task
+        restart();
+        QCOMPARE(taskOf(id)->engine, DownloadEngine::JDownloaderLocal);
+        QCOMPARE(taskOf(id)->engineDestination, destination);
+        QCOMPARE(jd.submissions, 1);
+        jd.finished = true;
+        jd.extracting = true;
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->enginePhase, QStringLiteral("extracting"), kTimeout);
+        QVERIFY(taskOf(id)->state != TaskState::Completed);
+        QFile media(QDir(destination).filePath(QStringLiteral("episode.mkv")));
+        QVERIFY(media.open(QIODevice::WriteOnly));
+        QCOMPARE(media.write("12345678"), 8);
+        media.close();
+        jd.extracting = false;
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->state, TaskState::Completed, kTimeout);
+        QCOMPARE(jd.submissions, 1);
+        QVERIFY(jd.scoped);
+        QVERIFY(library_->episodeLocations(kFrieren, 1)->size() == 1);
+        for (const auto& r : server_->requests()) {
+            QVERIFY(r.path != "/downloadcontroller/start" && r.path != "/downloadcontroller/stop" &&
+                    r.path != "/downloadcontroller/pause");
+        }
+    }
+
+    void jdCancellationDuringSubmissionWaitsForOwnedIds() {
+        engine_ = DownloadEngine::JDownloaderLocal;
+        FakeJd jd;
+        jd.submitDelay = 300;
+        jd.install(*server_);
+        resolveTo(
+            resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE(jd.submissions, 1);
+        manager_->cancel(*id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Cancelled, kTimeout);
+        QVERIFY(jd.scoped);
+        QCOMPARE(jd.removed, 1);
+        QVERIFY(!jd.moved);
+    }
+
+    void jdFinishedWithoutLocalMediaDoesNotComplete() {
+        engine_ = DownloadEngine::JDownloaderLocal;
+        FakeJd jd;
+        jd.install(*server_);
+        jd.finished = true;
+        resolveTo(
+            resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
+        auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::Storage);
+        QVERIFY(library_->episodeLocations(kFrieren, 1)->isEmpty());
+        QCOMPARE(jd.submissions, 1);
+    }
+
+    void jdUncertainSubmissionNeverResubmitsOnRestart() {
+        engine_ = DownloadEngine::JDownloaderLocal;
+        server_->route("GET", "/linkgrabberv2/addLinks", [](const auto&) {
+            return HttpTestServer::Response{.body = "{\"data\":null}"};
+        });
+        resolveTo(
+            resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
+        auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QVERIFY(!taskOf(*id)->engineSubmission.isEmpty());
+        restart();
+        manager_->retry(*id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(server_->count("/linkgrabberv2/addLinks"), 1);
+        QCOMPARE(server_->count("/api/v1/anime/sousou-no-frieren/downloads/resolve"), 1);
     }
 
     void downloadsAndVerifiesAMegaEpisode() {

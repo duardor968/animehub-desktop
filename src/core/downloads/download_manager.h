@@ -4,6 +4,7 @@
 #include "api/api_client.h"
 #include "aria2.h"
 #include "download_repository.h"
+#include "jdownloader.h"
 #include "library/library_repository.h"
 #include "mega.h"
 #include "pixeldrain.h"
@@ -22,12 +23,16 @@ struct DownloadSettings {
     QList<api::Provider> providers{api::Provider::Mega, api::Provider::Pixeldrain};
     api::Audio audio = api::Audio::Sub;
     int maxConcurrent = 2;
+    DownloadEngine engine = DownloadEngine::Native;
+    QUrl jdEndpoint{QStringLiteral("http://127.0.0.1:3128")};
+    QString jdDeviceId;
 };
 
 // What a request for several episodes did.
 struct Enqueued {
     int added = 0;
     int restarted = 0; // paused or failed ones that go on
+    QList<qint64> taskIds;
 };
 
 // Runs the download queue: resolves a source through the API, transfers it with aria2, decrypts
@@ -48,6 +53,7 @@ public:
         pixeldrain::Api& pixeldrain;
         DownloadRepository& repository;
         library::LibraryRepository& library;
+        myjd::Client* myJDownloader = nullptr;
     };
 
     DownloadManager(Services services, std::function<DownloadSettings()> settings,
@@ -56,15 +62,18 @@ public:
 
     [[nodiscard]] static bool isNative(api::Provider provider);
 
-    void start();
+    // Read-only startup presents a cloned queue without resolving or controlling either engine.
+    void start(bool transfers = true);
     // Gives aria2 the chance to save resume data, then calls `done`.
     void shutdown(std::function<void()> done);
 
     std::expected<qint64, QString> enqueue(const QString& slug, double number,
                                            const QString& anime_title, TaskOrigin origin);
     // Queues the episodes without a task and restarts the paused or failed ones.
-    std::expected<Enqueued, QString> enqueueMany(const QString& slug, const QList<double>& numbers,
-                                                 const QString& anime_title, TaskOrigin origin);
+    std::expected<Enqueued, QString>
+    enqueueMany(const QString& slug, const QList<double>& numbers, const QString& anime_title,
+                TaskOrigin origin, const QString& sourceRequestId = {},
+                std::optional<DownloadSettings> fixedSettings = std::nullopt);
     void pause(qint64 id);
     void resume(qint64 id);
     void cancel(qint64 id);
@@ -109,6 +118,7 @@ private:
         QString partialPath;
         std::shared_ptr<std::atomic<bool>> cancel;
         QDateTime savedAt;
+        bool jdBusy = false;
     };
 
     void pump();
@@ -119,6 +129,13 @@ private:
                        qint64 size, const QString& provider_name,
                        std::optional<mega::FileLink> mega_link);
     void poll();
+    void submitJd(qint64 id, const api::ResolvedLink& link);
+    void pollJd(qint64 id);
+    void collectJd(qint64 id);
+    void jdRequest(qint64 id, const QString& path, const QJsonArray& params,
+                   myjd::Client::Callback<QJsonValue> done);
+    void observeJd(qint64 id, const QJsonArray& links);
+    void cancelJd(qint64 id, bool collector = false);
     void finishTransfer(qint64 id);
     void verifyMega(qint64 id);
     void complete(qint64 id, const QString& path);
@@ -156,7 +173,9 @@ private:
     QHash<qint64, Live> live_;
     QTimer poll_timer_;
     QTimer wake_timer_;
+    QNetworkAccessManager jd_network_;
     bool started_ = false;
+    bool transfers_enabled_ = true;
     bool stopping_ = false;
 };
 

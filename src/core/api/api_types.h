@@ -81,6 +81,8 @@ struct AnimeDetail : AnimeSummary {
     QUrl sourceUrl;
     QList<Category> genres;
     QList<Relation> relations;
+    // Source -> this anime, preserving the provider's original kind (never inverted).
+    QList<Relation> incomingRelations;
 };
 
 struct Episode {

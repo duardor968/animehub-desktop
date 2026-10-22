@@ -6,6 +6,7 @@ import AnimeHub
 
 ModalDialog {
     id: dialog
+    objectName: "settingsDialog"
 
     required property AppController app
     readonly property AppSettings settings: app.settings
@@ -71,6 +72,15 @@ ModalDialog {
 
             SectionTitle { text: "Descargas"; Layout.topMargin: 0 }
 
+            FieldLabel { text: "Motor preferido" }
+            ComboBox {
+                Layout.fillWidth: true
+                model: ["Incorporado", "JDownloader"]
+                currentIndex: dialog.settings.preferredJDownloader ? 1 : 0
+                onActivated: index => dialog.settings.preferredJDownloader = index === 1
+                Accessible.name: "Motor preferido"
+            }
+
             FieldLabel { text: "Carpeta" }
             RowLayout {
                 Layout.fillWidth: true
@@ -87,6 +97,7 @@ ModalDialog {
                 }
                 Button {
                     text: "Cambiar…"
+                    enabled: !dialog.settings.isolated
                     onClicked: folderDialog.open()
                 }
             }
@@ -148,6 +159,7 @@ ModalDialog {
             Switch {
                 leftPadding: 0
                 text: "Abrir AnimeHub en la bandeja"
+                enabled: !dialog.settings.isolated
                 checked: dialog.settings.startWithWindows
                 onToggled: dialog.settings.startWithWindows = checked
             }
@@ -162,6 +174,38 @@ ModalDialog {
             }
 
             SectionTitle { text: "JDownloader" }
+
+            FieldLabel { text: "Conexión del motor" }
+            ComboBox {
+                Layout.fillWidth: true
+                model: ["Local", "MyJDownloader"]
+                currentIndex: dialog.settings.cloudJDownloader ? 1 : 0
+                onActivated: index => dialog.settings.cloudJDownloader = index === 1
+                Accessible.name: "Conexión del motor JDownloader"
+            }
+            FieldLabel { text: "API local"; visible: !dialog.settings.cloudJDownloader }
+            TextField {
+                Layout.fillWidth: true
+                visible: !dialog.settings.cloudJDownloader
+                text: dialog.settings.jdEndpoint
+                onEditingFinished: { dialog.settings.jdEndpoint = text; text = dialog.settings.jdEndpoint }
+                Accessible.name: "URL de la API local de JDownloader"
+            }
+            FieldLabel { text: "Aplicación" }
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    Layout.fillWidth: true
+                    text: dialog.settings.jdExecutable || "Sin seleccionar"
+                    elide: Text.ElideMiddle
+                }
+                Button { text: "Elegir…"; onClicked: jdFile.open() }
+                Button {
+                    text: "Iniciar JDownloader"
+                    enabled: dialog.settings.jdExecutable !== ""
+                    onClicked: dialog.app.jdownloader.launch()
+                }
+            }
 
             InfoLabel {
                 text: "Enviar enlaces a"
@@ -183,7 +227,7 @@ ModalDialog {
             RowLayout {
                 id: remote
                 Layout.fillWidth: true
-                visible: dialog.settings.jdownloader === AppSettings.Remote
+                visible: dialog.settings.jdownloader === AppSettings.Remote || dialog.settings.cloudJDownloader
 
                 Label {
                     Layout.fillWidth: true
@@ -227,10 +271,16 @@ ModalDialog {
             Label {
                 id: jdProblem
                 Layout.fillWidth: true
-                visible: remote.visible && dialog.app.jdownloader.problem !== ""
+                visible: dialog.app.jdownloader.problem !== ""
                 text: dialog.app.jdownloader.problem
                 color: Theme.danger
                 wrapMode: Text.Wrap
+            }
+
+            Button {
+                Layout.columnSpan: 2
+                text: "Dispositivos vinculados…"
+                onClicked: remoteDevices.open()
             }
 
             Label {
@@ -295,4 +345,11 @@ ModalDialog {
         currentFolder: "file:///" + dialog.settings.downloadDirectory
         onAccepted: dialog.settings.downloadDirectory = dialog.app.localPath(selectedFolder)
     }
+    FileDialog {
+        id: jdFile
+        title: "Seleccionar JDownloader"
+        nameFilters: ["Aplicaciones (*.exe)"]
+        onAccepted: dialog.settings.jdExecutable = dialog.app.localPath(selectedFile)
+    }
+    RemoteDevicesDialog { id: remoteDevices; objectName: "remoteDevices"; remote: dialog.app.remote }
 }

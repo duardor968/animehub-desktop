@@ -25,6 +25,9 @@ class DownloadsView final : public QObject {
 
     // Running, queued or due to retry: what goes on by itself. Paused ones wait for the user.
     Q_PROPERTY(int activeCount READ activeCount NOTIFY summaryChanged)
+    Q_PROPERTY(bool canPauseNative READ canPauseNative NOTIFY summaryChanged)
+    Q_PROPERTY(bool canResumeNative READ canResumeNative NOTIFY summaryChanged)
+    Q_PROPERTY(bool canRetryFailed READ canRetryFailed NOTIFY summaryChanged)
     Q_PROPERTY(bool anyPaused READ anyPaused NOTIFY summaryChanged)
 
     // The download on view at the top of the page.
@@ -124,6 +127,9 @@ public:
     [[nodiscard]] QString peakText() const;
     [[nodiscard]] QString totalText() const;
 
+    [[nodiscard]] bool canPauseNative() const;
+    [[nodiscard]] bool canResumeNative() const;
+    [[nodiscard]] bool canRetryFailed() const;
     Q_INVOKABLE void pauseAll();
     Q_INVOKABLE void resumeAll();
     Q_INVOKABLE void retryAllFailed();

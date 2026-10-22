@@ -2,6 +2,8 @@
 
 #include "platform/credentials.h"
 
+#include <QFileInfo>
+#include <QProcess>
 #include <QVariantMap>
 
 namespace animehub::app {
@@ -58,6 +60,18 @@ void JDownloaderView::start() {
         }
         refreshDevices();
     });
+}
+
+void JDownloaderView::launch() {
+    const QFileInfo executable(settings_.jdExecutable());
+    if (!executable.isAbsolute() || !executable.isFile() ||
+        executable.suffix().compare(QStringLiteral("exe"), Qt::CaseInsensitive) != 0 ||
+        !QProcess::startDetached(executable.absoluteFilePath(), {})) {
+        problem_ = QStringLiteral("Selecciona el ejecutable de JDownloader en Ajustes.");
+    } else {
+        problem_.clear();
+    }
+    emit changed();
 }
 
 void JDownloaderView::connectAccount(const QString& email, const QString& password) {

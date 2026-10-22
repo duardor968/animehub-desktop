@@ -267,7 +267,12 @@ Item {
                 Accessible.checked: root.view.inLibrary
                 ToolTip.visible: hovered && root.view.inLibrary
                 ToolTip.text: "Quitar de la biblioteca"
-                onClicked: root.view.setInLibrary(!root.view.inLibrary)
+                onClicked: {
+                    if (root.view.inLibrary)
+                        removalDialog.show([root.view.slug], root.view.title, false)
+                    else
+                        root.view.setInLibrary(true)
+                }
             }
 
             ToolButton {
@@ -397,6 +402,11 @@ Item {
             glyph: Theme.icon.folder
             onTriggered: root.view.openFolder()
         }
+    }
+
+    LibraryRemovalDialog {
+        id: removalDialog
+        model: root.ApplicationWindow.window.app.library
     }
 
     ModalDialog {

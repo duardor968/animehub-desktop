@@ -253,15 +253,18 @@ void Client::requestDevices(QObject* context, Callback<QList<Device>> done, bool
                });
 }
 
-void Client::callDevice(const QString& device_id, const QString& path, const QJsonObject& params,
+void Client::callDevice(const QString& device_id, const QString& path, const QJsonArray& params,
                         QObject* context, Answer done, bool retried) {
+    QJsonArray arguments;
+    for (const auto& parameter : params) {
+        const auto json = QJsonDocument(QJsonArray{parameter}).toJson(QJsonDocument::Compact);
+        arguments.append(QString::fromUtf8(json.mid(1, json.size() - 2)));
+    }
     const auto rid = nextRequestId();
-    const QJsonObject payload{
-        {QStringLiteral("apiVer"), 1},
-        {QStringLiteral("rid"), rid},
-        {QStringLiteral("url"), path},
-        {QStringLiteral("params"),
-         QJsonArray{QString::fromUtf8(QJsonDocument(params).toJson(QJsonDocument::Compact))}}};
+    const QJsonObject payload{{QStringLiteral("apiVer"), 1},
+                              {QStringLiteral("rid"), rid},
+                              {QStringLiteral("url"), path},
+                              {QStringLiteral("params"), arguments}};
     const auto key = device_token_;
     const auto body = encrypt(QJsonDocument(payload).toJson(QJsonDocument::Compact), key);
     const auto url =
@@ -318,9 +321,9 @@ void Client::addLinks(const QString& device_id, const QString& package, const QL
         urls.append(link.toString(QUrl::FullyEncoded));
     }
     callDevice(device_id, QStringLiteral("/linkgrabberv2/addLinks"),
-               {{QStringLiteral("links"), urls.join(QLatin1Char('\n'))},
-                {QStringLiteral("packageName"), package},
-                {QStringLiteral("autostart"), false}},
+               {QJsonObject{{QStringLiteral("links"), urls.join(QLatin1Char('\n'))},
+                            {QStringLiteral("packageName"), package},
+                            {QStringLiteral("autostart"), false}}},
                context, [done = std::move(done)](const auto& answer) {
                    if (!answer) {
                        done(std::unexpected(answer.error().first));
@@ -328,6 +331,23 @@ void Client::addLinks(const QString& device_id, const QString& package, const QL
                    }
                    done({});
                });
+}
+
+void Client::request(const QString& device_id, const QString& path, const QJsonArray& params,
+                     QObject* context, Callback<QJsonValue> done) {
+    if (!isConnected() || device_id.isEmpty()) {
+        done(std::unexpected(Failure::WrongCredentials));
+        return;
+    }
+    callDevice(device_id, path, params, context, [done = std::move(done)](const auto& answer) {
+        if (!answer) {
+            done(std::unexpected(answer.error().first));
+        } else if (!answer->contains(u"data")) {
+            done(std::unexpected(Failure::Protocol));
+        } else {
+            done(answer->value(u"data"));
+        }
+    });
 }
 
 void Client::disconnectAccount() {

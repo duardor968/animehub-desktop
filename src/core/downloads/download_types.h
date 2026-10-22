@@ -23,6 +23,7 @@ enum class TaskState {
 };
 
 enum class TaskOrigin { Manual, Automatic };
+enum class DownloadEngine { Native, JDownloaderLocal, JDownloaderCloud };
 
 // Why a task failed or waits; the UI turns it into words.
 enum class TaskIssue {
@@ -60,6 +61,15 @@ struct Task {
     QDateTime createdAt;
     QDateTime finishedAt;
     bool pausedWithAll = false; // paused by pauseAll(), so resumeAll() brings it back
+    DownloadEngine engine = DownloadEngine::Native;
+    QString engineEndpoint;
+    QString engineDevice;
+    qint64 engineJobId = 0;
+    QList<qint64> engineLinkIds;
+    QString engineSubmission; // local intent UUID; never a URL or credential
+    QString enginePhase;
+    QString engineDestination;
+    QString remoteRequestId;
 
     [[nodiscard]] bool active() const {
         return state != TaskState::Completed && state != TaskState::Cancelled &&

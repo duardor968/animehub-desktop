@@ -74,6 +74,28 @@ private slots:
         QCOMPARE(anime->relations.first().kind, RelationKind::Sequel);
     }
 
+    void decodesIncomingRelationsWithoutInvertingKinds() {
+        const auto body = edited(fixture("anime.json"), [](QJsonObject& root) {
+            auto data = root[u"data"].toObject();
+            auto incoming = data[u"relations"].toArray();
+            auto relation = incoming.first().toObject();
+            relation[u"kind"] = QStringLiteral("PREQUEL");
+            incoming[0] = relation;
+            data[u"incomingRelations"] = incoming;
+            root[u"data"] = data;
+        });
+        const auto decoded = json::decodeAnime(body);
+        QVERIFY2(decoded, qPrintable(why(decoded)));
+        QVERIFY(!decoded->incomingRelations.isEmpty());
+        QCOMPARE(decoded->incomingRelations.first().kind, RelationKind::Prequel);
+        QCOMPARE(decoded->relations.first().kind, RelationKind::Sequel);
+        const auto invalid = edited(body, [](QJsonObject& root) {
+            auto data = root[u"data"].toObject();
+            data[u"incomingRelations"] = 7;
+            root[u"data"] = data;
+        });
+        QVERIFY(!json::decodeAnime(invalid));
+    }
     void decodesEpisodePage() {
         const auto page = json::decodeEpisodes(fixture("episodes.json"));
         QVERIFY2(page, qPrintable(why(page)));

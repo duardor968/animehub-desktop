@@ -200,6 +200,41 @@ private slots:
         QCOMPARE(fake.lastLinks.split(u'\n').size(), 2);
     }
 
+    void scopedDeviceCallsPreservePositionalEncryptedArguments() {
+        HttpTestServer server;
+        QVERIFY(server.listen());
+        FakeMyJd fake;
+        fake.install(server);
+        QNetworkAccessManager network;
+        myjd::Client client(network, nullptr,
+                            server.url(QString()).adjusted(QUrl::StripTrailingSlash));
+        bool ready = false;
+        client.connectAccount(fake.secrets, this,
+                              [&](const auto& result) { ready = result.has_value(); });
+        QTRY_VERIFY(ready);
+        QJsonArray arguments;
+        server.route("POST", "/t_" + fake.session.toLatin1() + "_dev1/downloadsV2/forceDownload",
+                     [&](const auto& request) {
+                         const auto key = myjd::updateToken(fake.secrets.device, fake.session);
+                         const auto plain = myjd::decrypt(request.body, key);
+                         const auto payload = QJsonDocument::fromJson(plain.value_or("")).object();
+                         arguments = payload.value(u"params").toArray();
+                         const QJsonObject response{{QStringLiteral("rid"), payload.value(u"rid")},
+                                                    {QStringLiteral("data"), QJsonValue::Null}};
+                         return HttpTestServer::Response{
+                             .body = myjd::encrypt(QJsonDocument(response).toJson(), key)};
+                     });
+        std::optional<std::expected<QJsonValue, myjd::Failure>> response;
+        client.request(QStringLiteral("dev1"), QStringLiteral("/downloadsV2/forceDownload"),
+                       {QJsonArray{qint64(9007199254740993LL)}, QJsonArray{}}, this,
+                       [&](const auto& result) { response = result; });
+        QTRY_VERIFY(response.has_value());
+        QVERIFY(*response);
+        QCOMPARE(arguments.size(), 2);
+        QCOMPARE(arguments[0].toString(), QStringLiteral("[9007199254740993]"));
+        QCOMPARE(arguments[1].toString(), QStringLiteral("[]"));
+    }
+
     void reconnectsWhenTheSessionExpires() {
         HttpTestServer server;
         QVERIFY(server.listen());

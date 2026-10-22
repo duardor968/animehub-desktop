@@ -18,7 +18,15 @@ struct DownloadEpisodeRow {
     QString detail; // display::download
     bool problem = false;
     bool hasFile = false; // completed and still on disk
-    QString partial;      // what cancelling deletes ("143 MB"); empty when nothing
+    QString engine;
+    QString source;
+    QString connection;
+    QString destination;
+    QString phase;
+    bool canPause = false;
+    bool canResume = false;
+    bool canRetry = false;
+    QString partial; // what cancelling deletes ("143 MB"); empty when nothing
 
     bool operator==(const DownloadEpisodeRow&) const = default;
 };
@@ -34,6 +42,9 @@ struct DownloadSeriesRow {
     QString failedText; // "1 con error"
     bool canPause = false;
     bool canResume = false;
+    bool canRetry = false;
+    QString engines;
+    QString destinations;
     bool first = false;  // first in line
     QString cancelText;  // what cancelling deletes, said in full; empty when nothing
     int filesOnDisk = 0; // completed episodes whose file is still there
@@ -63,6 +74,14 @@ public:
         ProblemRole,
         HasFileRole,
         PartialRole,
+        EngineRole,
+        SourceRole,
+        ConnectionRole,
+        DestinationRole,
+        PhaseRole,
+        CanPauseRole,
+        CanResumeRole,
+        CanRetryRole,
     };
 
     using QAbstractListModel::QAbstractListModel;
@@ -97,6 +116,9 @@ public:
         CanPauseRole,
         CanResumeRole,
         FirstRole,
+        CanRetryRole,
+        EnginesRole,
+        DestinationsRole,
         CancelTextRole,
         FilesOnDiskRole,
         DiskTextRole,

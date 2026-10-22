@@ -442,17 +442,23 @@ Decoded<AnimeDetail> decodeAnime(const QByteArray& body) {
     detail.votes = reader.optionalInteger(data, path, L("votes"));
     detail.sourceUrl = reader.url(data, path, L("sourceUrl"));
     detail.genres = readCategories(reader, data, path, L("genres"));
-    detail.relations = reader.list<Relation>(
-        reader.array(data, path, L("relations")), path + QStringLiteral(".relations"),
-        [&](const QJsonObject& item, const QString& item_path) {
-            Relation relation;
-            const auto kind = relationKindFromKey(reader.text(item, item_path, L("kind")));
-            relation.kind = kind.value_or(RelationKind::Other);
-            relation.position = reader.integer(item, item_path, L("position"));
-            relation.anime = readSummary(reader, reader.object(item, item_path, L("anime")),
-                                         item_path + QStringLiteral(".anime"));
-            return relation;
-        });
+    const auto read_relation = [&](const QJsonObject& item, const QString& item_path) {
+        Relation relation;
+        const auto kind = relationKindFromKey(reader.text(item, item_path, L("kind")));
+        relation.kind = kind.value_or(RelationKind::Other);
+        relation.position = reader.integer(item, item_path, L("position"));
+        relation.anime = readSummary(reader, reader.object(item, item_path, L("anime")),
+                                     item_path + QStringLiteral(".anime"));
+        return relation;
+    };
+    detail.relations = reader.list<Relation>(reader.array(data, path, L("relations")),
+                                             path + QStringLiteral(".relations"), read_relation);
+    // Old cached responses predate this additive field. A present value still validates strictly.
+    if (data.contains(L("incomingRelations"))) {
+        detail.incomingRelations =
+            reader.list<Relation>(reader.array(data, path, L("incomingRelations")),
+                                  path + QStringLiteral(".incomingRelations"), read_relation);
+    }
     return finish(reader, std::move(detail));
 }
 

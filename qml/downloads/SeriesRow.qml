@@ -18,6 +18,9 @@ Item {
     required property string failedText
     required property bool canPause
     required property bool canResume
+    required property bool canRetry
+    required property string destinations
+    required property string engines
     required property bool first
     required property string cancelText
     required property int filesOnDisk
@@ -178,7 +181,7 @@ Item {
                                             - (failures.visible
                                                ? separator.implicitWidth + failures.implicitWidth : 0)
                                             - (retry.visible ? retry.width + 4 : 0))
-                            text: root.summary
+                            text: root.engines + " · " + root.summary
                             color: Theme.muted
                             font.pixelSize: Theme.body
                             elide: Text.ElideRight
@@ -212,7 +215,7 @@ Item {
                         ToolButton {
                             id: retry
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: root.failed > 0
+                            visible: root.canRetry
                             display: root.compact ? AbstractButton.IconOnly
                                                   : AbstractButton.TextOnly
                             text: "Reintentar fallidos"
@@ -223,6 +226,16 @@ Item {
                             onClicked: root.downloads.retryFailed(root.slug)
                         }
                     }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: root.destinations
+                    color: Theme.muted
+                    font.pixelSize: Theme.caption
+                    elide: Text.ElideMiddle
+                    ToolTip.visible: destinationHover.hovered
+                    ToolTip.text: text
+                    HoverHandler { id: destinationHover }
                 }
             }
 
@@ -286,7 +299,7 @@ Item {
                     icon.source: Theme.source(!root.queued ? Theme.icon.folder
                                               : root.canPause ? Theme.icon.pause : Theme.icon.download)
                     display: AbstractButton.IconOnly
-                    text: !root.queued ? "Abrir la carpeta" : root.canPause ? "Pausar" : "Reanudar"
+                    text: !root.queued ? "Abrir la carpeta" : root.canPause ? "Pausar incorporadas" : "Reanudar incorporadas"
                     ToolTip.visible: hovered
                     ToolTip.text: text
                     onClicked: {

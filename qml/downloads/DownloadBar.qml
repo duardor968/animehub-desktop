@@ -65,18 +65,20 @@ AbstractButton {
         Item { Layout.fillWidth: true }
 
         Button {
+            visible: root.mode === DownloadsView.Failed ? root.downloads.canRetryFailed
+                     : root.downloads.canPauseNative || root.downloads.canResumeNative
             Layout.rightMargin: 8
             flat: true
             text: root.mode === DownloadsView.Failed ? "Reintentar"
-                  : root.running ? "Pausar" : "Reanudar"
+                  : root.downloads.canPauseNative ? "Pausar incorporadas" : "Reanudar incorporadas"
             icon.source: Theme.source(root.mode === DownloadsView.Failed ? Theme.icon.retry
-                                      : root.running ? Theme.icon.pause : Theme.icon.download)
+                                      : root.downloads.canPauseNative ? Theme.icon.pause : Theme.icon.download)
             icon.width: 16
             icon.height: 16
             onClicked: {
                 if (root.mode === DownloadsView.Failed)
                     root.downloads.retryAllFailed()
-                else if (root.running)
+                else if (root.downloads.canPauseNative)
                     root.downloads.pauseAll()
                 else
                     root.downloads.resumeAll()

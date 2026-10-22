@@ -49,6 +49,7 @@ public:
 
     Stored<void> add(const AnimeRecord& snapshot);
     Stored<void> remove(const QString& slug);
+    Stored<void> archive(const QString& slug, bool archived);
     Stored<void> setFlag(const QString& slug, Flag flag, bool value);
     // Remembers the metadata of an anime seen in the catalog without adding it.
     Stored<void> remember(const AnimeRecord& snapshot);
@@ -90,6 +91,7 @@ signals:
     void listChanged();
     void refreshFailed(const QString& slug, const QString& message);
     void newEpisodes(const QString& slug, const QList<double>& numbers);
+    void newFranchiseMembers(const QStringList& slugs);
 
 private:
     void store(const api::AnimeDetail& detail, bool flag_new);
@@ -98,7 +100,8 @@ private:
     void sweep();
     Stored<void> changed(Stored<void> result, const QString& slug, bool list = false);
     Stored<Trashed> trash(const QString& slug,
-                          const std::function<bool(const EpisodeRecord&)>& chosen);
+                          const std::function<bool(const EpisodeRecord&)>& chosen,
+                          bool skip_shared = false);
 
     LibraryRepository& repository_;
     api::ApiClient& api_;
@@ -107,6 +110,7 @@ private:
     QSet<QString> refreshing_;
     QTimer recent_timer_;
     QTimer sweep_timer_;
+    qsizetype finished_sweep_offset_ = 0;
 };
 
 } // namespace animehub::library

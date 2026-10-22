@@ -120,8 +120,25 @@ Rectangle {
         Repeater {
             model: root.idle ? null : root.downloads.current
 
+            Label {
+                required property string engines
+                required property string destinations
+                Layout.fillWidth: true
+                text: engines + (destinations ? " · " + destinations : "")
+                color: Theme.muted
+                font.pixelSize: Theme.caption
+                elide: Text.ElideMiddle
+                ToolTip.visible: metadataHover.hovered
+                ToolTip.text: text
+                HoverHandler { id: metadataHover }
+            }
+        }
+        Repeater {
+            model: root.idle ? null : root.downloads.current
+
             RowLayout {
                 required property string slug
+                required property bool canRetry
                 required property int failed
                 required property string failedText
 
@@ -134,6 +151,7 @@ Rectangle {
                     font.pixelSize: Theme.body
                 }
                 Button {
+                    visible: parent.canRetry
                     flat: true
                     text: "Reintentar fallidos"
                     onClicked: root.downloads.retryFailed(parent.slug)
@@ -149,16 +167,17 @@ Rectangle {
 
             Button {
                 id: toggle
+                visible: root.downloads.canPauseNative || root.downloads.canResumeNative
                 highlighted: true
                 display: AbstractButton.IconOnly
                 // The icon and Fluent's own side padding; narrower squeezes the icon.
                 implicitWidth: 40
                 // As Steam's, and as the bottom bar's and the tray's: every download.
-                text: root.paused ? "Reanudar las descargas" : "Pausar las descargas"
-                icon.source: Theme.source(root.paused ? Theme.icon.download : Theme.icon.pause)
+                text: root.downloads.canPauseNative ? "Pausar incorporadas" : "Reanudar incorporadas"
+                icon.source: Theme.source(root.downloads.canPauseNative ? Theme.icon.pause : Theme.icon.download)
                 ToolTip.visible: hovered
                 ToolTip.text: text
-                onClicked: root.paused ? root.downloads.resumeAll() : root.downloads.pauseAll()
+                onClicked: root.downloads.canPauseNative ? root.downloads.pauseAll() : root.downloads.resumeAll()
             }
 
             ColumnLayout {

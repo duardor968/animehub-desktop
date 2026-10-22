@@ -5,6 +5,7 @@
 
 #include <QDateTime>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 
 #include <optional>
@@ -29,6 +30,7 @@ struct AnimeRecord {
     std::optional<int> startYear;
 
     bool inLibrary = false;
+    bool archived = false;
     bool favorite = false;
     bool notify = true;
     bool autoDownload = false;
@@ -55,6 +57,7 @@ struct LibraryEntry : AnimeRecord {
 
 struct EpisodeRecord {
     double number = 0;
+    QString sourceEpisodeId;
     QString title;
     QUrl imageUrl;
     QDateTime publishedAt;
@@ -65,6 +68,25 @@ struct EpisodeRecord {
     QDateTime stateAt;
     QString filePath;
     qint64 fileSize = 0;
+};
+
+struct EpisodeLocation {
+    QString path;
+    qint64 size = 0;
+};
+
+struct FranchiseRecord {
+    qint64 id = 0;
+    QString title;
+    QStringList members;
+};
+
+struct FranchiseCandidate {
+    QString slug;
+    QString title;
+    QString reason;
+    QStringList standaloneSlugs; // personal neighbors included when creating a needs_group group
+    QStringList franchiseTitles; // neighboring personal groups behind a multiple_groups review
 };
 
 // "12", "12.5": how episode numbers are shown and written in file names.

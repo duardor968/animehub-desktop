@@ -19,11 +19,17 @@ public:
     // Fails when the episode already has an active task. A new task takes the place in the
     // queue of its series when the series is still in line; otherwise it goes last.
     Stored<Task> create(const QString& slug, double number, const QString& anime_title,
-                        api::Audio audio, TaskOrigin origin, const QString& target_path);
+                        api::Audio audio, TaskOrigin origin, const QString& target_path,
+                        DownloadEngine engine = DownloadEngine::Native,
+                        const QString& endpoint = {}, const QString& device = {});
     // Several episodes (number, target path) of one anime, all or none.
     Stored<QList<Task>> createMany(const QString& slug,
                                    const QList<std::pair<double, QString>>& episodes,
-                                   const QString& anime_title, api::Audio audio, TaskOrigin origin);
+                                   const QString& anime_title, api::Audio audio, TaskOrigin origin,
+                                   DownloadEngine engine = DownloadEngine::Native,
+                                   const QString& endpoint = {}, const QString& device = {},
+                                   const QString& sourceRequestId = {});
+    [[nodiscard]] Stored<QList<qint64>> remoteTaskIds(const QString& sourceRequestId) const;
     Stored<void> save(const Task& task);
     Stored<void> save(const QList<Task>& tasks); // in one transaction
     Stored<void> remove(qint64 id);

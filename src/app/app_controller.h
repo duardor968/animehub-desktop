@@ -7,6 +7,7 @@
 #include "downloads_view.h"
 #include "jdownloader_view.h"
 #include "library_model.h"
+#include "remote_view.h"
 
 #include <QLocalServer>
 #include <QNetworkAccessManager>
@@ -25,6 +26,10 @@ struct AppPaths {
     QString data;      // library, settings, caches
     QString engines;   // aria2 and mpv shipped next to the executable
     QString downloads; // default download folder
+    QUrl apiBase;
+    bool isolated = false;
+    bool transfers = true;
+    bool smoke = false;
 };
 
 // Builds and owns everything the window shows, and the app's life outside it: tray icon,
@@ -39,6 +44,7 @@ class AppController final : public QObject {
     Q_PROPERTY(CatalogView* catalog READ catalog CONSTANT)
     Q_PROPERTY(DownloadsView* downloads READ downloads CONSTANT)
     Q_PROPERTY(JDownloaderView* jdownloader READ jdownloader CONSTANT)
+    Q_PROPERTY(RemoteView* remote READ remote CONSTANT)
     Q_PROPERTY(AnimeView* libraryAnime READ libraryAnime CONSTANT)
     Q_PROPERTY(AnimeView* catalogAnime READ catalogAnime CONSTANT)
     Q_PROPERTY(QString version READ version CONSTANT)
@@ -50,7 +56,7 @@ public:
     ~AppController() override;
 
     [[nodiscard]] bool ready() const {
-        return database_ != nullptr;
+        return database_ != nullptr && problem_.isEmpty();
     }
     [[nodiscard]] QString problem() const {
         return problem_;
@@ -76,6 +82,9 @@ public:
     }
     [[nodiscard]] JDownloaderView* jdownloader() {
         return jdownloader_view_.get();
+    }
+    RemoteView* remote() {
+        return remote_view_.get();
     }
     [[nodiscard]] AnimeView* libraryAnime() {
         return library_anime_.get();
@@ -113,6 +122,7 @@ private:
     void notifyNewEpisodes(const QString& slug, const QList<double>& numbers);
     void notify(const QString& title, const QString& text, const QString& slug);
     void hideToTray();
+    void publishRemoteProfiles();
 
     AppPaths paths_;
     QNetworkAccessManager network_;
@@ -129,6 +139,8 @@ private:
     std::unique_ptr<downloads::myjd::Client> myjd_;
     std::unique_ptr<JDownloaderView> jdownloader_view_;
     std::unique_ptr<downloads::DownloadManager> downloads_;
+    std::unique_ptr<remote::RemoteService> remote_service_;
+    std::unique_ptr<RemoteView> remote_view_;
     std::unique_ptr<playback::Player> player_;
     std::unique_ptr<LibraryModel> library_model_;
     std::unique_ptr<CatalogView> catalog_view_;

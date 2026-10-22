@@ -51,6 +51,7 @@ public:
     Q_INVOKABLE void connectAccount(const QString& email, const QString& password);
     Q_INVOKABLE void disconnectAccount();
     Q_INVOKABLE void refreshDevices();
+    Q_INVOKABLE void launch();
 
     // Sends `links` to the chosen JDownloader; `done` gets a short sentence for the user.
     void send(const QString& package, const QList<QUrl>& links, QObject* context,

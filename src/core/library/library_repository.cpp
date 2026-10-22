@@ -1,5 +1,7 @@
 #include "library_repository.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QSqlRecord>
 #include <QTimeZone>
 
@@ -30,7 +32,7 @@ std::optional<int> optionalInt(const QVariant& value) {
 constexpr auto kAnimeColumns =
     "slug, title, alternative_title, synopsis, poster_url, backdrop_url, category, status, "
     "episode_count, genres, start_year, in_library, added_at, favorite, notify, auto_download, "
-    "last_activity_at, episodes_synced_at";
+    "last_activity_at, episodes_synced_at, archived";
 
 AnimeRecord readAnime(const QSqlQuery& query) {
     AnimeRecord record;
@@ -52,6 +54,7 @@ AnimeRecord readAnime(const QSqlQuery& query) {
     record.autoDownload = query.value(15).toBool();
     record.lastActivityAt = timeAt(query.value(16));
     record.episodesSyncedAt = timeAt(query.value(17));
+    record.archived = query.value(18).toBool();
     return record;
 }
 
@@ -68,11 +71,13 @@ EpisodeRecord readEpisode(const QSqlQuery& query) {
     record.stateAt = timeAt(query.value(8));
     record.filePath = query.value(9).toString();
     record.fileSize = query.value(10).toLongLong();
+    record.sourceEpisodeId = query.value(11).toString();
     return record;
 }
 
-constexpr auto kEpisodeColumns = "number, title, image_url, published_at, is_new, state, "
-                                 "position_ms, duration_ms, state_at, file_path, file_size";
+constexpr auto kEpisodeColumns =
+    "number, title, image_url, published_at, is_new, state, "
+    "position_ms, duration_ms, state_at, file_path, file_size, source_episode_id";
 
 QString columnFor(Flag flag) {
     switch (flag) {
@@ -120,12 +125,20 @@ ON CONFLICT(slug) DO UPDATE SET
 }
 
 Stored<void> LibraryRepository::setInLibrary(const QString& slug, bool in_library) {
+    if (in_library) {
+        auto clear =
+            database_.run(QStringLiteral("DELETE FROM personal_exclusion WHERE slug = ?"), {slug});
+        if (!clear)
+            return std::unexpected(clear.error());
+    }
     const auto result =
         in_library
-            ? database_.run(QStringLiteral("UPDATE anime SET in_library = 1, added_at = COALESCE("
-                                           "CASE WHEN in_library = 1 THEN added_at END, ?) "
-                                           "WHERE slug = ?"),
-                            {nowMs(), slug})
+            ? database_.run(
+                  QStringLiteral(
+                      "UPDATE anime SET in_library = 1, archived = 0, added_at = COALESCE("
+                      "CASE WHEN in_library = 1 THEN added_at END, ?) "
+                      "WHERE slug = ?"),
+                  {nowMs(), slug})
             : database_.run(QStringLiteral("UPDATE anime SET in_library = 0, auto_download = 0, "
                                            "added_at = NULL WHERE slug = ?"),
                             {slug});
@@ -168,13 +181,14 @@ Stored<LibraryEntry> LibraryRepository::withProgress(LibraryEntry entry) const {
     auto counts = database_.run(QStringLiteral(R"sql(
 SELECT COUNT(*),
        COALESCE(SUM(state = 2), 0),
-       COALESCE(SUM(file_path IS NOT NULL), 0),
+       COALESCE(SUM(EXISTS(SELECT 1 FROM episode_file f WHERE f.slug = episode.slug AND f.number = episode.number)), 0),
        COALESCE(SUM(is_new), 0),
        MAX(CASE WHEN state = 2 THEN number END),
-       COALESCE(SUM(CASE WHEN file_path IS NOT NULL THEN file_size END), 0)
+       (SELECT COALESCE(SUM(size), 0) FROM media_file WHERE id IN
+           (SELECT file_id FROM episode_file WHERE slug = ?))
 FROM episode WHERE slug = ?
 )sql"),
-                                {entry.slug});
+                                {entry.slug, entry.slug});
     if (!counts) {
         return std::unexpected(counts.error());
     }
@@ -211,10 +225,19 @@ FROM episode WHERE slug = ?
     return entry;
 }
 
-Stored<QList<LibraryEntry>> LibraryRepository::entries() const {
-    auto query = database_.run(QStringLiteral("SELECT %1 FROM anime WHERE in_library = 1 "
+Stored<QList<LibraryEntry>> LibraryRepository::entries(bool include_archived) const {
+    return queryEntries(include_archived ? QStringLiteral("in_library = 1")
+                                         : QStringLiteral("in_library = 1 AND archived = 0"));
+}
+
+Stored<QList<LibraryEntry>> LibraryRepository::followedEntries() const {
+    return queryEntries(QStringLiteral("in_library = 1 AND (notify = 1 OR auto_download = 1)"));
+}
+
+Stored<QList<LibraryEntry>> LibraryRepository::queryEntries(const QString& predicate) const {
+    auto query = database_.run(QStringLiteral("SELECT %1 FROM anime WHERE %2 "
                                               "ORDER BY title COLLATE NOCASE")
-                                   .arg(QLatin1StringView(kAnimeColumns)));
+                                   .arg(QLatin1StringView(kAnimeColumns), predicate));
     if (!query) {
         return std::unexpected(query.error());
     }
@@ -263,17 +286,18 @@ Stored<QList<double>> LibraryRepository::syncEpisodes(const QString& slug,
             }
             const bool known = exists->next();
             exists->finish();
-            auto written =
-                database_.run(QStringLiteral(R"sql(
-INSERT INTO episode (slug, number, title, image_url, published_at, known_at, is_new)
-VALUES (?, ?, COALESCE(?, ''), COALESCE(?, ''), ?, ?, ?)
+            auto written = database_.run(
+                QStringLiteral(R"sql(
+INSERT INTO episode (slug, number, title, image_url, published_at, known_at, is_new, source_episode_id)
+VALUES (?, ?, COALESCE(?, ''), COALESCE(?, ''), ?, ?, ?, COALESCE(?, ''))
 ON CONFLICT(slug, number) DO UPDATE SET
     title = excluded.title,
     image_url = excluded.image_url,
-    published_at = COALESCE(excluded.published_at, published_at)
+    published_at = COALESCE(excluded.published_at, published_at),
+    source_episode_id = COALESCE(NULLIF(excluded.source_episode_id, ''), source_episode_id)
 )sql"),
-                              {slug, episode.number, episode.title, episode.imageUrl.toString(),
-                               nullable(episode.publishedAt), now, flag_new && !known ? 1 : 0});
+                {slug, episode.number, episode.title, episode.imageUrl.toString(),
+                 nullable(episode.publishedAt), now, flag_new && !known ? 1 : 0, episode.id});
             if (!written) {
                 return std::unexpected(written.error());
             }
@@ -304,7 +328,11 @@ Stored<QList<EpisodeRecord>> LibraryRepository::episodes(const QString& slug) co
     }
     QList<EpisodeRecord> episodes;
     while (query->next()) {
-        episodes.append(readEpisode(*query));
+        auto record = readEpisode(*query);
+        if (auto best = selectBestFile(slug, record); !best) {
+            return std::unexpected(best.error());
+        }
+        episodes.append(std::move(record));
     }
     return episodes;
 }
@@ -321,7 +349,11 @@ Stored<std::optional<EpisodeRecord>> LibraryRepository::episode(const QString& s
     if (!query->next()) {
         return std::optional<EpisodeRecord>();
     }
-    return std::optional<EpisodeRecord>(readEpisode(*query));
+    auto record = readEpisode(*query);
+    if (auto best = selectBestFile(slug, record); !best) {
+        return std::unexpected(best.error());
+    }
+    return std::optional<EpisodeRecord>(std::move(record));
 }
 
 Stored<void> LibraryRepository::ensureEpisode(const QString& slug, double number) {
@@ -401,28 +433,26 @@ Stored<void> LibraryRepository::setAllUnwatched(const QString& slug) {
 
 Stored<void> LibraryRepository::setEpisodeFile(const QString& slug, double number,
                                                const QString& path, qint64 size) {
-    return database_.transaction([&]() -> Stored<void> {
-        if (auto ensured = ensureEpisode(slug, number); !ensured) {
-            return ensured;
-        }
-        auto result = database_.run(QStringLiteral("UPDATE episode SET file_path = ?, file_size = "
-                                                   "? WHERE slug = ? AND number = ?"),
-                                    {path, size, slug, number});
-        if (!result) {
-            return std::unexpected(result.error());
-        }
-        return {};
-    });
+    return database_.transaction(
+        [&]() -> Stored<void> { return storeEpisodeFile(slug, number, path, size); });
 }
 
 Stored<void> LibraryRepository::clearEpisodeFile(const QString& slug, double number) {
-    auto result = database_.run(QStringLiteral("UPDATE episode SET file_path = NULL, file_size = "
-                                               "NULL WHERE slug = ? AND number = ?"),
-                                {slug, number});
-    if (!result) {
-        return std::unexpected(result.error());
-    }
-    return {};
+    return database_.transaction([&]() -> Stored<void> {
+        const auto locations = episodeLocations(slug, number);
+        if (!locations)
+            return std::unexpected(locations.error());
+        auto result =
+            database_.run(QStringLiteral("DELETE FROM episode_file WHERE slug = ? AND number = ?"),
+                          {slug, number});
+        if (!result)
+            return std::unexpected(result.error());
+        for (const auto& location : *locations) {
+            if (auto pruned = pruneUnreferencedFile(location.path); !pruned)
+                return pruned;
+        }
+        return updateLegacyFile(slug, number);
+    });
 }
 
 Stored<void> LibraryRepository::clearNew(const QString& slug) {
@@ -435,8 +465,8 @@ Stored<void> LibraryRepository::clearNew(const QString& slug) {
 }
 
 Stored<QList<std::tuple<QString, double, QString>>> LibraryRepository::episodeFiles() const {
-    auto query = database_.run(
-        QStringLiteral("SELECT slug, number, file_path FROM episode WHERE file_path IS NOT NULL"));
+    auto query = database_.run(QStringLiteral("SELECT e.slug, e.number, f.path FROM episode_file e "
+                                              "JOIN media_file f ON f.id = e.file_id"));
     if (!query) {
         return std::unexpected(query.error());
     }
@@ -446,6 +476,573 @@ Stored<QList<std::tuple<QString, double, QString>>> LibraryRepository::episodeFi
             {query->value(0).toString(), query->value(1).toDouble(), query->value(2).toString()});
     }
     return files;
+}
+
+namespace {
+QString normalizedPath(const QString& path) {
+    return QDir::cleanPath(QDir::fromNativeSeparators(path));
+}
+QString pathKey(const QString& path) {
+    return normalizedPath(path).toCaseFolded();
+}
+} // namespace
+
+Stored<void> LibraryRepository::setArchived(const QString& slug, bool archived) {
+    auto result = database_.run(
+        QStringLiteral("UPDATE anime SET archived = ? WHERE slug = ? AND in_library = 1"),
+        {archived ? 1 : 0, slug});
+    if (!result)
+        return std::unexpected(result.error());
+    if (!result->numRowsAffected())
+        return std::unexpected(StorageError{QStringLiteral("unknown personal anime")});
+    return {};
+}
+
+Stored<void> LibraryRepository::removePersonalRecord(const QString& slug) {
+    return database_.transaction([&]() -> Stored<void> {
+        auto excluded =
+            database_.run(QStringLiteral("INSERT OR IGNORE INTO personal_exclusion(slug) SELECT "
+                                         "slug FROM anime WHERE slug = ?"),
+                          {slug});
+        if (!excluded)
+            return std::unexpected(excluded.error());
+        auto pending =
+            database_.run(QStringLiteral("DELETE FROM franchise_candidate WHERE slug = ?"), {slug});
+        if (!pending)
+            return std::unexpected(pending.error());
+        for (const auto& sql :
+             {QStringLiteral(
+                  "DELETE FROM franchise WHERE EXISTS (SELECT 1 FROM franchise_member target WHERE "
+                  "target.franchise_id = franchise.id AND target.slug = ? AND NOT EXISTS (SELECT 1 "
+                  "FROM franchise_member other WHERE other.franchise_id = franchise.id AND "
+                  "other.included = 1 AND other.slug <> target.slug))"),
+              QStringLiteral("DELETE FROM franchise_member WHERE slug = ?"),
+              QStringLiteral("DELETE FROM episode_file WHERE slug = ?"),
+              QStringLiteral(
+                  "UPDATE episode SET state = 0, position_ms = 0, duration_ms = 0, state_at = "
+                  "NULL, is_new = 0, file_path = NULL, file_size = NULL WHERE slug = ?"),
+              QStringLiteral(
+                  "UPDATE anime SET in_library = 0, archived = 0, favorite = 0, notify = 0, "
+                  "auto_download = 0, added_at = NULL, last_activity_at = NULL WHERE slug = ?")}) {
+            auto result = database_.run(sql, {slug});
+            if (!result)
+                return std::unexpected(result.error());
+        }
+        auto cleaned =
+            database_.run(QStringLiteral("DELETE FROM media_file WHERE NOT EXISTS (SELECT 1 FROM "
+                                         "episode_file WHERE file_id = media_file.id)"));
+        if (!cleaned)
+            return std::unexpected(cleaned.error());
+        return {};
+    });
+}
+
+Stored<qint64> LibraryRepository::createFranchise(const QString& title) {
+    if (title.trimmed().isEmpty())
+        return std::unexpected(StorageError{QStringLiteral("empty franchise title")});
+    auto result =
+        database_.run(QStringLiteral("INSERT INTO franchise(title) VALUES (?)"), {title.trimmed()});
+    if (!result)
+        return std::unexpected(result.error());
+    return result->lastInsertId().toLongLong();
+}
+
+Stored<QList<FranchiseRecord>> LibraryRepository::franchises() const {
+    auto result = database_.run(
+        QStringLiteral("SELECT id, title FROM franchise ORDER BY title COLLATE NOCASE, id"));
+    if (!result)
+        return std::unexpected(result.error());
+    QList<FranchiseRecord> records;
+    while (result->next()) {
+        FranchiseRecord record{.id = result->value(0).toLongLong(),
+                               .title = result->value(1).toString()};
+        auto members =
+            database_.run(QStringLiteral("SELECT slug FROM franchise_member WHERE franchise_id = ? "
+                                         "AND included = 1 ORDER BY slug"),
+                          {record.id});
+        if (!members)
+            return std::unexpected(members.error());
+        while (members->next())
+            record.members.append(members->value(0).toString());
+        records.append(std::move(record));
+    }
+    return records;
+}
+
+Stored<void> LibraryRepository::setFranchiseMember(qint64 id, const QString& slug, bool included) {
+    return database_.transaction([&]() { return writeFranchiseMember(id, slug, included); });
+}
+
+Stored<void> LibraryRepository::writeFranchiseMember(qint64 id, const QString& slug,
+                                                     bool included) {
+    if (included) {
+        auto clear =
+            database_.run(QStringLiteral("DELETE FROM personal_exclusion WHERE slug = ?"), {slug});
+        if (!clear)
+            return std::unexpected(clear.error());
+        auto exclude =
+            database_.run(QStringLiteral("UPDATE franchise_member SET included = 0, manual = 1 "
+                                         "WHERE slug = ? AND franchise_id <> ?"),
+                          {slug, id});
+        if (!exclude)
+            return std::unexpected(exclude.error());
+    }
+    auto result = database_.run(
+        QStringLiteral("INSERT INTO franchise_member(franchise_id, slug, included, manual) "
+                       "VALUES (?, ?, ?, 1) ON CONFLICT(franchise_id, slug) DO UPDATE SET "
+                       "included = excluded.included, manual = 1"),
+        {id, slug, included ? 1 : 0});
+    if (!result)
+        return std::unexpected(result.error());
+    auto pending =
+        database_.run(QStringLiteral("DELETE FROM franchise_candidate WHERE slug = ?"), {slug});
+    if (!pending)
+        return std::unexpected(pending.error());
+    return {};
+}
+
+Stored<qint64> LibraryRepository::createFranchise(const QString& title,
+                                                  const QString& initial_slug) {
+    qint64 id = 0;
+    auto result = database_.transaction([&]() -> Stored<void> {
+        auto created = createFranchise(title);
+        if (!created)
+            return std::unexpected(created.error());
+        id = *created;
+        return writeFranchiseMember(id, initial_slug, true);
+    });
+    if (!result)
+        return std::unexpected(result.error());
+    return id;
+}
+
+Stored<void> LibraryRepository::admitFranchiseCandidate(const QString& slug, qint64 id) {
+    auto candidate = database_.run(
+        QStringLiteral(
+            "SELECT 1 FROM franchise_candidate WHERE slug = ? AND NOT EXISTS "
+            "(SELECT 1 FROM personal_exclusion WHERE slug = ?) AND NOT EXISTS "
+            "(SELECT 1 FROM franchise_member WHERE slug = ? AND (included = 1 OR manual = 1))"),
+        {slug, slug, slug});
+    if (!candidate)
+        return std::unexpected(candidate.error());
+    if (!candidate->next())
+        return std::unexpected(StorageError{QStringLiteral("candidate is no longer pending")});
+    candidate->finish();
+    auto group = database_.run(
+        QStringLiteral(
+            "SELECT f.id, COALESCE(MIN(a.archived), 0) FROM franchise f LEFT JOIN franchise_member "
+            "m "
+            "ON m.franchise_id = f.id AND m.included = 1 LEFT JOIN anime a ON a.slug = m.slug "
+            "AND a.in_library = 1 WHERE f.id = ? GROUP BY f.id"),
+        {id});
+    if (!group)
+        return std::unexpected(group.error());
+    if (!group->next())
+        return std::unexpected(StorageError{QStringLiteral("unknown franchise")});
+    const bool archived = group->value(1).toBool();
+    group->finish();
+    auto admission = database_.run(
+        QStringLiteral(
+            "UPDATE anime SET archived = CASE WHEN in_library = 1 THEN archived ELSE ? END, "
+            "notify = CASE WHEN in_library = 1 THEN notify ELSE 1 END, "
+            "auto_download = CASE WHEN in_library = 1 THEN auto_download ELSE 0 END, "
+            "added_at = COALESCE(added_at, ?), in_library = 1 WHERE slug = ?"),
+        {archived ? 1 : 0, nowMs(), slug});
+    if (!admission)
+        return std::unexpected(admission.error());
+    return writeFranchiseMember(id, slug, true);
+}
+
+Stored<void> LibraryRepository::resolveFranchiseCandidate(const QString& slug,
+                                                          qint64 franchise_id) {
+    return database_.transaction([&]() { return admitFranchiseCandidate(slug, franchise_id); });
+}
+
+Stored<qint64> LibraryRepository::resolveFranchiseCandidate(const QString& slug,
+                                                            const QString& new_title) {
+    qint64 id = 0;
+    auto result = database_.transaction([&]() -> Stored<void> {
+        auto neighbors = candidateStandaloneSlugs(slug);
+        if (!neighbors)
+            return std::unexpected(neighbors.error());
+        auto created = createFranchise(new_title);
+        if (!created)
+            return std::unexpected(created.error());
+        id = *created;
+        for (const auto& neighbor : *neighbors) {
+            if (auto attached = writeFranchiseMember(id, neighbor, true); !attached)
+                return attached;
+        }
+        return admitFranchiseCandidate(slug, id);
+    });
+    if (!result)
+        return std::unexpected(result.error());
+    return id;
+}
+
+Stored<void> LibraryRepository::dismissFranchiseCandidate(const QString& slug) {
+    return database_.transaction([&]() -> Stored<void> {
+        auto excluded =
+            database_.run(QStringLiteral("INSERT OR IGNORE INTO personal_exclusion(slug) SELECT "
+                                         "slug FROM franchise_candidate "
+                                         "WHERE slug = ?"),
+                          {slug});
+        if (!excluded)
+            return std::unexpected(excluded.error());
+        auto removed =
+            database_.run(QStringLiteral("DELETE FROM franchise_candidate WHERE slug = ?"), {slug});
+        if (!removed)
+            return std::unexpected(removed.error());
+        return {};
+    });
+}
+
+Stored<void> LibraryRepository::applyFranchiseRelations(qint64 id, const QStringList& slugs) {
+    return database_.transaction([&]() -> Stored<void> {
+        auto known = database_.run(QStringLiteral("SELECT 1 FROM franchise WHERE id = ?"), {id});
+        if (!known)
+            return std::unexpected(known.error());
+        if (!known->next())
+            return std::unexpected(StorageError{QStringLiteral("unknown franchise")});
+        known->finish();
+        for (const auto& slug : slugs) {
+            auto result = database_.run(
+                QStringLiteral(
+                    "INSERT INTO franchise_member(franchise_id, slug, included, manual) SELECT ?, "
+                    "?, 1, 0 WHERE NOT EXISTS (SELECT 1 FROM franchise_member WHERE slug = ? AND "
+                    "(included = 1 OR manual = 1)) AND NOT EXISTS (SELECT 1 FROM "
+                    "personal_exclusion WHERE slug = ?) ON CONFLICT(franchise_id, slug) DO "
+                    "NOTHING"),
+                {id, slug, slug, slug});
+            if (!result)
+                return std::unexpected(result.error());
+        }
+        return {};
+    });
+}
+
+Stored<QStringList> LibraryRepository::candidateStandaloneSlugs(const QString& slug) const {
+    auto query = database_.run(
+        QStringLiteral(
+            "SELECT a.slug FROM anime a WHERE a.in_library = 1 AND a.slug <> ? "
+            "AND EXISTS (SELECT 1 FROM franchise_candidate WHERE slug = ? AND reason = "
+            "'needs_group') "
+            "AND a.slug IN (SELECT target_slug FROM anime_relation WHERE source_slug = ? UNION "
+            "SELECT source_slug FROM anime_relation WHERE target_slug = ?) "
+            "AND NOT EXISTS (SELECT 1 FROM franchise_member m WHERE m.slug = a.slug AND "
+            "(m.included = 1 OR m.manual = 1)) AND NOT EXISTS (SELECT 1 FROM personal_exclusion e "
+            "WHERE e.slug = a.slug) ORDER BY a.title COLLATE NOCASE, a.slug"),
+        {slug, slug, slug, slug});
+    if (!query)
+        return std::unexpected(query.error());
+    QStringList result;
+    while (query->next())
+        result.append(query->value(0).toString());
+    return result;
+}
+
+Stored<QList<FranchiseCandidate>> LibraryRepository::pendingFranchiseCandidates() const {
+    auto query = database_.run(
+        QStringLiteral("SELECT c.slug, a.title, c.reason FROM franchise_candidate c JOIN anime a "
+                       "ON a.slug = c.slug ORDER BY a.title COLLATE NOCASE"));
+    if (!query)
+        return std::unexpected(query.error());
+    QList<FranchiseCandidate> result;
+    while (query->next()) {
+        auto neighbors = candidateStandaloneSlugs(query->value(0).toString());
+        if (!neighbors)
+            return std::unexpected(neighbors.error());
+        QStringList titles;
+        if (query->value(2).toString() == QStringLiteral("multiple_groups")) {
+            auto groups = database_.run(
+                QStringLiteral(
+                    "SELECT DISTINCT f.id, f.title FROM franchise f JOIN franchise_member m "
+                    "ON m.franchise_id = f.id JOIN anime a ON a.slug = m.slug "
+                    "WHERE m.included = 1 AND a.in_library = 1 AND m.slug IN "
+                    "(SELECT target_slug FROM anime_relation WHERE source_slug = ? UNION "
+                    "SELECT source_slug FROM anime_relation WHERE target_slug = ?) "
+                    "ORDER BY f.title COLLATE NOCASE, f.id"),
+                {query->value(0), query->value(0)});
+            if (!groups)
+                return std::unexpected(groups.error());
+            while (groups->next())
+                titles.append(groups->value(1).toString());
+        }
+        result.append({query->value(0).toString(), query->value(1).toString(),
+                       query->value(2).toString(), *neighbors, titles});
+    }
+    return result;
+}
+
+Stored<QStringList> LibraryRepository::discoverFranchiseRelations(const api::AnimeDetail& detail) {
+    QStringList added;
+    const auto applied = database_.transaction([&]() -> Stored<void> {
+        if (auto snapshot = saveSnapshot(snapshotOf(detail)); !snapshot)
+            return snapshot;
+        QStringList affected{detail.slug};
+        const auto remember = [&](const api::Relation& relation, bool incoming) -> Stored<void> {
+            if (relation.anime.slug.isEmpty() || relation.anime.slug == detail.slug)
+                return {};
+            if (auto saved = saveSnapshot(snapshotOf(relation.anime)); !saved)
+                return saved;
+            auto edge = database_.run(
+                QStringLiteral(
+                    "INSERT OR IGNORE INTO anime_relation(source_slug, target_slug) VALUES (?, ?)"),
+                {incoming ? relation.anime.slug : detail.slug,
+                 incoming ? detail.slug : relation.anime.slug});
+            if (!edge)
+                return std::unexpected(edge.error());
+            affected.append(relation.anime.slug);
+            return {};
+        };
+        for (const auto& relation : detail.relations) {
+            if (auto saved = remember(relation, false); !saved)
+                return saved;
+        }
+        for (const auto& relation : detail.incomingRelations) {
+            if (auto saved = remember(relation, true); !saved)
+                return saved;
+        }
+        affected.removeDuplicates();
+        struct Admission {
+            QString slug;
+            qint64 group;
+            bool archived;
+            bool notify;
+        };
+        QList<Admission> admissions;
+        // Evaluate all candidates before admitting any: iteration order cannot create a group.
+        for (const auto& slug : affected) {
+            auto clear = database_.run(
+                QStringLiteral("DELETE FROM franchise_candidate WHERE slug = ?"), {slug});
+            if (!clear)
+                return std::unexpected(clear.error());
+            auto excluded = database_.run(
+                QStringLiteral(
+                    "SELECT 1 FROM personal_exclusion WHERE slug = ? UNION ALL SELECT 1 FROM "
+                    "franchise_member WHERE slug = ? AND manual = 1 AND included = 0 LIMIT 1"),
+                {slug, slug});
+            if (!excluded)
+                return std::unexpected(excluded.error());
+            if (excluded->next())
+                continue;
+            auto owner = database_.run(
+                QStringLiteral("SELECT 1 FROM franchise_member WHERE slug = ? AND included = 1"),
+                {slug});
+            if (!owner)
+                return std::unexpected(owner.error());
+            if (owner->next())
+                continue;
+            const auto neighborsSql =
+                QStringLiteral("SELECT target_slug FROM anime_relation WHERE source_slug = ? UNION "
+                               "SELECT source_slug FROM anime_relation WHERE target_slug = ?");
+            auto groups = database_.run(
+                QStringLiteral("SELECT DISTINCT m.franchise_id FROM franchise_member m JOIN anime "
+                               "a ON a.slug = m.slug WHERE m.included = 1 AND a.in_library = 1 AND "
+                               "a.notify = 1 AND m.slug IN (%1)")
+                    .arg(neighborsSql),
+                {slug, slug});
+            if (!groups)
+                return std::unexpected(groups.error());
+            QList<qint64> ids;
+            while (groups->next())
+                ids.append(groups->value(0).toLongLong());
+            if (ids.size() == 1) {
+                // A second un-followed personal group is still a conflict, never a merge.
+                auto allGroups = database_.run(
+                    QStringLiteral("SELECT COUNT(DISTINCT m.franchise_id) FROM franchise_member m "
+                                   "JOIN anime a ON a.slug = m.slug WHERE m.included = 1 AND "
+                                   "a.in_library = 1 AND m.slug IN (%1)")
+                        .arg(neighborsSql),
+                    {slug, slug});
+                if (!allGroups)
+                    return std::unexpected(allGroups.error());
+                allGroups->next();
+                if (allGroups->value(0).toInt() == 1) {
+                    auto continuity = database_.run(
+                        QStringLiteral("SELECT MIN(a.archived), MAX(a.notify) FROM anime a JOIN "
+                                       "franchise_member m ON m.slug = a.slug WHERE m.franchise_id "
+                                       "= ? AND m.included = 1 AND a.in_library = 1"),
+                        {ids.first()});
+                    if (!continuity)
+                        return std::unexpected(continuity.error());
+                    continuity->next();
+                    admissions.append({slug, ids.first(), continuity->value(0).toBool(),
+                                       continuity->value(1).toBool()});
+                    continue;
+                }
+                ids.append(-1); // conflict with a personal group whose notifications are disabled
+            }
+            QString reason;
+            if (ids.size() > 1)
+                reason = QStringLiteral("multiple_groups");
+            if (ids.isEmpty()) {
+                auto standalone =
+                    database_.run(QStringLiteral("SELECT 1 FROM anime WHERE in_library = 1 AND "
+                                                 "notify = 1 AND slug IN (%1) LIMIT 1")
+                                      .arg(neighborsSql),
+                                  {slug, slug});
+                if (!standalone)
+                    return std::unexpected(standalone.error());
+                if (standalone->next())
+                    reason = QStringLiteral("needs_group");
+            }
+            if (!reason.isEmpty()) {
+                auto pending = database_.run(
+                    QStringLiteral("INSERT INTO franchise_candidate(slug, reason) VALUES (?, ?)"),
+                    {slug, reason});
+                if (!pending)
+                    return std::unexpected(pending.error());
+            }
+        }
+        for (const auto& admission : admissions) {
+            auto member = database_.run(
+                QStringLiteral("INSERT INTO franchise_member(franchise_id, slug, included, manual) "
+                               "VALUES (?, ?, 1, 0) ON CONFLICT(franchise_id, slug) DO UPDATE SET "
+                               "included = 1 WHERE manual = 0"),
+                {admission.group, admission.slug});
+            if (!member)
+                return std::unexpected(member.error());
+            auto personal = database_.run(
+                QStringLiteral(
+                    "UPDATE anime SET archived = CASE WHEN in_library = 1 THEN archived ELSE ? "
+                    "END, notify = CASE WHEN in_library = 1 THEN notify ELSE ? END, added_at = "
+                    "COALESCE(added_at, ?), in_library = 1 WHERE slug = ?"),
+                {admission.archived ? 1 : 0, admission.notify ? 1 : 0, nowMs(), admission.slug});
+            if (!personal)
+                return std::unexpected(personal.error());
+            added.append(admission.slug);
+        }
+        return {};
+    });
+    if (!applied)
+        return std::unexpected(applied.error());
+    return added;
+}
+Stored<void> LibraryRepository::storeEpisodeFile(const QString& slug, double number,
+                                                 const QString& path, qint64 size) {
+    if (path.trimmed().isEmpty() || !QFileInfo(path).isAbsolute() || size < 0)
+        return std::unexpected(StorageError{QStringLiteral("invalid media path or size")});
+    if (auto ensured = ensureEpisode(slug, number); !ensured)
+        return ensured;
+    auto file =
+        database_.run(QStringLiteral("INSERT INTO media_file(path, path_key, size) VALUES (?, ?, "
+                                     "?) ON CONFLICT(path_key) DO UPDATE SET size = excluded.size"),
+                      {normalizedPath(path), pathKey(path), size});
+    if (!file)
+        return std::unexpected(file.error());
+    auto mapping =
+        database_.run(QStringLiteral("INSERT OR IGNORE INTO episode_file(slug, number, file_id) "
+                                     "SELECT ?, ?, id FROM media_file WHERE path_key = ?"),
+                      {slug, number, pathKey(path)});
+    if (!mapping)
+        return std::unexpected(mapping.error());
+    return updateLegacyFile(slug, number);
+}
+
+Stored<QList<EpisodeLocation>> LibraryRepository::episodeLocations(const QString& slug,
+                                                                   double number) const {
+    auto query = database_.run(
+        QStringLiteral("SELECT f.path, f.size FROM episode_file e JOIN media_file f ON f.id = "
+                       "e.file_id WHERE e.slug = ? AND e.number = ? ORDER BY f.id"),
+        {slug, number});
+    if (!query)
+        return std::unexpected(query.error());
+    QList<EpisodeLocation> result;
+    while (query->next())
+        result.append({query->value(0).toString(), query->value(1).toLongLong()});
+    return result;
+}
+
+Stored<void> LibraryRepository::selectBestFile(const QString& slug, EpisodeRecord& episode) const {
+    auto locations = episodeLocations(slug, episode.number);
+    if (!locations)
+        return std::unexpected(locations.error());
+    episode.filePath.clear();
+    episode.fileSize = 0;
+    for (const auto& location : *locations) {
+        if (episode.filePath.isEmpty() || QFileInfo::exists(location.path)) {
+            episode.filePath = location.path;
+            episode.fileSize = location.size;
+            if (QFileInfo::exists(location.path))
+                break;
+        }
+    }
+    return {};
+}
+
+Stored<void> LibraryRepository::updateLegacyFile(const QString& slug, double number) {
+    EpisodeRecord record;
+    record.number = number;
+    if (auto best = selectBestFile(slug, record); !best)
+        return best;
+    auto result = database_.run(
+        QStringLiteral(
+            "UPDATE episode SET file_path = ?, file_size = ? WHERE slug = ? AND number = ?"),
+        {record.filePath.isEmpty() ? QVariant(QMetaType::fromType<QString>())
+                                   : QVariant(record.filePath),
+         record.filePath.isEmpty() ? QVariant(QMetaType::fromType<qint64>())
+                                   : QVariant(record.fileSize),
+         slug, number});
+    if (!result)
+        return std::unexpected(result.error());
+    return {};
+}
+
+Stored<void> LibraryRepository::pruneUnreferencedFile(const QString& path) {
+    auto cleanup =
+        database_.run(QStringLiteral("DELETE FROM media_file WHERE path_key = ? AND NOT EXISTS "
+                                     "(SELECT 1 FROM episode_file WHERE file_id = media_file.id)"),
+                      {pathKey(path)});
+    if (!cleanup)
+        return std::unexpected(cleanup.error());
+    return {};
+}
+
+Stored<QList<std::tuple<QString, double>>>
+LibraryRepository::episodeFileMappings(const QString& path) const {
+    auto query = database_.run(
+        QStringLiteral("SELECT e.slug, e.number FROM episode_file e JOIN media_file f ON f.id = "
+                       "e.file_id WHERE f.path_key = ? ORDER BY e.slug, e.number"),
+        {pathKey(path)});
+    if (!query)
+        return std::unexpected(query.error());
+    QList<std::tuple<QString, double>> result;
+    while (query->next())
+        result.append({query->value(0).toString(), query->value(1).toDouble()});
+    return result;
+}
+
+Stored<void> LibraryRepository::removeEpisodeFile(const QString& slug, double number,
+                                                  const QString& path) {
+    return database_.transaction([&]() -> Stored<void> {
+        auto result = database_.run(
+            QStringLiteral("DELETE FROM episode_file WHERE slug = ? AND number = ? AND file_id IN "
+                           "(SELECT id FROM media_file WHERE path_key = ?)"),
+            {slug, number, pathKey(path)});
+        if (!result)
+            return std::unexpected(result.error());
+        if (auto pruned = pruneUnreferencedFile(path); !pruned)
+            return pruned;
+        return updateLegacyFile(slug, number);
+    });
+}
+
+Stored<void> LibraryRepository::importEpisodeFile(const QString& slug, double number,
+                                                  const QString& path, qint64 size, bool watched) {
+    return database_.transaction([&]() -> Stored<void> {
+        if (auto stored = storeEpisodeFile(slug, number, path, size); !stored)
+            return stored;
+        if (watched) {
+            auto state = database_.run(
+                QStringLiteral("UPDATE episode SET state = 2, state_at = NULL, position_ms = 0, "
+                               "is_new = 0 WHERE slug = ? AND number = ? AND state = 0"),
+                {slug, number});
+            if (!state)
+                return std::unexpected(state.error());
+        }
+        return {};
+    });
 }
 
 } // namespace animehub::library

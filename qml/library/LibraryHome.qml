@@ -13,11 +13,12 @@ Item {
     property string emptyText
 
     readonly property LibraryModel library: app.library
-    readonly property bool hasFeatured: !!library.featured.slug
-    readonly property string gridTitle: ["Toda la biblioteca", "Viendo", "Sin empezar", "Vistos",
+    readonly property bool hasFeatured: library.viewMode === LibraryModel.AllAnime && !!library.featured.slug
+    readonly property string gridTitle: library.archivedOnly ? "Archivo" : ["Toda la biblioteca", "Viendo", "Sin empezar", "Vistos",
                                          "Favoritos", "Descargados"][library.filter]
 
     signal activated(string slug)
+    signal franchiseActivated(var id)
     signal browseCatalog()
 
     // The backdrop of the featured anime reaches the pane's edges, beyond the grid's margins.
@@ -30,7 +31,7 @@ Item {
         anchors.rightMargin: Theme.pad
         visible: count > 0
         clip: false
-        model: root.library.allShelf
+        model: root.library.overview
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {}
         keyNavigationEnabled: true
@@ -67,6 +68,7 @@ Item {
 
             Shelf {
                 width: parent.width
+                visible: root.library.viewMode === LibraryModel.AllAnime && !root.library.archivedOnly && root.library.continueShelf.count > 0
                 title: "Continuar viendo"
                 model: root.library.continueShelf
                 onActivated: slug => root.activated(slug)
@@ -74,6 +76,7 @@ Item {
 
             Shelf {
                 width: parent.width
+                visible: root.library.viewMode === LibraryModel.AllAnime && !root.library.archivedOnly && root.library.freshShelf.count > 0
                 title: "Episodios nuevos"
                 model: root.library.freshShelf
                 onActivated: slug => root.activated(slug)
@@ -81,6 +84,7 @@ Item {
 
             Shelf {
                 width: parent.width
+                visible: root.library.viewMode === LibraryModel.AllAnime && !root.library.archivedOnly && root.library.upcomingShelf.count > 0
                 title: "Próximos episodios"
                 model: root.library.upcomingShelf
                 onActivated: slug => root.activated(slug)
@@ -96,18 +100,18 @@ Item {
         }
 
         delegate: Item {
-            required property var model
+            required property var modelData
             width: grid.cellWidth
             height: grid.cellHeight
 
             PosterCard {
                 width: parent.width - Theme.posterGap
-                text: model.title
-                posterUrl: model.posterUrl
-                caption: model.caption
-                progress: model.progress
-                fresh: model.fresh
-                onClicked: root.activated(model.slug)
+                text: modelData.title
+                posterUrl: modelData.posterUrl
+                caption: modelData.caption
+                progress: modelData.progress
+                fresh: false
+                onClicked: modelData.groupId ? root.franchiseActivated(modelData.groupId) : root.activated(modelData.slug)
             }
         }
     }
@@ -123,7 +127,9 @@ Item {
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
-            text: root.library.total === 0 ? "Tu biblioteca está vacía" : root.emptyText
+            text: root.library.search !== "" ? "Nada coincide con la búsqueda"
+                  : root.library.total === 0 ? (root.library.archivedOnly ? "El Archivo está vacío" : "Tu biblioteca está vacía")
+                  : root.library.viewMode === LibraryModel.Franchises ? "No hay franquicias en esta vista" : root.emptyText
             color: Theme.ink
             font.pixelSize: Theme.subtitle
             font.weight: Font.DemiBold
@@ -131,13 +137,18 @@ Item {
 
         Button {
             Layout.alignment: Qt.AlignHCenter
-            text: root.library.total === 0 ? "Explorar el catálogo" : "Mostrar todo"
+            text: root.library.archivedOnly ? "Volver a la biblioteca" : root.library.total === 0 ? "Explorar el catálogo" : "Mostrar todo"
             highlighted: true
             onClicked: {
-                if (root.library.total === 0)
+                if (root.library.archivedOnly)
+                    root.library.archivedOnly = false
+                else if (root.library.total === 0)
                     root.browseCatalog()
-                else
+                else {
+                    root.library.search = ""
                     root.library.filter = LibraryModel.All
+                    root.library.viewMode = LibraryModel.Collection
+                }
             }
         }
     }

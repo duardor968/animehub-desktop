@@ -1,6 +1,7 @@
 #include "database.h"
 
 #include <QDateTime>
+#include <QDir>
 #include <QSqlError>
 #include <QUuid>
 
@@ -88,6 +89,71 @@ ALTER TABLE anime DROP COLUMN pending;
     // Resuming all brings back only what pausing all stopped, not what was paused on its own.
     R"sql(
 ALTER TABLE download ADD COLUMN paused_with_all INTEGER NOT NULL DEFAULT 0;
+)sql",
+    R"sql(
+ALTER TABLE anime ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE episode ADD COLUMN source_episode_id TEXT NOT NULL DEFAULT '';
+CREATE TABLE franchise (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL
+) STRICT;
+CREATE TABLE franchise_member (
+    franchise_id INTEGER NOT NULL REFERENCES franchise(id) ON DELETE CASCADE,
+    slug TEXT NOT NULL REFERENCES anime(slug) ON DELETE CASCADE,
+    included INTEGER NOT NULL DEFAULT 1,
+    manual INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(franchise_id, slug)
+) STRICT;
+CREATE UNIQUE INDEX franchise_one_membership ON franchise_member(slug) WHERE included = 1;
+CREATE TABLE media_file (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL,
+    path_key TEXT NOT NULL UNIQUE,
+    size INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE TABLE episode_file (
+    slug TEXT NOT NULL,
+    number REAL NOT NULL,
+    file_id INTEGER NOT NULL REFERENCES media_file(id) ON DELETE CASCADE,
+    PRIMARY KEY(slug, number, file_id),
+    FOREIGN KEY(slug, number) REFERENCES episode(slug, number) ON DELETE CASCADE
+) STRICT;
+ALTER TABLE download ADD COLUMN engine TEXT NOT NULL DEFAULT 'native';
+ALTER TABLE download ADD COLUMN engine_endpoint TEXT NOT NULL DEFAULT '';
+ALTER TABLE download ADD COLUMN engine_device TEXT NOT NULL DEFAULT '';
+ALTER TABLE download ADD COLUMN engine_job_id INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE download ADD COLUMN engine_link_ids TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE download ADD COLUMN engine_submission TEXT NOT NULL DEFAULT '';
+ALTER TABLE download ADD COLUMN engine_phase TEXT NOT NULL DEFAULT '';
+ALTER TABLE download ADD COLUMN engine_destination TEXT NOT NULL DEFAULT '';
+ALTER TABLE download ADD COLUMN remote_request_id TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX download_remote_episode ON download(remote_request_id, number, audio)
+    WHERE remote_request_id <> '';
+CREATE TABLE download_request_receipt (
+    remote_request_id TEXT NOT NULL,
+    number REAL NOT NULL,
+    audio TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    task_id INTEGER NOT NULL,
+    PRIMARY KEY(remote_request_id, number, audio)
+) STRICT;
+)sql",
+    R"sql(
+CREATE TABLE anime_relation (
+    source_slug TEXT NOT NULL REFERENCES anime(slug) ON DELETE CASCADE,
+    target_slug TEXT NOT NULL REFERENCES anime(slug) ON DELETE CASCADE,
+    PRIMARY KEY(source_slug, target_slug)
+) STRICT;
+CREATE TABLE franchise_candidate (
+    slug TEXT PRIMARY KEY REFERENCES anime(slug) ON DELETE CASCADE,
+    reason TEXT NOT NULL
+) STRICT;
+CREATE TABLE personal_exclusion (
+    slug TEXT PRIMARY KEY REFERENCES anime(slug) ON DELETE CASCADE
+) STRICT;
+)sql",
+    R"sql(
+CREATE INDEX episode_file_file_id ON episode_file(file_id);
 )sql",
 };
 
@@ -196,6 +262,31 @@ Stored<void> Database::migrate() {
                 if (auto result = run(statement); !result) {
                     return std::unexpected(result.error());
                 }
+            }
+            if (step == 3) {
+                // Use the same Unicode case folding and lexical normalization as new imports.
+                auto files = run(
+                    QStringLiteral("SELECT slug, number, file_path, COALESCE(file_size, 0) FROM "
+                                   "episode WHERE file_path IS NOT NULL AND file_path <> ''"));
+                if (!files)
+                    return std::unexpected(files.error());
+                while (files->next()) {
+                    const auto path =
+                        QDir::cleanPath(QDir::fromNativeSeparators(files->value(2).toString()));
+                    const auto key = path.toCaseFolded();
+                    auto file = run(QStringLiteral("INSERT OR IGNORE INTO media_file(path, "
+                                                   "path_key, size) VALUES (?, ?, ?)"),
+                                    {path, key, files->value(3)});
+                    if (!file)
+                        return std::unexpected(file.error());
+                    auto mapping =
+                        run(QStringLiteral("INSERT INTO episode_file(slug, number, file_id) SELECT "
+                                           "?, ?, id FROM media_file WHERE path_key = ?"),
+                            {files->value(0), files->value(1), key});
+                    if (!mapping)
+                        return std::unexpected(mapping.error());
+                }
+                files->finish();
             }
             if (auto result = run(QStringLiteral("PRAGMA user_version = %1").arg(step + 1));
                 !result) {

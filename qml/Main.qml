@@ -7,6 +7,7 @@ ApplicationWindow {
     id: window
 
     required property AppController app
+    property bool smokeHidden: false
 
     function showPage(index) {
         tabs.currentIndex = index
@@ -41,7 +42,8 @@ ApplicationWindow {
     height: app.settings.value("window/height", 820)
     minimumWidth: 820
     minimumHeight: 600
-    visible: true
+    // main() supplies visibility; construction itself never exposes a native window.
+    visible: false
     title: "AnimeHub"
     color: Theme.canvas
     palette.accent: Theme.accent
@@ -64,6 +66,8 @@ ApplicationWindow {
 
     // INI settings come back as text.
     function showAsLeft() {
+        if (smokeHidden)
+            return
         if (String(app.settings.value("window/maximized", false)) === "true")
             showMaximized()
         else
@@ -90,6 +94,8 @@ ApplicationWindow {
     Connections {
         target: window.app
         function onShowRequested() {
+            if (window.smokeHidden)
+                return
             if (!window.visible)
                 window.showAsLeft()
             window.raise()
@@ -156,7 +162,9 @@ ApplicationWindow {
 
         LibraryPage {
             id: libraryPage
+            objectName: "libraryPage"
             app: window.app
+            onActionFailed: text => toast.show(text, true)
             onBrowseCatalog: window.showPage(1)
             onSearchCatalog: text => window.searchCatalog(text)
         }

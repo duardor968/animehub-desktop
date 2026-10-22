@@ -11,6 +11,9 @@ qt_add_library(animehub-core STATIC
   downloads/click_n_load.h
   downloads/aria2.cpp
   downloads/aria2.h
+  downloads/jdownloader.cpp
+  downloads/jdownloader.h
+  downloads/download_manager_jd.cpp
   downloads/download_manager.cpp
   downloads/download_manager.h
   downloads/download_repository.cpp
@@ -35,6 +38,8 @@ qt_add_library(animehub-core STATIC
   platform/credentials.h
   platform/process_job.h
   platform/trash.h
+  remote/remote_service.cpp
+  remote/remote_service.h
   storage/database.cpp
   storage/database.h
   util/file_names.cpp

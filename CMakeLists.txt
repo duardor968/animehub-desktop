@@ -87,6 +87,8 @@ qt_add_executable(animehub-desktop WIN32
   src/app/jdownloader_view.h
   src/app/library_model.cpp
   src/app/library_model.h
+  src/app/remote_view.cpp
+  src/app/remote_view.h
   src/app/main.cpp
   src/app/schedule.cpp
   src/app/schedule.h
@@ -107,6 +109,7 @@ qt_add_qml_module(animehub-desktop
     qml/Theme.qml
     qml/CloseDialog.qml
     qml/SettingsDialog.qml
+    qml/RemoteDevicesDialog.qml
     qml/anime/AnimeHeader.qml
     qml/anime/AnimePage.qml
     qml/anime/CompactBar.qml
@@ -137,6 +140,9 @@ qt_add_qml_module(animehub-desktop
     qml/downloads/SectionHeading.qml
     qml/downloads/SeriesRow.qml
     qml/downloads/SpeedGraph.qml
+    qml/library/FranchisePage.qml
+    qml/library/FranchiseCandidatesDialog.qml
+    qml/library/LibraryRemovalDialog.qml
     qml/library/FeaturedAnime.qml
     qml/library/LibraryHome.qml
     qml/library/LibraryList.qml
@@ -166,6 +172,14 @@ if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
   include(cmake/Deploy.cmake)
   animehub_deploy_runtime(animehub-desktop)
 endif()
+
+qt_add_executable(animehub-library-import
+  src/tools/library_import.cpp
+  tests/support/noninteractive_guard.cpp
+)
+target_link_libraries(animehub-library-import PRIVATE animehub-core Qt6::Core Qt6::Sql)
+animehub_configure_target(animehub-library-import)
+set_target_properties(animehub-library-import PROPERTIES WIN32_EXECUTABLE FALSE)
 
 include(CTest)
 if(BUILD_TESTING)
