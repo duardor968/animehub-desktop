@@ -1,10 +1,38 @@
 #include "file_names.h"
 
+#include "library/library_types.h"
+
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
 
 namespace animehub::util {
+
+QString downloadBasePath(const QString& directory, const QString& slug, const QString& anime_title,
+                         double number) {
+    static const QRegularExpression kCanonicalSlug(QStringLiteral("^[a-z0-9]+(?:-[a-z0-9]+)*$"));
+    auto folder = slug;
+    if (slug.size() > 80 || !kCanonicalSlug.match(slug).hasMatch() || safeFileName(slug) != slug) {
+        const auto hash = QString::fromLatin1(
+            QCryptographicHash::hash(slug.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
+        folder = safeFileName(slug, QStringLiteral("anime"), 62);
+        if (folder.back().isHighSurrogate())
+            folder.chop(1);
+        folder += u'~' + hash;
+    }
+    auto label = library::formatEpisodeNumber(number);
+    const auto dot = label.indexOf(u'.');
+    const auto whole = dot < 0 ? label.size() : dot;
+    if (whole < 2)
+        label.prepend(QString(2 - whole, u'0'));
+    const auto suffix = QStringLiteral(" - ") + label;
+    auto title =
+        safeFileName(anime_title, QStringLiteral("Anime"), 119 - static_cast<int>(suffix.size()));
+    if (title.back().isHighSurrogate())
+        title.chop(1);
+    return QDir(directory).filePath(folder + u'/' + title + suffix);
+}
 
 QString safeFileName(const QString& name, const QString& fallback, int max_length) {
     QString result;

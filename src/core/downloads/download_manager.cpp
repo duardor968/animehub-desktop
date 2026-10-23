@@ -56,16 +56,6 @@ bool inLine(const Task& task) {
     return task.state != TaskState::Completed && task.state != TaskState::Cancelled;
 }
 
-QString episodeLabel(double number) {
-    auto label = library::formatEpisodeNumber(number);
-    const auto dot = label.indexOf(u'.');
-    const auto whole = dot < 0 ? label.size() : dot;
-    if (whole < 2) {
-        label.prepend(QString(2 - whole, u'0'));
-    }
-    return label;
-}
-
 } // namespace
 
 DownloadManager::DownloadManager(Services services, std::function<DownloadSettings()> settings,
@@ -247,13 +237,6 @@ std::optional<Task> DownloadManager::activeTaskFor(const QString& slug, double n
     return std::nullopt;
 }
 
-QString DownloadManager::basePathFor(const QString& directory, const QString& anime_title,
-                                     double number) {
-    const auto folder = util::safeFileName(anime_title);
-    return QDir(directory).filePath(folder + QLatin1Char('/') + folder + QStringLiteral(" - ") +
-                                    episodeLabel(number));
-}
-
 std::expected<qint64, QString> DownloadManager::enqueue(const QString& slug, double number,
                                                         const QString& anime_title,
                                                         TaskOrigin origin) {
@@ -271,10 +254,10 @@ std::expected<qint64, QString> DownloadManager::enqueue(const QString& slug, dou
     if (settings.directory.isEmpty() || !QDir().mkpath(settings.directory)) {
         return std::unexpected(QStringLiteral("La carpeta de descargas no está disponible."));
     }
-    auto created = services_.repository.create(slug, number, anime_title, settings.audio, origin,
-                                               basePathFor(settings.directory, anime_title, number),
-                                               settings.engine, settings.jdEndpoint.toString(),
-                                               settings.jdDeviceId);
+    auto created = services_.repository.create(
+        slug, number, anime_title, settings.audio, origin,
+        util::downloadBasePath(settings.directory, slug, anime_title, number), settings.engine,
+        settings.jdEndpoint.toString(), settings.jdDeviceId);
     if (!created) {
         return std::unexpected(created.error().message);
     }
@@ -300,7 +283,8 @@ DownloadManager::enqueueMany(const QString& slug, const QList<double>& numbers,
             return std::unexpected(QStringLiteral("El pedido no tiene un destino local fijado."));
         QList<std::pair<double, QString>> episodes;
         for (const auto number : wanted)
-            episodes.append({number, basePathFor(settings.directory, anime_title, number)});
+            episodes.append(
+                {number, util::downloadBasePath(settings.directory, slug, anime_title, number)});
         auto created = services_.repository.createMany(
             slug, episodes, anime_title, settings.audio, origin, settings.engine,
             settings.jdEndpoint.toString(), settings.jdDeviceId, sourceRequestId);
@@ -341,7 +325,8 @@ DownloadManager::enqueueMany(const QString& slug, const QList<double>& numbers,
         }
         QList<std::pair<double, QString>> episodes;
         for (const auto number : fresh) {
-            episodes.append({number, basePathFor(settings.directory, anime_title, number)});
+            episodes.append(
+                {number, util::downloadBasePath(settings.directory, slug, anime_title, number)});
         }
         auto created = services_.repository.createMany(
             slug, episodes, anime_title, settings.audio, origin, settings.engine,

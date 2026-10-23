@@ -1,5 +1,6 @@
 #include "downloads/download_manager.h"
 #include "http_test_server.h"
+#include "util/file_names.h"
 
 #include <QCryptographicHash>
 #include <QDirIterator>
@@ -103,6 +104,7 @@ public:
     bool moved = false;
     bool finished = false;
     bool extracting = false;
+    bool extracted = false;
     QString destination;
     int submissions = 0;
     int removed = 0;
@@ -124,13 +126,15 @@ public:
                                    QStringLiteral("\"jobUUIDs\":[77]"));
             QJsonArray links;
             if (moved)
-                links.append(QJsonObject{{QStringLiteral("uuid"), 88},
-                                         {QStringLiteral("finished"), finished},
-                                         {QStringLiteral("running"), !finished},
-                                         {QStringLiteral("bytesLoaded"), finished ? 8 : 2},
-                                         {QStringLiteral("bytesTotal"), 8},
-                                         {QStringLiteral("extractionStatus"),
-                                          extracting ? QStringLiteral("RUNNING") : QString()}});
+                links.append(QJsonObject{
+                    {QStringLiteral("uuid"), 88},
+                    {QStringLiteral("finished"), finished},
+                    {QStringLiteral("running"), !finished},
+                    {QStringLiteral("bytesLoaded"), finished ? 8 : 2},
+                    {QStringLiteral("bytesTotal"), 8},
+                    {QStringLiteral("extractionStatus"), extracting  ? QStringLiteral("RUNNING")
+                                                         : extracted ? QStringLiteral("SUCCESSFUL")
+                                                                     : QString()}});
             return HttpTestServer::Response{
                 .body = QJsonDocument(QJsonObject{{QStringLiteral("data"), links}}).toJson()};
         });
@@ -299,6 +303,29 @@ class DownloadManagerTest final : public QObject {
     }
 
 private slots:
+    void defaultPathsKeepWorkIdentityAndReadableEpisodeNames() {
+        const auto root = QStringLiteral("D:/Multimedia/Anime");
+        const auto title = QStringLiteral("Kaguya-sama wa Kokurasetai");
+        const auto first = util::downloadBasePath(root, QStringLiteral("kaguya-sama"), title, 1);
+        const auto second = util::downloadBasePath(root, QStringLiteral("kaguya-sama-2"), title, 1);
+        QCOMPARE(first, root + QStringLiteral("/kaguya-sama/Kaguya-sama wa Kokurasetai - 01"));
+        QVERIFY(first.compare(second, Qt::CaseInsensitive) != 0);
+        QCOMPARE(first, util::downloadBasePath(root, QStringLiteral("kaguya-sama"), title, 1));
+        QVERIFY(util::downloadBasePath(root, QStringLiteral("kaguya-sama"), title, 1.5)
+                    .endsWith(QStringLiteral(" - 01.5")));
+        const auto long_slug = QString(200, u'a');
+        const auto long_title = QString(240, u'B');
+        const auto long_path = util::downloadBasePath(root, long_slug, long_title, 123.5);
+        QVERIFY(long_path.size() + QStringLiteral(".webm.mega.aria2").size() < 260);
+        QVERIFY(QFileInfo(long_path).fileName().size() <= 120);
+        QVERIFY(QFileInfo(long_path).dir().dirName().size() <= 80);
+        QVERIFY(long_path != util::downloadBasePath(root, long_slug + u'b', long_title, 123.5));
+        QVERIFY(util::downloadBasePath(root, QStringLiteral("a:b"), title, 1) !=
+                util::downloadBasePath(root, QStringLiteral("a?b"), title, 1));
+        const auto reserved = util::downloadBasePath(root, QStringLiteral("con"), title, 1);
+        QVERIFY(QFileInfo(reserved).dir().dirName().startsWith(QStringLiteral("_con~")));
+    }
+
     void init() {
         root_ = std::make_unique<QTemporaryDir>();
         downloads_ = root_->filePath(QStringLiteral("Anime"));
@@ -442,6 +469,9 @@ private slots:
         QCOMPARE(taskOf(id)->engineJobId, 77);
         QCOMPARE(taskOf(id)->engineLinkIds, QList<qint64>{88});
         const auto destination = taskOf(id)->engineDestination;
+        QCOMPARE(taskOf(id)->targetPath,
+                 util::downloadBasePath(downloads_, kFrieren, titleOf(kFrieren), 1));
+        QVERIFY(destination.startsWith(QDir(downloads_).filePath(kFrieren)));
         engine_ = DownloadEngine::Native; // settings changes cannot reroute the persisted task
         restart();
         QCOMPARE(taskOf(id)->engine, DownloadEngine::JDownloaderLocal);
@@ -456,14 +486,102 @@ private slots:
         QCOMPARE(media.write("12345678"), 8);
         media.close();
         jd.extracting = false;
+        jd.extracted = true;
         QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->state, TaskState::Completed, kTimeout);
         QCOMPARE(jd.submissions, 1);
         QVERIFY(jd.scoped);
         QVERIFY(library_->episodeLocations(kFrieren, 1)->size() == 1);
+        QCOMPARE(taskOf(id)->targetPath,
+                 util::downloadBasePath(downloads_, kFrieren, titleOf(kFrieren), 1) +
+                     QStringLiteral(".mkv"));
+        QCOMPARE(sha256File(taskOf(id)->targetPath),
+                 QString::fromLatin1(
+                     QCryptographicHash::hash("12345678", QCryptographicHash::Sha256).toHex()));
+        QVERIFY(!QFileInfo::exists(media.fileName()));
         for (const auto& r : server_->requests()) {
             QVERIFY(r.path != "/downloadcontroller/start" && r.path != "/downloadcontroller/stop" &&
                     r.path != "/downloadcontroller/pause");
         }
+    }
+
+    void jdCanonicalDestinationNeverOverwritesExistingCopy() {
+        engine_ = DownloadEngine::JDownloaderLocal;
+        FakeJd jd;
+        jd.install(*server_);
+        resolveTo(
+            resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
+        const auto created = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(created);
+        const auto id = *created;
+        QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
+        const auto base = taskOf(id)->targetPath;
+        QFile existing(base + QStringLiteral(".mkv"));
+        QVERIFY(existing.open(QIODevice::WriteOnly));
+        QCOMPARE(existing.write("old-copy"), 8);
+        existing.close();
+        const auto oldHash = sha256File(existing.fileName());
+        QFile media(QDir(taskOf(id)->engineDestination).filePath(QStringLiteral("provider.mkv")));
+        QVERIFY(media.open(QIODevice::WriteOnly));
+        QCOMPARE(media.write("new-copy"), 8);
+        media.close();
+        const auto newHash = sha256File(media.fileName());
+        jd.finished = true;
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->state, TaskState::Completed, kTimeout);
+        QCOMPARE(taskOf(id)->targetPath, base + QStringLiteral(" (2).mkv"));
+        QCOMPARE(sha256File(taskOf(id)->targetPath), newHash);
+        QCOMPARE(sha256File(existing.fileName()), oldHash);
+        QVERIFY(!QFileInfo::exists(media.fileName()));
+        QCOMPARE(jd.submissions, 1);
+        QVERIFY(jd.scoped);
+    }
+
+    void jdOrganizationFailurePreservesSourceAndRetriesSameJob() {
+        engine_ = DownloadEngine::JDownloaderLocal;
+        FakeJd jd;
+        jd.install(*server_);
+        resolveTo(
+            resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
+        const auto created = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(created);
+        const auto id = *created;
+        QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
+        const auto base = taskOf(id)->targetPath;
+        const auto stage = taskOf(id)->engineDestination;
+        QFile media(QDir(stage).filePath(QStringLiteral("provider.mp4")));
+        QVERIFY(media.open(QIODevice::WriteOnly));
+        QCOMPARE(media.write("verified"), 8);
+        media.close();
+        const auto hash = sha256File(media.fileName());
+        // Persist an unusable target directory, keeping the owned job and source intact.
+        QFile blocker(root_->filePath(QStringLiteral("blocked-directory")));
+        QVERIFY(blocker.open(QIODevice::WriteOnly));
+        blocker.write("file");
+        blocker.close();
+        bool stopped = false;
+        manager_->shutdown([&] { stopped = true; });
+        QTRY_VERIFY_WITH_TIMEOUT(stopped, 8000);
+        auto pinned = *taskOf(id);
+        pinned.targetPath = blocker.fileName() + QStringLiteral("/episode");
+        QVERIFY(repository_->save(pinned));
+        manager_.reset();
+        aria2_.reset();
+        makeManager();
+        jd.finished = true;
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(taskOf(id)->issue, TaskIssue::Storage);
+        QCOMPARE(sha256File(media.fileName()), hash);
+        QVERIFY(library_->episodeLocations(kFrieren, 1)->isEmpty());
+        QCOMPARE(jd.submissions, 1);
+        pinned = *taskOf(id);
+        pinned.targetPath = base;
+        QVERIFY(repository_->save(pinned));
+        restart();
+        manager_->retry(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->state, TaskState::Completed, kTimeout);
+        QCOMPARE(taskOf(id)->targetPath, base + QStringLiteral(".mp4"));
+        QCOMPARE(sha256File(taskOf(id)->targetPath), hash);
+        QCOMPARE(jd.submissions, 1);
+        QVERIFY(jd.scoped);
     }
 
     void jdCancellationDuringSubmissionWaitsForOwnedIds() {
@@ -488,6 +606,11 @@ private slots:
         FakeJd jd;
         jd.install(*server_);
         jd.finished = true;
+        QFile outside(root_->filePath(QStringLiteral("outside-owned.mp4")));
+        QVERIFY(outside.open(QIODevice::WriteOnly));
+        QCOMPARE(outside.write("outside!"), 8);
+        outside.close();
+        const auto outsideHash = sha256File(outside.fileName());
         resolveTo(
             resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
         auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
@@ -496,6 +619,7 @@ private slots:
         QCOMPARE(taskOf(*id)->issue, TaskIssue::Storage);
         QVERIFY(library_->episodeLocations(kFrieren, 1)->isEmpty());
         QCOMPARE(jd.submissions, 1);
+        QCOMPARE(sha256File(outside.fileName()), outsideHash);
     }
 
     void jdUncertainSubmissionNeverResubmitsOnRestart() {
@@ -528,7 +652,7 @@ private slots:
         QCOMPARE(task->state, TaskState::Completed);
         QCOMPARE(task->provider, api::Provider::Mega);
         const auto expected_path =
-            downloads_ + QStringLiteral("/Sousou no Frieren/Sousou no Frieren - 01.mp4");
+            downloads_ + QStringLiteral("/sousou-no-frieren/Sousou no Frieren - 01.mp4");
         QCOMPARE(task->targetPath, expected_path);
         QCOMPARE(sha256File(expected_path), vectors().value(u"plainSha256").toString());
         const auto episode = library_->episode(QStringLiteral("sousou-no-frieren"), 1);
@@ -932,7 +1056,7 @@ private slots:
         // Frieren 1 gives way and waits in line with its partial file, without a transfer.
         manager_->prioritize(kBebop);
         QTRY_VERIFY_WITH_TIMEOUT(taskFor(kBebop, 1)->bytesDone > 0, kTimeout);
-        const auto frieren_folder = downloads_ + QStringLiteral("/Sousou no Frieren");
+        const auto frieren_folder = QDir(downloads_).filePath(kFrieren);
         QVERIFY(!leftovers(frieren_folder).isEmpty());
 
         manager_->cancelSeries(kFrieren);
@@ -940,7 +1064,7 @@ private slots:
         QCOMPARE(taskFor(kFrieren, 2)->state, TaskState::Cancelled);
         QTRY_VERIFY_WITH_TIMEOUT(leftovers(frieren_folder).isEmpty(), kTimeout);
         QCOMPARE(taskFor(kBebop, 1)->state, TaskState::Downloading);
-        QVERIFY(!leftovers(downloads_ + QStringLiteral("/Cowboy Bebop")).isEmpty());
+        QVERIFY(!leftovers(QDir(downloads_).filePath(kBebop)).isEmpty());
     }
 
     void forgetsTheFinishedRowsOfASeries() {

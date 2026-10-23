@@ -152,8 +152,6 @@ private:
     void removeFiles(const QStringList& paths, int attempts_left);
     [[nodiscard]] bool isCurrent(qint64 id, quint64 generation, TaskState state) const;
     [[nodiscard]] int running() const;
-    [[nodiscard]] static QString basePathFor(const QString& directory, const QString& anime_title,
-                                             double number);
 
     // The single-task steps behind the public calls; the callers pump once at the end.
     bool pauseTask(qint64 id, bool with_all = false);

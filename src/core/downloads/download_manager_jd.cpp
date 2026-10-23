@@ -1,5 +1,7 @@
 #include "download_manager.h"
+#include "util/file_names.h"
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QUuid>
 
@@ -304,7 +306,7 @@ void DownloadManager::observeJd(qint64 id, const QJsonArray& links) {
     task.bytesPerSecond = speed;
     task.enginePhase = extracting ? u"extracting"_s : running ? u"transferring"_s : u"waiting"_s;
     store(task);
-    if (!finished || extracting)
+    if (!finished || running || extracting)
         return;
     const auto files = jd::verifiedMedia(task.engineDestination);
     if (files.isEmpty()) {
@@ -313,14 +315,37 @@ void DownloadManager::observeJd(qint64 id, const QJsonArray& links) {
             u"JDownloader terminó, pero no hay vídeo local verificable en el destino del trabajo."_s);
         return;
     }
+    // Move only verified media after JD has closed the transfer and extractor. The
+    // receipt and staging bytes survive failures; retry must reconcile the same job.
+    const QFileInfo staging(task.engineDestination);
+    if (QDir::cleanPath(staging.absoluteFilePath())
+            .compare(staging.canonicalFilePath(), Qt::CaseInsensitive) != 0) {
+        fail(id, TaskIssue::Storage, u"El destino de JDownloader redirige fuera del trabajo."_s);
+        return;
+    }
+    QString firstDestination;
     for (const auto& path : files) {
-        if (!services_.library.setEpisodeFile(task.slug, task.number, path,
-                                              QFileInfo(path).size())) {
-            fail(id, TaskIssue::Storage);
+        const auto destination =
+            util::uniquePath(task.targetPath + u'.' + QFileInfo(path).suffix());
+        if (!QDir().mkpath(QFileInfo(destination).absolutePath()) ||
+            !QFile::rename(path, destination)) {
+            fail(
+                id, TaskIssue::Storage,
+                u"No se pudo organizar el vídeo terminado. Se conserva el trabajo de JDownloader."_s);
             return;
         }
+        if (!services_.library.setEpisodeFile(task.slug, task.number, destination,
+                                              QFileInfo(destination).size())) {
+            const bool restored = QFile::rename(destination, path);
+            fail(id, TaskIssue::Storage,
+                 restored ? u"No se pudo registrar el vídeo terminado."_s
+                          : u"No se pudo registrar el vídeo; se conserva en: "_s + destination);
+            return;
+        }
+        if (firstDestination.isEmpty())
+            firstDestination = destination;
     }
     task.enginePhase = u"completed"_s;
-    complete(id, files.first());
+    complete(id, firstDestination);
 }
 } // namespace animehub::downloads

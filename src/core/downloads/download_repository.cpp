@@ -247,7 +247,8 @@ Stored<QList<Task>> DownloadRepository::createMany(
                  device.isNull() ? u""_s : device,
                  engine == DownloadEngine::Native
                      ? QFileInfo(target_path).absolutePath()
-                     : target_path + u" - "_s + QUuid::createUuid().toString(QUuid::WithoutBraces),
+                     : QFileInfo(target_path).absolutePath() + u"/.jd-"_s +
+                           QUuid::createUuid().toString(QUuid::Id128),
                  sourceRequestId.isNull() ? u""_s : sourceRequestId});
             if (!row) {
                 return std::unexpected(row.error());
