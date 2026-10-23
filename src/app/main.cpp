@@ -1,5 +1,6 @@
 #include "app_controller.h"
 #include "glyph_provider.h"
+#include "smoke_flow.h"
 
 #include <QApplication>
 #include <QCommandLineParser>
@@ -149,6 +150,11 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption smoke_hidden_native(
         QStringLiteral("smoke-hidden-native"),
         QStringLiteral("Capturar con una ventana nativa creada siempre oculta; requiere smoke."));
+    const QCommandLineOption smoke_flow(
+        QStringLiteral("smoke-flow"),
+        QStringLiteral("Recorrido Qt: create, add, ignore, archive o settings."),
+        QStringLiteral("caso"));
+    parser.addOption(smoke_flow);
     parser.addOptions({api_base, smoke_image, smoke_size, smoke_page, profile_transfers,
                        smoke_hidden_native, smoke_view, smoke_archive, smoke_franchise,
                        smoke_anime});
@@ -159,6 +165,12 @@ int main(int argc, char* argv[]) {
     parser.process(app);
     const bool smoke = parser.isSet(smoke_image);
     const bool smokeHidden = parser.isSet(smoke_hidden_native);
+    if (parser.isSet(smoke_flow) &&
+        (!smokeHidden ||
+         !QStringList{QStringLiteral("create"), QStringLiteral("add"), QStringLiteral("ignore"),
+                      QStringLiteral("archive"), QStringLiteral("settings")}
+              .contains(parser.value(smoke_flow))))
+        return 2;
     if (smokeHidden &&
         (!smoke || !parser.isSet(data_dir) || QGuiApplication::platformName() != u"windows")) {
         qCritical("Smoke nativo oculto requiere captura, perfil y plataforma windows");
@@ -333,6 +345,12 @@ int main(int argc, char* argv[]) {
                         QCoreApplication::exit(5);
                 });
             }
+        }
+        if (parser.isSet(smoke_flow)) {
+            QTimer::singleShot(650, &app, [window, &controller, flow = parser.value(smoke_flow)] {
+                if (!animehub::app::runSmokeFlow(window, controller.library(), flow))
+                    QCoreApplication::exit(8);
+            });
         }
         // A hidden window has no regular render loop. Render a few frames so asynchronous
         // images and the product's own fade-in transitions settle before the evidence frame.
