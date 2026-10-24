@@ -135,7 +135,6 @@ private:
     std::unique_ptr<downloads::Aria2> aria2_;
     std::unique_ptr<downloads::mega::Api> mega_;
     std::unique_ptr<downloads::pixeldrain::Api> pixeldrain_;
-    std::unique_ptr<downloads::ClickNLoad> click_n_load_;
     std::unique_ptr<downloads::myjd::Client> myjd_;
     std::unique_ptr<JDownloaderView> jdownloader_view_;
     std::unique_ptr<downloads::DownloadManager> downloads_;

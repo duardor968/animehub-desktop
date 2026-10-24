@@ -33,8 +33,6 @@ public:
                                                   QStringLiteral("contraseña de prueba"));
     QString session = QStringLiteral("0011223344556677");
     bool expireOnce = false;
-    QString lastLinks;
-    QString lastPackage;
     int reconnects = 0;
 
     void install(HttpTestServer& server) {
@@ -72,23 +70,6 @@ public:
                             {QStringLiteral("name"), QStringLiteral("PC de Duardo")}}};
             return reply(key, rid(r), {{QStringLiteral("list"), list}});
         });
-    }
-
-    void installDevice(HttpTestServer& server) {
-        server.route("POST", "/t_" + session.toLatin1() + "_dev1/linkgrabberv2/addLinks",
-                     [this](const HttpTestServer::Request& r) {
-                         const auto key = myjd::updateToken(secrets.device, session);
-                         const auto plain = myjd::decrypt(r.body, key);
-                         const auto call = QJsonDocument::fromJson(plain.value_or("")).object();
-                         const auto params =
-                             QJsonDocument::fromJson(
-                                 call.value(u"params").toArray().first().toString().toUtf8())
-                                 .object();
-                         lastLinks = params.value(u"links").toString();
-                         lastPackage = params.value(u"packageName").toString();
-                         return reply(key, call.value(u"rid").toInteger(),
-                                      {{QStringLiteral("data"), QJsonValue::Null}});
-                     });
     }
 
 private:
@@ -168,7 +149,7 @@ private slots:
         QVERIFY(!myjd::decrypt(raw.toBase64(), key));
     }
 
-    void connectsListsDevicesAndAddsLinks() {
+    void connectsAndListsDevices() {
         HttpTestServer server;
         QVERIFY(server.listen());
         FakeMyJd fake;
@@ -187,17 +168,6 @@ private slots:
         QTRY_VERIFY(devices.has_value());
         QVERIFY(*devices);
         QCOMPARE((*devices)->first().name, QStringLiteral("PC de Duardo"));
-
-        fake.installDevice(server);
-        std::optional<std::expected<void, myjd::Failure>> added;
-        client.addLinks(QStringLiteral("dev1"), QStringLiteral("Sousou no Frieren"),
-                        {QUrl(QStringLiteral("https://mega.nz/file/a#b")),
-                         QUrl(QStringLiteral("https://www.mp4upload.com/x"))},
-                        this, [&](const auto& r) { added = r; });
-        QTRY_VERIFY(added.has_value());
-        QVERIFY(*added);
-        QCOMPARE(fake.lastPackage, QStringLiteral("Sousou no Frieren"));
-        QCOMPARE(fake.lastLinks.split(u'\n').size(), 2);
     }
 
     void scopedDeviceCallsPreservePositionalEncryptedArguments() {

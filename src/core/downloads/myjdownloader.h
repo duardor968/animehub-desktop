@@ -13,7 +13,7 @@
 
 class QNetworkAccessManager;
 
-// Sends links to a JDownloader anywhere through the MyJDownloader service: requests signed with
+// Reaches a JDownloader anywhere through the MyJDownloader service: requests signed with
 // HMAC-SHA256 and bodies encrypted with AES-128-CBC, with keys derived from the account.
 namespace animehub::downloads::myjd {
 
@@ -62,8 +62,6 @@ public:
 
     void connectAccount(const Secrets& secrets, QObject* context, Callback<void> done);
     void devices(QObject* context, Callback<QList<Device>> done);
-    void addLinks(const QString& device_id, const QString& package, const QList<QUrl>& links,
-                  QObject* context, Callback<void> done);
     void disconnectAccount();
     // Positional device API arguments. Result is the decrypted `data` value.
     void request(const QString& device_id, const QString& path, const QJsonArray& params,

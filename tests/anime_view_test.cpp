@@ -13,8 +13,8 @@ namespace {
 
 constexpr qint64 kGigabyte = 1'000'000'000;
 
-// An anime of three episodes and its page, with nothing that reaches the network: the API and
-// MyJDownloader point at a closed port, aria2 does not exist and no transfer starts.
+// An anime of three episodes and its page, with nothing that reaches the network: the API points
+// at a closed port, aria2 does not exist and no transfer starts.
 struct Fixture {
     QTemporaryDir root;
     std::unique_ptr<storage::Database> db;
@@ -29,9 +29,6 @@ struct Fixture {
     std::unique_ptr<downloads::DownloadManager> manager;
     std::unique_ptr<playback::Player> player;
     std::unique_ptr<app::AppSettings> settings;
-    std::unique_ptr<downloads::ClickNLoad> click_n_load;
-    std::unique_ptr<downloads::myjd::Client> myjd;
-    std::unique_ptr<app::JDownloaderView> jdownloader;
     std::unique_ptr<AnimeView> view;
 
     bool open(api::AnimeStatus status) {
@@ -57,10 +54,6 @@ struct Fixture {
             *repo, [] { return playback::PlayerSettings{}; }, [](const QString&) { return false; });
         settings = std::make_unique<app::AppSettings>(root.filePath(QStringLiteral("settings.ini")),
                                                       root.filePath(QStringLiteral("Anime")));
-        click_n_load = std::make_unique<downloads::ClickNLoad>(network);
-        myjd = std::make_unique<downloads::myjd::Client>(network, nullptr, closed);
-        jdownloader = std::make_unique<app::JDownloaderView>(
-            *settings, *click_n_load, *myjd, QStringLiteral("AnimeHub/Test/anime-view"));
 
         library::AnimeRecord anime;
         anime.slug = QStringLiteral("a");
@@ -112,7 +105,7 @@ struct Fixture {
     void show() {
         manager->start(false); // no aria2, API or JDownloader traffic
         view = std::make_unique<AnimeView>(
-            app::Services{*api, *library, *manager, *jdownloader, *player, *settings});
+            app::Services{*api, *library, *manager, *player, *settings});
         view->open(QStringLiteral("a"));
     }
 

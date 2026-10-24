@@ -378,7 +378,7 @@ Item {
 
         entries: [autoEntry, airingSeparator, watchedEntry, unwatchedEntry, positionEntry,
                   downloadsSeparator, missingEntry, unwatchedMissingEntry, rangeEntry, chooseEntry,
-                  pauseEntry, resumeEntry, retryEntry, cancelEntry, sendEntry,
+                  pauseEntry, resumeEntry, retryEntry, cancelEntry,
                   filesSeparator, trashWatchedEntry, trashFilmEntry, folderEntry, trailerEntry,
                   librarySeparator, removeEntry]
 
@@ -483,14 +483,6 @@ Item {
             text: page.view.single ? "Cancelar la descarga" : "Cancelar las descargas"
             glyph: Theme.icon.cancel
             onTriggered: page.view.cancelSeries(false)
-        }
-        MenuEntry {
-            id: sendEntry
-            property bool wanted: page.view.single && page.view.canSendToJDownloader
-                                  && page.view.onDiskCount === 0
-            text: "Enviar a JDownloader"
-            glyph: Theme.icon.send
-            onTriggered: page.view.sendToJDownloader(page.view.firstNumber)
         }
         MenuSeparator {
             id: filesSeparator

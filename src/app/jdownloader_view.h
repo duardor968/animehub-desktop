@@ -2,7 +2,6 @@
 #define ANIMEHUB_APP_JDOWNLOADER_VIEW_H
 
 #include "app_settings.h"
-#include "downloads/click_n_load.h"
 #include "downloads/myjdownloader.h"
 
 #include <QObject>
@@ -11,8 +10,8 @@
 
 namespace animehub::app {
 
-// JDownloader as a destination for the hosts AnimeHub does not download itself: the one on this
-// computer (Click'n'Load) or any of the account's devices (MyJDownloader).
+// The MyJDownloader account and device the downloads reach JDownloader through, and the
+// JDownloader application Ajustes can start.
 class JDownloaderView final : public QObject {
     Q_OBJECT
     QML_ELEMENT
@@ -25,9 +24,8 @@ class JDownloaderView final : public QObject {
     Q_PROPERTY(QString problem READ problem NOTIFY changed)
 
 public:
-    JDownloaderView(AppSettings& settings, downloads::ClickNLoad& local,
-                    downloads::myjd::Client& remote, QString credential_target,
-                    QObject* parent = nullptr);
+    JDownloaderView(AppSettings& settings, downloads::myjd::Client& remote,
+                    QString credential_target, QObject* parent = nullptr);
 
     [[nodiscard]] QString account() const {
         return account_;
@@ -53,10 +51,6 @@ public:
     Q_INVOKABLE void refreshDevices();
     Q_INVOKABLE void launch();
 
-    // Sends `links` to the chosen JDownloader; `done` gets a short sentence for the user.
-    void send(const QString& package, const QList<QUrl>& links, QObject* context,
-              std::function<void(bool sent, const QString& message)> done);
-
 signals:
     void changed();
 
@@ -65,7 +59,6 @@ private:
     [[nodiscard]] static QString describe(downloads::myjd::Failure failure);
 
     AppSettings& settings_;
-    downloads::ClickNLoad& local_;
     downloads::myjd::Client& remote_;
     QString credential_target_;
     QString account_;

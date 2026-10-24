@@ -5,7 +5,6 @@
 #include "card_model.h"
 #include "downloads/download_manager.h"
 #include "episode_model.h"
-#include "jdownloader_view.h"
 #include "library/library_service.h"
 #include "playback/player.h"
 #include "schedule.h"
@@ -24,7 +23,6 @@ struct Services {
     api::ApiClient& api;
     library::LibraryService& library;
     downloads::DownloadManager& downloads;
-    JDownloaderView& jdownloader;
     playback::Player& player;
     AppSettings& settings;
 };
@@ -97,7 +95,6 @@ class AnimeView final : public QObject {
     Q_PROPERTY(bool refreshing READ refreshing NOTIFY changed)
     Q_PROPERTY(QString problem READ problem NOTIFY changed)
     Q_PROPERTY(QString downloadFolder READ downloadFolder NOTIFY changed)
-    Q_PROPERTY(bool canSendToJDownloader READ canSendToJDownloader NOTIFY changed)
     Q_PROPERTY(EpisodeModel* episodes READ episodes CONSTANT)
     Q_PROPERTY(CardModel* related READ related CONSTANT)
 
@@ -198,7 +195,6 @@ public:
         return problem_;
     }
     [[nodiscard]] QString downloadFolder() const;
-    [[nodiscard]] bool canSendToJDownloader() const;
     [[nodiscard]] EpisodeModel* episodes() {
         return &episodes_;
     }
@@ -243,7 +239,6 @@ public:
     Q_INVOKABLE bool hasFolder() const;
     Q_INVOKABLE void openFolder();
     Q_INVOKABLE void openTrailer();
-    Q_INVOKABLE void sendToJDownloader(double number);
     Q_INVOKABLE void setInLibrary(bool value);
     Q_INVOKABLE void setFavorite(bool value);
     Q_INVOKABLE void setNotify(bool value);

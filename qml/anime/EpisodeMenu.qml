@@ -37,7 +37,7 @@ Item {
         id: menu
 
         entries: [watchedEntry, throughEntry, positionEntry, fileSeparator, cancelEntry, revealEntry,
-                  trashEntry, sendEntry]
+                  trashEntry]
 
         MenuEntry {
             id: watchedEntry
@@ -81,13 +81,6 @@ Item {
             text: "Mover a la Papelera"
             glyph: Theme.icon.trash
             onTriggered: root.view.trashFile(root.number)
-        }
-        MenuEntry {
-            id: sendEntry
-            property bool wanted: root.view.canSendToJDownloader && !root.hasFile
-            text: "Enviar a JDownloader"
-            glyph: Theme.icon.send
-            onTriggered: root.view.sendToJDownloader(root.number)
         }
     }
 

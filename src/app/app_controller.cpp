@@ -90,12 +90,10 @@ AppController::AppController(AppPaths paths, QObject* parent)
         api_options.userAgent);
     mega_ = std::make_unique<downloads::mega::Api>(network_);
     pixeldrain_ = std::make_unique<downloads::pixeldrain::Api>(network_);
-    click_n_load_ = std::make_unique<downloads::ClickNLoad>(network_);
     myjd_ = std::make_unique<downloads::myjd::Client>(network_);
     // One saved account per data folder, so test profiles never touch the real one.
     const auto credential = QStringLiteral("AnimeHub/MyJDownloader/") + instanceName(paths_.data);
-    jdownloader_view_ =
-        std::make_unique<JDownloaderView>(*settings_, *click_n_load_, *myjd_, credential);
+    jdownloader_view_ = std::make_unique<JDownloaderView>(*settings_, *myjd_, credential);
     downloads_ = std::make_unique<downloads::DownloadManager>(
         downloads::DownloadManager::Services{*api_, *aria2_, *mega_, *pixeldrain_,
                                              *download_repository_, *library_repository_,
@@ -154,8 +152,7 @@ AppController::AppController(AppPaths paths, QObject* parent)
     connect(player_.get(), &playback::Player::progressChanged, library_.get(),
             &library::LibraryService::announce);
 
-    const Services services{*api_,    *library_, *downloads_, *jdownloader_view_,
-                            *player_, *settings_};
+    const Services services{*api_, *library_, *downloads_, *player_, *settings_};
     library_model_ = std::make_unique<LibraryModel>(*library_, *downloads_, *api_);
     catalog_view_ = std::make_unique<CatalogView>(*api_, *library_model_);
     downloads_view_ = std::make_unique<DownloadsView>(*downloads_, *library_, *player_);

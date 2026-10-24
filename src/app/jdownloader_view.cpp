@@ -10,10 +10,9 @@ namespace animehub::app {
 
 using downloads::myjd::Failure;
 
-JDownloaderView::JDownloaderView(AppSettings& settings, downloads::ClickNLoad& local,
-                                 downloads::myjd::Client& remote, QString credential_target,
-                                 QObject* parent)
-    : QObject(parent), settings_(settings), local_(local), remote_(remote),
+JDownloaderView::JDownloaderView(AppSettings& settings, downloads::myjd::Client& remote,
+                                 QString credential_target, QObject* parent)
+    : QObject(parent), settings_(settings), remote_(remote),
       credential_target_(std::move(credential_target)) {}
 
 QString JDownloaderView::describe(Failure failure) {
@@ -130,39 +129,6 @@ void JDownloaderView::refreshDevices() {
                        ? QStringLiteral("Tu cuenta no tiene ningún JDownloader conectado.")
                        : QString();
         emit changed();
-    });
-}
-
-void JDownloaderView::send(const QString& package, const QList<QUrl>& links, QObject* context,
-                           std::function<void(bool, const QString&)> done) {
-    if (settings_.jdownloader() == AppSettings::JDownloader::Remote) {
-        if (!remote_.isConnected() || settings_.jdownloaderDevice().isEmpty()) {
-            done(false, QStringLiteral("Conecta tu cuenta de MyJDownloader en Ajustes."));
-            return;
-        }
-        remote_.addLinks(
-            settings_.jdownloaderDevice(), package, links, context, [done](const auto& result) {
-                done(result.has_value(), result ? QStringLiteral("Enlaces enviados a JDownloader.")
-                                                : describe(result.error()));
-            });
-        return;
-    }
-    local_.send(package, links, context, [done](const auto& result) {
-        if (result) {
-            done(true, QStringLiteral("Enlaces enviados a JDownloader."));
-            return;
-        }
-        switch (result.error()) {
-        case downloads::ClickNLoad::Failure::Unreachable:
-            done(false, QStringLiteral("Abre JDownloader con Click'n'Load activo (puerto 9666)."));
-            break;
-        case downloads::ClickNLoad::Failure::Foreign:
-            done(false, QStringLiteral("Otro programa está usando el puerto 9666."));
-            break;
-        case downloads::ClickNLoad::Failure::Rejected:
-            done(false, QStringLiteral("JDownloader no aceptó los enlaces."));
-            break;
-        }
     });
 }
 

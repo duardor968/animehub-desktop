@@ -310,29 +310,6 @@ void Client::callDevice(const QString& device_id, const QString& path, const QJs
         });
 }
 
-void Client::addLinks(const QString& device_id, const QString& package, const QList<QUrl>& links,
-                      QObject* context, Callback<void> done) {
-    if (!isConnected()) {
-        done(std::unexpected(Failure::WrongCredentials));
-        return;
-    }
-    QStringList urls;
-    for (const auto& link : links) {
-        urls.append(link.toString(QUrl::FullyEncoded));
-    }
-    callDevice(device_id, QStringLiteral("/linkgrabberv2/addLinks"),
-               {QJsonObject{{QStringLiteral("links"), urls.join(QLatin1Char('\n'))},
-                            {QStringLiteral("packageName"), package},
-                            {QStringLiteral("autostart"), false}}},
-               context, [done = std::move(done)](const auto& answer) {
-                   if (!answer) {
-                       done(std::unexpected(answer.error().first));
-                       return;
-                   }
-                   done({});
-               });
-}
-
 void Client::request(const QString& device_id, const QString& path, const QJsonArray& params,
                      QObject* context, Callback<QJsonValue> done) {
     if (!isConnected() || device_id.isEmpty()) {

@@ -619,13 +619,6 @@ QString AnimeView::downloadFolder() const {
     return QDir::toNativeSeparators(folderPath());
 }
 
-// Only while AnimeHub downloads: with JDownloader as the engine, "Descargar" already sends it
-// there, followed and into the library's folder.
-bool AnimeView::canSendToJDownloader() const {
-    return services_.settings.jdownloader() != AppSettings::JDownloader::Off &&
-           !services_.settings.preferredJDownloader();
-}
-
 double AnimeView::firstNumber() const {
     return episodes_.episodes().isEmpty() ? 0 : episodes_.episodes().first().number;
 }
@@ -1291,37 +1284,6 @@ void AnimeView::openTrailer() {
     if (const auto url = trailerUrl(); url.isValid()) {
         QDesktopServices::openUrl(url);
     }
-}
-
-void AnimeView::sendToJDownloader(double number) {
-    const auto generation = generation_;
-    const auto package = title();
-    services_.api.resolve(
-        slug_,
-        {.episodeNumbers = {number},
-         .audio = services_.settings.dubbed() ? api::Audio::Dub : api::Audio::Sub,
-         .providers = {api::Provider::Mega, api::Provider::Pixeldrain, api::Provider::Mp4Upload,
-                       api::Provider::OneFichier}},
-        this, [this, generation, package](const api::Result<api::Resolution>& result) {
-            if (generation != generation_) {
-                return;
-            }
-            QList<QUrl> links;
-            if (result) {
-                for (const auto& episode : result->value.episodes) {
-                    for (const auto& link : episode.links) {
-                        links.append(link.url);
-                    }
-                }
-            }
-            if (links.isEmpty()) {
-                emit message(QStringLiteral("No hay enlaces para este episodio."), true);
-                return;
-            }
-            services_.jdownloader.send(
-                package, links, this,
-                [this](bool sent, const QString& text) { emit message(text, !sent); });
-        });
 }
 
 void AnimeView::setFavorite(bool value) {
