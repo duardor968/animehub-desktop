@@ -656,23 +656,29 @@ private slots:
     }
 
     void manualFranchiseMembershipSurvivesRefresh() {
+        // Frieren is the sequel of a followed anime in First.
         const auto slug = frieren().slug;
-        const auto first = repository_->createFranchise(QStringLiteral("First"));
+        auto anchor = frieren();
+        anchor.slug = QStringLiteral("anchor");
+        QVERIFY(repository_->saveSnapshot(anchor));
+        QVERIFY(repository_->setInLibrary(anchor.slug, true));
+        const auto first = repository_->createFranchise(QStringLiteral("First"), anchor.slug);
         const auto second = repository_->createFranchise(QStringLiteral("Second"));
         QVERIFY(first && second);
-        QVERIFY(repository_->applyFranchiseRelations(*first, {slug}));
+        const auto detail = detailOf(anchor.slug, {relationTo(slug)});
+        QCOMPARE(*repository_->discoverFranchiseRelations(detail), QStringList{slug});
         QVERIFY(repository_->setFranchiseMember(*first, slug, false));
-        QVERIFY(repository_->applyFranchiseRelations(*first, {slug}));
-        QVERIFY(repository_->franchises()->first().members.isEmpty());
+        QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
+        QCOMPARE(repository_->franchises()->first().members, QStringList{anchor.slug});
         QVERIFY(repository_->setFranchiseMember(*second, slug, true));
-        QVERIFY(repository_->applyFranchiseRelations(*first, {slug}));
+        QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
         QVERIFY(repository_->saveSnapshot(frieren()));
         const auto groups = repository_->franchises();
         QCOMPARE(groups->at(0).id, *first);
-        QVERIFY(groups->at(0).members.isEmpty());
+        QCOMPARE(groups->at(0).members, QStringList{anchor.slug});
         QCOMPARE(groups->at(1).members, QStringList{slug});
         QVERIFY(repository_->setFranchiseMember(*first, slug, true));
-        QCOMPARE(repository_->franchises()->at(0).members, QStringList{slug});
+        QCOMPARE(repository_->franchises()->at(0).members, (QStringList{anchor.slug, slug}));
         QVERIFY(repository_->franchises()->at(1).members.isEmpty());
     }
     void discoversIncomingAndOutgoingRelationsForArchivedFinishedGroups_data() {
@@ -754,33 +760,21 @@ private slots:
         QVERIFY(repository_->setFranchiseMember(*second, other.slug, true));
         auto detail = detailOf(crossover.slug, {});
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
         detail.relations = {relationTo(frieren().slug, api::RelationKind::Prequel),
                             relationTo(other.slug, api::RelationKind::SideStory)};
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
+        QCOMPARE(repository_->franchises()->size(), 2);
         QCOMPARE(repository_->franchises()->at(0).members, QStringList{frieren().slug});
         QCOMPARE(repository_->franchises()->at(1).members, QStringList{other.slug});
-        const auto pending = repository_->pendingFranchiseCandidates();
-        QCOMPARE(pending->size(), 1);
-        QCOMPARE(pending->first().reason, QStringLiteral("multiple_groups"));
-        QCOMPARE(pending->first().franchiseTitles,
-                 (QStringList{QStringLiteral("First"), QStringLiteral("Second")}));
-        QVERIFY(pending->first().standaloneSlugs.isEmpty());
         // A non-followed neighboring group still prevents an automatic merge.
         QVERIFY(repository_->setFlag(other.slug, Flag::Notify, false));
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QCOMPARE(repository_->pendingFranchiseCandidates()->first().franchiseTitles,
-                 pending->first().franchiseTitles);
-        QVERIFY(repository_->resolveFranchiseCandidate(detail.slug, *second));
-        QVERIFY((*repository_->anime(detail.slug))->inLibrary);
-        QVERIFY((*repository_->anime(detail.slug))->notify);
-        QVERIFY(!(*repository_->anime(detail.slug))->autoDownload);
-        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
-        QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QCOMPARE(repository_->franchises()->at(1).members.size(), 2);
+        QCOMPARE(repository_->franchises()->size(), 2);
+        QCOMPARE(repository_->franchises()->at(0).members, QStringList{frieren().slug});
+        QCOMPARE(repository_->franchises()->at(1).members, QStringList{other.slug});
     }
 
-    void unfollowedAnimeAddsAndProposesNothing() {
+    void unfollowedAnimeAddsNothing() {
         // Its prequel is in a followed franchise and its side story is followed on its own.
         const auto old = frieren().slug;
         QVERIFY(repository_->setInLibrary(old, true));
@@ -794,17 +788,16 @@ private slots:
                                       relationTo(side.slug, api::RelationKind::SideStory)});
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
         QVERIFY(!inLibrary(detail.slug));
-        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
         QCOMPARE(storedRelations(), 0);
         // In the library without notices or downloads, it is not followed either.
         QVERIFY(repository_->setInLibrary(detail.slug, true));
         QVERIFY(repository_->setFlag(detail.slug, Flag::Notify, false));
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
+        QCOMPARE(storedRelations(), 0);
         QCOMPARE(repository_->franchises()->first().members, QStringList{old});
     }
 
-    void onlyInstallmentsJoinOrAreProposed_data() {
+    void onlyInstallmentsJoin_data() {
         using api::RelationKind;
         QTest::addColumn<int>("kind");
         QTest::addColumn<bool>("installment");
@@ -821,7 +814,7 @@ private slots:
         QTest::newRow("other") << static_cast<int>(RelationKind::Other) << false;
     }
 
-    void onlyInstallmentsJoinOrAreProposed() {
+    void onlyInstallmentsJoin() {
         QFETCH(int, kind);
         QFETCH(bool, installment);
         const auto relation_kind = static_cast<api::RelationKind>(kind);
@@ -841,14 +834,16 @@ private slots:
         QCOMPARE(repository_->entries(true)->size(), installment ? 3 : 2);
         QCOMPARE(repository_->franchises()->first().members.size(), installment ? 2 : 1);
 
-        QVERIFY(repository_->discoverFranchiseRelations(
-            detailOf(solo.slug, {relationTo(QStringLiteral("proposed"), relation_kind)})));
-        QCOMPARE(repository_->pendingFranchiseCandidates()->size(), installment ? 1 : 0);
+        QVERIFY(repository_
+                    ->discoverFranchiseRelations(detailOf(
+                        solo.slug, {relationTo(QStringLiteral("solo-related"), relation_kind)}))
+                    ->isEmpty());
+        QVERIFY(!inLibrary(QStringLiteral("solo-related")));
         QCOMPARE(storedRelations(), installment ? 2 : 0);
     }
 
     void refreshDropsLinksThatNoLongerCount() {
-        // Links stored when any relation counted, with the proposals they made.
+        // Links stored when any relation counted.
         const auto old = frieren().slug;
         QVERIFY(repository_->setInLibrary(old, true));
         for (const auto& slug : {QStringLiteral("spin-off"), QStringLiteral("gone")}) {
@@ -858,10 +853,6 @@ private slots:
             QVERIFY(database_->run(QStringLiteral("INSERT INTO anime_relation(source_slug, "
                                                   "target_slug) VALUES (?, ?)"),
                                    {old, slug}));
-            QVERIFY(database_->run(
-                QStringLiteral(
-                    "INSERT INTO franchise_candidate(slug, reason) VALUES (?, 'needs_group')"),
-                {slug}));
         }
         QVERIFY(database_->run(
             QStringLiteral("INSERT INTO anime_relation(source_slug, target_slug) VALUES (?, ?)"),
@@ -873,192 +864,70 @@ private slots:
             relationTo(QStringLiteral("spin-off"), api::RelationKind::SpinOff));
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
         QCOMPARE(storedRelations(), 0);
-        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
-    }
-    void resolvesCandidateAtomically_data() {
-        QTest::addColumn<bool>("new_group");
-        QTest::addColumn<bool>("already_personal");
-        QTest::newRow("existing-archived-group") << false << false;
-        QTest::newRow("new-group-with-standalone") << true << false;
-        QTest::newRow("preserve-personal-flags") << false << true;
     }
 
-    void resolvesCandidateAtomically() {
-        QFETCH(bool, new_group);
-        QFETCH(bool, already_personal);
+    void removedWorkIsNotRediscoveredAndManualExclusionWins() {
         const auto old = frieren().slug;
-        const auto candidate = QStringLiteral("pending-season");
+        const auto season = QStringLiteral("removed-season");
         QVERIFY(repository_->setInLibrary(old, true));
-        const auto detail = detailOf(old, {relationTo(candidate)});
-        QVERIFY(repository_->discoverFranchiseRelations(detail));
-        QCOMPARE(repository_->pendingFranchiseCandidates()->size(), 1);
-        api::Episode episode;
-        episode.number = 1;
-        episode.id = QStringLiteral("source-episode");
-        QVERIFY(repository_->syncEpisodes(candidate, {episode}, false));
-        QVERIFY(repository_->setWatchState(candidate, 1, WatchState::Watched));
-        if (already_personal) {
-            QVERIFY(repository_->setInLibrary(candidate, true));
-            QVERIFY(repository_->setFlag(candidate, Flag::Notify, false));
-            QVERIFY(repository_->setFlag(candidate, Flag::AutoDownload, true));
-        }
-        qint64 id = 0;
-        if (new_group) {
-            const auto created =
-                repository_->resolveFranchiseCandidate(candidate, QStringLiteral("Chosen"));
-            QVERIFY(created);
-            id = *created;
-        } else {
-            const auto created = repository_->createFranchise(QStringLiteral("Chosen"), old);
-            QVERIFY(created);
-            id = *created;
-            QVERIFY(repository_->setArchived(old, true));
-            QVERIFY(repository_->resolveFranchiseCandidate(candidate, id));
-        }
-        const auto record = *repository_->anime(candidate);
-        QVERIFY(record->inLibrary);
-        QCOMPARE(record->archived, !new_group && !already_personal);
-        QCOMPARE(record->notify, !already_personal);
-        QCOMPARE(record->autoDownload, already_personal);
-        QCOMPARE((*repository_->episode(candidate, 1))->state, WatchState::Watched);
-        QCOMPARE((*repository_->episode(candidate, 1))->sourceEpisodeId, episode.id);
-        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
+        const auto group = repository_->createFranchise(QStringLiteral("Personal"), old);
+        QVERIFY(group);
+        const auto detail = detailOf(old, {relationTo(season)});
+        QCOMPARE(*repository_->discoverFranchiseRelations(detail), QStringList{season});
+        QVERIFY(repository_->removePersonalRecord(season));
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QVERIFY(!repository_->resolveFranchiseCandidate(candidate, id));
-        QCOMPARE(repository_->franchises()->size(), 1);
-        QCOMPARE(repository_->franchises()->first().members.size(), 2);
+        QVERIFY(!inLibrary(season));
+        QCOMPARE(repository_->franchises()->first().members, QStringList{old});
+        // An explicit personal correction is allowed; its manual exclusion then wins.
+        QVERIFY(repository_->setFranchiseMember(*group, season, true));
+        QCOMPARE(repository_->franchises()->first().members, (QStringList{season, old}));
+        QVERIFY(repository_->setFranchiseMember(*group, season, false));
+        QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
+        QCOMPARE(repository_->franchises()->first().members, QStringList{old});
     }
 
-    void candidateResolutionRollsBackAndDismissalPersists() {
-        const auto slug = frieren().slug;
-        QVERIFY(database_->run(
-            QStringLiteral(
-                "INSERT INTO franchise_candidate(slug, reason) VALUES (?, 'needs_group')"),
-            {slug}));
-        QVERIFY(!repository_->resolveFranchiseCandidate(slug, qint64{9999}));
-        QVERIFY(!repository_->resolveFranchiseCandidate(slug, QStringLiteral("  ")));
+    void ambiguousRelationCreatesNothing() {
+        // Two followed anime of their own share a sequel that is not in the library.
+        const auto first = frieren().slug;
+        auto other = frieren();
+        other.slug = QStringLiteral("another-show");
+        QVERIFY(repository_->saveSnapshot(other));
+        QVERIFY(repository_->setInLibrary(first, true));
+        QVERIFY(repository_->setInLibrary(other.slug, true));
+        const auto sequel = QStringLiteral("shared-sequel");
+        const auto memberships = [&] {
+            auto query = database_->run(
+                QStringLiteral("SELECT COUNT(*) FROM franchise_member WHERE slug = ?"), {sequel});
+            return query && query->next() ? query->value(0).toInt() : -1;
+        };
+        // No franchise to join: none is created.
+        for (const auto& slug : {first, other.slug})
+            QVERIFY(repository_->discoverFranchiseRelations(detailOf(slug, {relationTo(sequel)}))
+                        ->isEmpty());
+        QCOMPARE(storedRelations(), 2);
+        QVERIFY(!inLibrary(sequel));
+        QVERIFY(repository_->franchises()->isEmpty());
+        // A franchise each: it could join either, so it joins neither.
+        const auto one = repository_->createFranchise(QStringLiteral("One"), first);
+        const auto two = repository_->createFranchise(QStringLiteral("Two"), other.slug);
+        QVERIFY(one && two);
+        const auto detail = detailOf(first, {relationTo(sequel)});
+        QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
+        QVERIFY(!inLibrary(sequel));
+        QCOMPARE(memberships(), 0);
+        QCOMPARE(repository_->franchises()->size(), 2);
+        QCOMPARE(repository_->franchises()->at(0).members, QStringList{first});
+        QCOMPARE(repository_->franchises()->at(1).members, QStringList{other.slug});
+        // With one franchise left, the same refresh adds it there.
+        QVERIFY(repository_->setFranchiseMember(*two, other.slug, false));
+        QCOMPARE(*repository_->discoverFranchiseRelations(detail), QStringList{sequel});
+        QCOMPARE(repository_->franchises()->at(0).members, (QStringList{sequel, first}));
+    }
+
+    void franchiseWithAnUnknownWorkIsNotCreated() {
         QVERIFY(
             !repository_->createFranchise(QStringLiteral("Bad member"), QStringLiteral("missing")));
         QVERIFY(repository_->franchises()->isEmpty());
-        QVERIFY(database_->run(
-            QStringLiteral("CREATE TRIGGER reject_member BEFORE INSERT ON franchise_member BEGIN "
-                           "SELECT RAISE(ABORT, 'forced failure'); END")));
-        QVERIFY(!repository_->resolveFranchiseCandidate(slug, QStringLiteral("Rolled back")));
-        QVERIFY(!(*repository_->anime(slug))->inLibrary);
-        QVERIFY(repository_->franchises()->isEmpty());
-        QCOMPARE(repository_->pendingFranchiseCandidates()->size(), 1);
-        QVERIFY(database_->run(QStringLiteral("DROP TRIGGER reject_member")));
-        QVERIFY(repository_->dismissFranchiseCandidate(slug));
-        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
-        QVERIFY(!repository_->resolveFranchiseCandidate(slug, QStringLiteral("Stale review")));
-        QVERIFY(repository_->franchises()->isEmpty());
-        // Even a stale queued candidate cannot override the persisted personal exclusion.
-        QVERIFY(database_->run(
-            QStringLiteral(
-                "INSERT INTO franchise_candidate(slug, reason) VALUES (?, 'needs_group')"),
-            {slug}));
-        QVERIFY(!repository_->resolveFranchiseCandidate(slug, QStringLiteral("Excluded")));
-        QVERIFY(repository_->franchises()->isEmpty());
-        const auto group = repository_->createFranchise(QStringLiteral("Manual override"), slug);
-        QVERIFY(group);
-        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
-    }
-
-    void dismissedCandidateIsNotRediscoveredAndManualExclusionWins() {
-        const auto old = frieren().slug;
-        const auto candidate = QStringLiteral("dismissed-season");
-        QVERIFY(repository_->setInLibrary(old, true));
-        const auto detail = detailOf(old, {relationTo(candidate)});
-        QVERIFY(repository_->discoverFranchiseRelations(detail));
-        QCOMPARE(repository_->pendingFranchiseCandidates()->size(), 1);
-        QVERIFY(repository_->dismissFranchiseCandidate(candidate));
-        QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
-        QVERIFY(!inLibrary(candidate));
-        const auto group = repository_->createFranchise(QStringLiteral("Personal"), old);
-        QVERIFY(group);
-        QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QVERIFY(!inLibrary(candidate));
-        // An explicit personal correction is allowed; stale review after exclusion is not.
-        QVERIFY(repository_->setFranchiseMember(*group, candidate, true));
-        QVERIFY(repository_->setFranchiseMember(*group, candidate, false));
-        QVERIFY(database_->run(
-            QStringLiteral(
-                "INSERT INTO franchise_candidate(slug, reason) VALUES (?, 'multiple_groups')"),
-            {candidate}));
-        QVERIFY(!repository_->resolveFranchiseCandidate(candidate, *group));
-        QCOMPARE(repository_->franchises()->first().members, QStringList{old});
-        QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
-    }
-
-    void newCandidateGroupIncludesOnlyEligibleStandaloneNeighborsAtomically() {
-        const QString candidate = QStringLiteral("candidate");
-        const auto old = frieren().slug;
-        QVERIFY(repository_->setInLibrary(old, true));
-        QVERIFY(repository_->setArchived(old, true));
-        QVERIFY(repository_->setFlag(old, Flag::AutoDownload, true));
-        QVERIFY(repository_->setWatchState(old, 1, WatchState::Watched));
-        const QStringList neighbors{old, QStringLiteral("second"), QStringLiteral("excluded"),
-                                    QStringLiteral("grouped")};
-        for (const auto& slug : neighbors) {
-            auto record = frieren();
-            record.slug = slug;
-            QVERIFY(repository_->saveSnapshot(record));
-            QVERIFY(repository_->setInLibrary(slug, true));
-            QVERIFY(repository_->setArchived(slug, true));
-        }
-        // Discover before personal corrections; the review must re-read current eligibility.
-        for (const auto& slug : neighbors)
-            QVERIFY(
-                repository_->discoverFranchiseRelations(detailOf(slug, {relationTo(candidate)})));
-        const auto other =
-            repository_->createFranchise(QStringLiteral("Other"), QStringLiteral("grouped"));
-        QVERIFY(other);
-        QVERIFY(repository_->setFranchiseMember(*other, QStringLiteral("excluded"), false));
-        auto pending = repository_->pendingFranchiseCandidates();
-        QCOMPARE(pending->size(), 1);
-        QCOMPARE(pending->first().standaloneSlugs, (QStringList{QStringLiteral("second"), old}));
-        QVERIFY(database_->run(QStringLiteral(
-            "CREATE TRIGGER reject_candidate BEFORE INSERT ON franchise_member WHEN NEW.slug = "
-            "'candidate' BEGIN SELECT RAISE(ABORT, 'forced failure'); END")));
-        QVERIFY(!repository_->resolveFranchiseCandidate(candidate, QStringLiteral("Together")));
-        QCOMPARE(repository_->franchises()->size(), 1);
-        QCOMPARE(repository_->franchises()->first().members,
-                 QStringList{QStringLiteral("grouped")});
-        QCOMPARE(repository_->pendingFranchiseCandidates()->first().standaloneSlugs,
-                 pending->first().standaloneSlugs);
-        QVERIFY(!(*repository_->anime(candidate))->inLibrary);
-        QVERIFY((*repository_->anime(old))->archived);
-        QVERIFY((*repository_->anime(old))->autoDownload);
-        QCOMPARE((*repository_->episode(old, 1))->state, WatchState::Watched);
-        QVERIFY(database_->run(QStringLiteral("DROP TRIGGER reject_candidate")));
-        const auto group =
-            repository_->resolveFranchiseCandidate(candidate, QStringLiteral("Together"));
-        QVERIFY(group);
-        const auto groups = repository_->franchises();
-        QCOMPARE(groups->size(), 2);
-        QCOMPARE(groups->first().members, QStringList{QStringLiteral("grouped")});
-        QCOMPARE(groups->last().members, (QStringList{candidate, QStringLiteral("second"), old}));
-        QVERIFY((*repository_->anime(candidate))->archived);
-        QVERIFY((*repository_->anime(candidate))->notify);
-        QVERIFY(!(*repository_->anime(candidate))->autoDownload);
-        QVERIFY((*repository_->anime(old))->autoDownload);
-        QCOMPARE((*repository_->episode(old, 1))->state, WatchState::Watched);
-    }
-
-    void existingCandidateTargetDoesNotPullStandaloneNeighbors() {
-        const auto old = frieren().slug;
-        const auto candidate = QStringLiteral("candidate");
-        QVERIFY(repository_->setInLibrary(old, true));
-        QVERIFY(repository_->discoverFranchiseRelations(detailOf(old, {relationTo(candidate)})));
-        QCOMPARE(repository_->pendingFranchiseCandidates()->first().standaloneSlugs,
-                 QStringList{old});
-        const auto group = repository_->createFranchise(QStringLiteral("Existing"));
-        QVERIFY(group);
-        QVERIFY(repository_->resolveFranchiseCandidate(candidate, *group));
-        QCOMPARE(repository_->franchises()->first().members, QStringList{candidate});
-        QVERIFY((*repository_->anime(old))->inLibrary);
     }
 
     void openingAnAnimePageAddsNothing() {
@@ -1082,7 +951,6 @@ private slots:
         QTRY_VERIFY(!service.isRefreshing(detail->slug));
         QCOMPARE(repository_->episodes(detail->slug)->size(), 1); // its page still gets episodes
         QVERIFY(!inLibrary(detail->slug));
-        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
         QCOMPARE(repository_->franchises()->first().members, QStringList{sequel.slug});
         QCOMPARE(storedRelations(), 0);
         QVERIFY(members.isEmpty());

@@ -106,39 +106,6 @@ private slots:
         QCOMPARE(model.rowCount(), 2); // search opens the matching member under its personal group
         QCOMPARE(model.groupAt(0), personal);
         QCOMPARE(model.slugAt(1), QStringLiteral("a"));
-        const auto candidate = [&](const QString& slug) {
-            library::AnimeRecord record;
-            record.slug = slug;
-            record.title = slug.toUpper();
-            if (!repo.saveSnapshot(record))
-                return false;
-            return db
-                ->run(QStringLiteral("INSERT INTO franchise_candidate(slug, reason) VALUES "
-                                     "(?, 'multiple_groups')"),
-                      {slug})
-                .has_value();
-        };
-        QVERIFY(candidate(QStringLiteral("d")));
-        QCOMPARE(model.pendingCandidates().size(), 1);
-        QVERIFY(!model.resolveCandidate(QStringLiteral("d"), -100));
-        QVERIFY(!model.error().isEmpty());
-        QCOMPARE(model.pendingCandidates().size(), 1);
-        QVERIFY(!model.contains(QStringLiteral("d")));
-        QVERIFY(model.resolveCandidate(QStringLiteral("d"), personal));
-        QVERIFY(model.error().isEmpty());
-        QVERIFY(model.pendingCandidates().isEmpty());
-        QVERIFY(model.contains(QStringLiteral("d")));
-        QVERIFY(candidate(QStringLiteral("e")));
-        QVERIFY(model.dismissCandidate(QStringLiteral("e")));
-        QVERIFY(model.pendingCandidates().isEmpty());
-        QVERIFY(!model.contains(QStringLiteral("e")));
-        QVERIFY(candidate(QStringLiteral("f")));
-        QVERIFY(model.createCandidateFranchise(QStringLiteral("f"), QStringLiteral("New group")));
-        QVERIFY(model.pendingCandidates().isEmpty());
-        QVERIFY(model.contains(QStringLiteral("f")));
-        QCOMPARE(model.franchise().value(QStringLiteral("title")).toString(),
-                 QStringLiteral("New group"));
-        QCOMPARE(model.franchiseChoices().size(), 3);
     }
 };
 

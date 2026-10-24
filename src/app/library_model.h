@@ -38,8 +38,6 @@ class LibraryModel final : public QAbstractListModel {
     Q_PROPERTY(QVariantMap franchise READ franchise NOTIFY franchiseChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
     Q_PROPERTY(QVariantList overview READ overview NOTIFY countChanged)
-    Q_PROPERTY(QVariantList pendingCandidates READ pendingCandidates NOTIFY countChanged)
-    Q_PROPERTY(QVariantList franchiseChoices READ franchiseChoices NOTIFY countChanged)
     // The anime watched last, shown in large on the home: slug, title, backdropUrl, posterUrl,
     // detail, progress (< 0 hides the bar), action (FeaturedAction) and actionText. Empty when
     // nothing that passes the filter is being watched.
@@ -135,11 +133,6 @@ public:
     Q_INVOKABLE bool setFranchiseMember(qint64 id, const QString& slug, bool included);
     Q_INVOKABLE QVariantList memberChoices(qint64 id) const;
     Q_INVOKABLE bool createFranchise(const QString& title, const QString& slug);
-    QVariantList pendingCandidates() const;
-    QVariantList franchiseChoices() const;
-    Q_INVOKABLE bool resolveCandidate(const QString& slug, qint64 id);
-    Q_INVOKABLE bool createCandidateFranchise(const QString& slug, const QString& title);
-    Q_INVOKABLE bool dismissCandidate(const QString& slug);
     [[nodiscard]] QVariantMap featured() const {
         return featured_;
     }

@@ -85,14 +85,6 @@ struct FranchiseRecord {
     QStringList members;
 };
 
-struct FranchiseCandidate {
-    QString slug;
-    QString title;
-    QString reason;
-    QStringList standaloneSlugs; // personal neighbors included when creating a needs_group group
-    QStringList franchiseTitles; // neighboring personal groups behind a multiple_groups review
-};
-
 // "12", "12.5": how episode numbers are shown and written in file names.
 [[nodiscard]] QString formatEpisodeNumber(double number);
 

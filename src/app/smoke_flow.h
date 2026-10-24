@@ -57,75 +57,62 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
                 return object;
         return nullptr;
     };
-    if (flow == u"create" || flow == u"add" || flow == u"ignore") {
-        auto* dialog = named("franchiseReviewDialog");
-        auto* destination = named("candidateDestination");
-        auto* title = qobject_cast<QQuickItem*>(named("candidateNewTitle"));
-        auto* confirm = named("candidateConfirm");
-        if (!check(dialog && destination && title && confirm &&
-                       !model->pendingCandidates().isEmpty(),
-                   "candidate fixture and controls"))
+    // The library list, found by one of its signals.
+    const auto listWith = [&descendants](const char* signal) -> QObject* {
+        for (auto* object : descendants())
+            if (object->metaObject()->indexOfSignal(signal) >= 0)
+                return object;
+        return nullptr;
+    };
+    if (flow == u"create") {
+        // "Crear franquicia…" from a work's menu in the list.
+        model->setFilter(LibraryModel::Filter::AllAnime);
+        model->setArchivedOnly(false);
+        settle();
+        const QString slug = model->slugAt(0);
+        auto* list = listWith("createFranchiseRequested(QString,QString)");
+        auto* dialog = named("createFranchiseDialog");
+        auto* title = qobject_cast<QQuickItem*>(named("createFranchiseTitle"));
+        auto* confirm = named("createFranchiseConfirm");
+        if (!check(list && dialog && title && confirm && !slug.isEmpty(),
+                   "create fixture and controls"))
             return false;
-        const auto count = model->pendingCandidates().size();
-        if (!QMetaObject::invokeMethod(dialog, "show"))
+        if (!QMetaObject::invokeMethod(list, "createFranchiseRequested", Q_ARG(QString, slug),
+                                       Q_ARG(QString, slug)))
             return false;
         settle();
-        if (!check(!confirm->property("enabled").toBool(), "unselected destination cannot submit"))
+        if (!check(dialog->property("visible").toBool(), "menu entry opens the dialog"))
             return false;
-        QMetaObject::invokeMethod(dialog, "submit");
-        if (!check(model->pendingCandidates().size() == count,
-                   "invalid submit preserves candidate"))
+        title->setProperty("text", QStringLiteral("   "));
+        if (!check(!confirm->property("enabled").toBool(), "blank franchise cannot submit"))
             return false;
-        qobject_cast<QQuickItem*>(destination)->forceActiveFocus();
+        title->forceActiveFocus();
+        key(Qt::Key_Return);
+        settle();
+        if (!check(dialog->property("visible").toBool(), "Enter on a blank name keeps the dialog"))
+            return false;
         auto* focus = window->activeFocusItem();
-        qInfo() << "Flow focus before Tab" << focus;
         key(Qt::Key_Tab);
-        qInfo() << "Flow focus after Tab" << window->activeFocusItem();
         if (!check(window->activeFocusItem() && window->activeFocusItem() != focus,
                    "Tab advances dialog focus"))
             return false;
-        if (flow == u"ignore") {
-            auto* ignore = named("candidateIgnore");
-            if (!ignore || !QMetaObject::invokeMethod(ignore, "clicked"))
-                return false;
-        } else if (flow == u"create") {
-            destination->setProperty("currentIndex", destination->property("count").toInt() - 1);
-            settle();
-            title->setProperty("text", QStringLiteral("   "));
-            if (!check(!confirm->property("enabled").toBool(), "blank franchise cannot submit"))
-                return false;
-            title->setProperty("text", QStringLiteral("Smoke flow franchise"));
-            title->forceActiveFocus();
-            key(Qt::Key_Return);
-        } else {
-            destination->setProperty("currentIndex", 1);
-            if (!check(confirm->property("enabled").toBool(), "existing franchise enables submit"))
-                return false;
-            if (!QMetaObject::invokeMethod(confirm, "clicked"))
-                return false;
-        }
+        title->setProperty("text", QStringLiteral("Smoke flow franchise"));
+        title->forceActiveFocus();
+        key(Qt::Key_Return);
         settle();
-        if (!check(model->pendingCandidates().size() == count - 1,
-                   "action resolves exactly one candidate"))
-            return false;
-        if (flow == u"create" &&
-            !check(model->franchise().value(QStringLiteral("title")).toString() ==
+        if (!check(model->franchise().value(QStringLiteral("title")).toString() ==
                        u"Smoke flow franchise",
-                   "Enter creates selected franchise"))
+                   "Enter creates the franchise"))
             return false;
-        QMetaObject::invokeMethod(dialog, "close");
+        if (!check(!dialog->property("visible").toBool(), "dialog closes once created"))
+            return false;
     } else if (flow == u"archive") {
         model->setFilter(LibraryModel::Filter::AllAnime);
         model->setArchivedOnly(false);
         settle();
         const QString slug = model->slugAt(0);
         const int count = model->archivedCount();
-        QObject* list = nullptr;
-        for (auto* object : descendants())
-            if (object->metaObject()->indexOfSignal("removeRequested(QString,QString)") >= 0) {
-                list = object;
-                break;
-            }
+        auto* list = listWith("removeRequested(QString,QString)");
         if (!check(list && !slug.isEmpty(), "archive fixture and list"))
             return false;
         if (!QMetaObject::invokeMethod(list, "removeRequested", Q_ARG(QString, slug),

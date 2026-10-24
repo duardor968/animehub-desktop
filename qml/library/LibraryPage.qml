@@ -76,7 +76,6 @@ Item {
             SplitView.maximumWidth: 480
             model: page.app.library
             onActionFailed: text => page.actionFailed(text)
-            onReviewCandidatesRequested: candidateReview.show()
             selectedSlug: page.selected
             homeVisible: !page.selected && !page.selectedGroup
             selectedGroup: page.selectedGroup
@@ -137,18 +136,9 @@ Item {
         model: page.app.library
         onCompleted: page.select("")
     }
-    FranchiseCandidatesDialog {
-        id: candidateReview
-        model: page.app.library
-        onResolved: (id, archived) => {
-            page.app.library.archivedOnly = archived
-            page.selected = ""
-            page.selectedGroup = id
-            page.app.library.openFranchise(id)
-        }
-    }
     ModalDialog {
         id: createGroup
+        objectName: "createFranchiseDialog"
         property string slug
         property string failure: ""
         width: 480
@@ -166,11 +156,12 @@ Item {
         onAboutToShow: { failure = ""; groupTitle.forceActiveFocus() }
         ColumnLayout {
             width: 432
-            TextField { id: groupTitle; Layout.fillWidth: true; placeholderText: "Nombre de la franquicia"; Accessible.name: "Nombre de la franquicia"; onAccepted: createGroup.submit() }
+            TextField { id: groupTitle; objectName: "createFranchiseTitle"; Layout.fillWidth: true; placeholderText: "Nombre de la franquicia"; Accessible.name: "Nombre de la franquicia"; onAccepted: createGroup.submit() }
             Label { Layout.fillWidth: true; visible: text !== ""; text: createGroup.failure; wrapMode: Text.Wrap; color: Theme.muted }
         }
         footer: DialogButtonBox {
             Button {
+                objectName: "createFranchiseConfirm"
                 text: "Crear franquicia"
                 enabled: groupTitle.text.trim().length > 0
                 highlighted: true

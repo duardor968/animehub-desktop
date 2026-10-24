@@ -92,7 +92,7 @@ QString columnFor(Flag flag) {
 }
 
 // Seasons, films and side stories of the same work. Spin-offs, summaries and alternative versions
-// are works of their own: they never join a franchise or become a proposal.
+// are works of their own: they never join a franchise.
 bool isInstallment(api::RelationKind kind) {
     using api::RelationKind;
     switch (kind) {
@@ -562,10 +562,6 @@ Stored<void> LibraryRepository::removePersonalRecord(const QString& slug) {
                           {slug});
         if (!excluded)
             return std::unexpected(excluded.error());
-        auto pending =
-            database_.run(QStringLiteral("DELETE FROM franchise_candidate WHERE slug = ?"), {slug});
-        if (!pending)
-            return std::unexpected(pending.error());
         for (const auto& sql :
              {QStringLiteral(
                   "DELETE FROM franchise WHERE EXISTS (SELECT 1 FROM franchise_member target WHERE "
@@ -651,10 +647,6 @@ Stored<void> LibraryRepository::writeFranchiseMember(qint64 id, const QString& s
         {id, slug, included ? 1 : 0});
     if (!result)
         return std::unexpected(result.error());
-    auto pending =
-        database_.run(QStringLiteral("DELETE FROM franchise_candidate WHERE slug = ?"), {slug});
-    if (!pending)
-        return std::unexpected(pending.error());
     return {};
 }
 
@@ -671,164 +663,6 @@ Stored<qint64> LibraryRepository::createFranchise(const QString& title,
     if (!result)
         return std::unexpected(result.error());
     return id;
-}
-
-Stored<void> LibraryRepository::admitFranchiseCandidate(const QString& slug, qint64 id) {
-    auto candidate = database_.run(
-        QStringLiteral(
-            "SELECT 1 FROM franchise_candidate WHERE slug = ? AND NOT EXISTS "
-            "(SELECT 1 FROM personal_exclusion WHERE slug = ?) AND NOT EXISTS "
-            "(SELECT 1 FROM franchise_member WHERE slug = ? AND (included = 1 OR manual = 1))"),
-        {slug, slug, slug});
-    if (!candidate)
-        return std::unexpected(candidate.error());
-    if (!candidate->next())
-        return std::unexpected(StorageError{QStringLiteral("candidate is no longer pending")});
-    candidate->finish();
-    auto group = database_.run(
-        QStringLiteral(
-            "SELECT f.id, COALESCE(MIN(a.archived), 0) FROM franchise f LEFT JOIN franchise_member "
-            "m "
-            "ON m.franchise_id = f.id AND m.included = 1 LEFT JOIN anime a ON a.slug = m.slug "
-            "AND a.in_library = 1 WHERE f.id = ? GROUP BY f.id"),
-        {id});
-    if (!group)
-        return std::unexpected(group.error());
-    if (!group->next())
-        return std::unexpected(StorageError{QStringLiteral("unknown franchise")});
-    const bool archived = group->value(1).toBool();
-    group->finish();
-    auto admission = database_.run(
-        QStringLiteral(
-            "UPDATE anime SET archived = CASE WHEN in_library = 1 THEN archived ELSE ? END, "
-            "notify = CASE WHEN in_library = 1 THEN notify ELSE 1 END, "
-            "auto_download = CASE WHEN in_library = 1 THEN auto_download ELSE 0 END, "
-            "added_at = COALESCE(added_at, ?), in_library = 1 WHERE slug = ?"),
-        {archived ? 1 : 0, nowMs(), slug});
-    if (!admission)
-        return std::unexpected(admission.error());
-    return writeFranchiseMember(id, slug, true);
-}
-
-Stored<void> LibraryRepository::resolveFranchiseCandidate(const QString& slug,
-                                                          qint64 franchise_id) {
-    return database_.transaction([&]() { return admitFranchiseCandidate(slug, franchise_id); });
-}
-
-Stored<qint64> LibraryRepository::resolveFranchiseCandidate(const QString& slug,
-                                                            const QString& new_title) {
-    qint64 id = 0;
-    auto result = database_.transaction([&]() -> Stored<void> {
-        auto neighbors = candidateStandaloneSlugs(slug);
-        if (!neighbors)
-            return std::unexpected(neighbors.error());
-        auto created = createFranchise(new_title);
-        if (!created)
-            return std::unexpected(created.error());
-        id = *created;
-        for (const auto& neighbor : *neighbors) {
-            if (auto attached = writeFranchiseMember(id, neighbor, true); !attached)
-                return attached;
-        }
-        return admitFranchiseCandidate(slug, id);
-    });
-    if (!result)
-        return std::unexpected(result.error());
-    return id;
-}
-
-Stored<void> LibraryRepository::dismissFranchiseCandidate(const QString& slug) {
-    return database_.transaction([&]() -> Stored<void> {
-        auto excluded =
-            database_.run(QStringLiteral("INSERT OR IGNORE INTO personal_exclusion(slug) SELECT "
-                                         "slug FROM franchise_candidate "
-                                         "WHERE slug = ?"),
-                          {slug});
-        if (!excluded)
-            return std::unexpected(excluded.error());
-        auto removed =
-            database_.run(QStringLiteral("DELETE FROM franchise_candidate WHERE slug = ?"), {slug});
-        if (!removed)
-            return std::unexpected(removed.error());
-        return {};
-    });
-}
-
-Stored<void> LibraryRepository::applyFranchiseRelations(qint64 id, const QStringList& slugs) {
-    return database_.transaction([&]() -> Stored<void> {
-        auto known = database_.run(QStringLiteral("SELECT 1 FROM franchise WHERE id = ?"), {id});
-        if (!known)
-            return std::unexpected(known.error());
-        if (!known->next())
-            return std::unexpected(StorageError{QStringLiteral("unknown franchise")});
-        known->finish();
-        for (const auto& slug : slugs) {
-            auto result = database_.run(
-                QStringLiteral(
-                    "INSERT INTO franchise_member(franchise_id, slug, included, manual) SELECT ?, "
-                    "?, 1, 0 WHERE NOT EXISTS (SELECT 1 FROM franchise_member WHERE slug = ? AND "
-                    "(included = 1 OR manual = 1)) AND NOT EXISTS (SELECT 1 FROM "
-                    "personal_exclusion WHERE slug = ?) ON CONFLICT(franchise_id, slug) DO "
-                    "NOTHING"),
-                {id, slug, slug, slug});
-            if (!result)
-                return std::unexpected(result.error());
-        }
-        return {};
-    });
-}
-
-Stored<QStringList> LibraryRepository::candidateStandaloneSlugs(const QString& slug) const {
-    auto query = database_.run(
-        QStringLiteral(
-            "SELECT a.slug FROM anime a WHERE a.in_library = 1 AND a.slug <> ? "
-            "AND EXISTS (SELECT 1 FROM franchise_candidate WHERE slug = ? AND reason = "
-            "'needs_group') "
-            "AND a.slug IN (SELECT target_slug FROM anime_relation WHERE source_slug = ? UNION "
-            "SELECT source_slug FROM anime_relation WHERE target_slug = ?) "
-            "AND NOT EXISTS (SELECT 1 FROM franchise_member m WHERE m.slug = a.slug AND "
-            "(m.included = 1 OR m.manual = 1)) AND NOT EXISTS (SELECT 1 FROM personal_exclusion e "
-            "WHERE e.slug = a.slug) ORDER BY a.title COLLATE NOCASE, a.slug"),
-        {slug, slug, slug, slug});
-    if (!query)
-        return std::unexpected(query.error());
-    QStringList result;
-    while (query->next())
-        result.append(query->value(0).toString());
-    return result;
-}
-
-Stored<QList<FranchiseCandidate>> LibraryRepository::pendingFranchiseCandidates() const {
-    auto query = database_.run(
-        QStringLiteral("SELECT c.slug, a.title, c.reason FROM franchise_candidate c JOIN anime a "
-                       "ON a.slug = c.slug ORDER BY a.title COLLATE NOCASE"));
-    if (!query)
-        return std::unexpected(query.error());
-    QList<FranchiseCandidate> result;
-    while (query->next()) {
-        auto neighbors = candidateStandaloneSlugs(query->value(0).toString());
-        if (!neighbors)
-            return std::unexpected(neighbors.error());
-        QStringList titles;
-        if (query->value(2).toString() == QStringLiteral("multiple_groups")) {
-            auto groups = database_.run(
-                QStringLiteral(
-                    "SELECT DISTINCT f.id, f.title FROM franchise f JOIN franchise_member m "
-                    "ON m.franchise_id = f.id JOIN anime a ON a.slug = m.slug "
-                    "WHERE m.included = 1 AND a.in_library = 1 AND m.slug IN "
-                    "(SELECT target_slug FROM anime_relation WHERE source_slug = ? UNION "
-                    "SELECT source_slug FROM anime_relation WHERE target_slug = ?) "
-                    "ORDER BY f.title COLLATE NOCASE, f.id"),
-                {query->value(0), query->value(0)});
-            if (!groups)
-                return std::unexpected(groups.error());
-            while (groups->next())
-                titles.append(groups->value(1).toString());
-        }
-        result.append({query->value(0).toString(), query->value(1).toString(),
-                       query->value(2).toString(), *neighbors, titles});
-    }
-    return result;
 }
 
 Stored<QStringList> LibraryRepository::discoverFranchiseRelations(const api::AnimeDetail& detail) {
@@ -858,7 +692,8 @@ Stored<QStringList> LibraryRepository::discoverFranchiseRelations(const api::Ani
                 affected.append(query->value(0).toString());
             return {};
         };
-        // Neighbors it no longer links to are evaluated again too: their proposal may be over.
+        // Neighbors it no longer links to are evaluated again too: they may now belong to just
+        // one group.
         if (auto former = neighbors(); !former)
             return former;
         // The detail lists every link it starts and the kind of each one it receives; only
@@ -908,12 +743,9 @@ Stored<QStringList> LibraryRepository::discoverFranchiseRelations(const api::Ani
             bool notify;
         };
         QList<Admission> admissions;
-        // Evaluate all candidates before admitting any: iteration order cannot create a group.
+        // Evaluate every work before admitting any: iteration order cannot change the outcome.
+        // A work related to several groups, or to none, stays as it is.
         for (const auto& slug : affected) {
-            auto clear = database_.run(
-                QStringLiteral("DELETE FROM franchise_candidate WHERE slug = ?"), {slug});
-            if (!clear)
-                return std::unexpected(clear.error());
             auto excluded = database_.run(
                 QStringLiteral(
                     "SELECT 1 FROM personal_exclusion WHERE slug = ? UNION ALL SELECT 1 FROM "
@@ -941,53 +773,30 @@ Stored<QStringList> LibraryRepository::discoverFranchiseRelations(const api::Ani
             QList<qint64> ids;
             while (groups->next())
                 ids.append(groups->value(0).toLongLong());
-            if (ids.size() == 1) {
-                // A second un-followed personal group is still a conflict, never a merge.
-                auto allGroups = database_.run(
-                    QStringLiteral("SELECT COUNT(DISTINCT m.franchise_id) FROM franchise_member m "
-                                   "JOIN anime a ON a.slug = m.slug WHERE m.included = 1 AND "
-                                   "a.in_library = 1 AND m.slug IN (%1)")
-                        .arg(neighborsSql),
-                    {slug, slug});
-                if (!allGroups)
-                    return std::unexpected(allGroups.error());
-                allGroups->next();
-                if (allGroups->value(0).toInt() == 1) {
-                    auto continuity = database_.run(
-                        QStringLiteral("SELECT MIN(a.archived), MAX(a.notify) FROM anime a JOIN "
-                                       "franchise_member m ON m.slug = a.slug WHERE m.franchise_id "
-                                       "= ? AND m.included = 1 AND a.in_library = 1"),
-                        {ids.first()});
-                    if (!continuity)
-                        return std::unexpected(continuity.error());
-                    continuity->next();
-                    admissions.append({slug, ids.first(), continuity->value(0).toBool(),
-                                       continuity->value(1).toBool()});
-                    continue;
-                }
-                ids.append(-1); // conflict with a personal group whose notifications are disabled
-            }
-            QString reason;
-            if (ids.size() > 1)
-                reason = QStringLiteral("multiple_groups");
-            if (ids.isEmpty()) {
-                auto standalone =
-                    database_.run(QStringLiteral("SELECT 1 FROM anime WHERE in_library = 1 AND "
-                                                 "notify = 1 AND slug IN (%1) LIMIT 1")
-                                      .arg(neighborsSql),
-                                  {slug, slug});
-                if (!standalone)
-                    return std::unexpected(standalone.error());
-                if (standalone->next())
-                    reason = QStringLiteral("needs_group");
-            }
-            if (!reason.isEmpty()) {
-                auto pending = database_.run(
-                    QStringLiteral("INSERT INTO franchise_candidate(slug, reason) VALUES (?, ?)"),
-                    {slug, reason});
-                if (!pending)
-                    return std::unexpected(pending.error());
-            }
+            if (ids.size() != 1)
+                continue;
+            // A second un-followed personal group is still a conflict, never a merge.
+            auto allGroups = database_.run(
+                QStringLiteral("SELECT COUNT(DISTINCT m.franchise_id) FROM franchise_member m "
+                               "JOIN anime a ON a.slug = m.slug WHERE m.included = 1 AND "
+                               "a.in_library = 1 AND m.slug IN (%1)")
+                    .arg(neighborsSql),
+                {slug, slug});
+            if (!allGroups)
+                return std::unexpected(allGroups.error());
+            allGroups->next();
+            if (allGroups->value(0).toInt() != 1)
+                continue;
+            auto continuity = database_.run(
+                QStringLiteral("SELECT MIN(a.archived), MAX(a.notify) FROM anime a JOIN "
+                               "franchise_member m ON m.slug = a.slug WHERE m.franchise_id "
+                               "= ? AND m.included = 1 AND a.in_library = 1"),
+                {ids.first()});
+            if (!continuity)
+                return std::unexpected(continuity.error());
+            continuity->next();
+            admissions.append(
+                {slug, ids.first(), continuity->value(0).toBool(), continuity->value(1).toBool()});
         }
         for (const auto& admission : admissions) {
             auto member = database_.run(

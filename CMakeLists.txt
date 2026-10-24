@@ -142,7 +142,6 @@ qt_add_qml_module(animehub-desktop
     qml/downloads/SeriesRow.qml
     qml/downloads/SpeedGraph.qml
     qml/library/FranchisePage.qml
-    qml/library/FranchiseCandidatesDialog.qml
     qml/library/LibraryRemovalDialog.qml
     qml/library/FeaturedAnime.qml
     qml/library/LibraryHome.qml

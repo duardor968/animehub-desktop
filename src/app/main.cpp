@@ -130,8 +130,7 @@ int main(int argc, char* argv[]) {
                                         QStringLiteral("tamaño"), QStringLiteral("1280x820"));
     const QCommandLineOption smoke_page(
         QStringLiteral("smoke-page"),
-        QStringLiteral("Página: library, library-relations, catalog, downloads, settings o "
-                       "linked-devices."),
+        QStringLiteral("Página: library, catalog, downloads, settings o linked-devices."),
         QStringLiteral("página"), QStringLiteral("library"));
     const QCommandLineOption smoke_view(
         QStringLiteral("smoke-library-view"),
@@ -151,10 +150,9 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption smoke_hidden_native(
         QStringLiteral("smoke-hidden-native"),
         QStringLiteral("Capturar con una ventana nativa creada siempre oculta; requiere smoke."));
-    const QCommandLineOption smoke_flow(
-        QStringLiteral("smoke-flow"),
-        QStringLiteral("Recorrido Qt: create, add, ignore, archive o settings."),
-        QStringLiteral("caso"));
+    const QCommandLineOption smoke_flow(QStringLiteral("smoke-flow"),
+                                        QStringLiteral("Recorrido Qt: create, archive o settings."),
+                                        QStringLiteral("caso"));
     parser.addOption(smoke_flow);
     parser.addOptions({api_base, smoke_image, smoke_size, smoke_page, profile_transfers,
                        smoke_hidden_native, smoke_view, smoke_archive, smoke_franchise,
@@ -167,10 +165,9 @@ int main(int argc, char* argv[]) {
     const bool smoke = parser.isSet(smoke_image);
     const bool smokeHidden = parser.isSet(smoke_hidden_native);
     if (parser.isSet(smoke_flow) &&
-        (!smokeHidden ||
-         !QStringList{QStringLiteral("create"), QStringLiteral("add"), QStringLiteral("ignore"),
-                      QStringLiteral("archive"), QStringLiteral("settings")}
-              .contains(parser.value(smoke_flow))))
+        (!smokeHidden || !QStringList{QStringLiteral("create"), QStringLiteral("archive"),
+                                      QStringLiteral("settings")}
+                              .contains(parser.value(smoke_flow))))
         return 2;
     if (smokeHidden &&
         (!smoke || !parser.isSet(data_dir) || QGuiApplication::platformName() != u"windows")) {
@@ -188,9 +185,8 @@ int main(int argc, char* argv[]) {
     }
     const auto sizeMatch = QRegularExpression(QStringLiteral("^([0-9]{3,4})x([0-9]{3,4})$"))
                                .match(parser.value(smoke_size));
-    const QStringList smokePages{QStringLiteral("library"), QStringLiteral("library-relations"),
-                                 QStringLiteral("catalog"), QStringLiteral("downloads"),
-                                 QStringLiteral("settings"),
+    const QStringList smokePages{QStringLiteral("library"), QStringLiteral("catalog"),
+                                 QStringLiteral("downloads"), QStringLiteral("settings"),
                                  QStringLiteral("linked-devices")};
     if (smoke && (!sizeMatch.hasMatch() || !smokePages.contains(parser.value(smoke_page))))
         return 2;
@@ -322,12 +318,6 @@ int main(int argc, char* argv[]) {
                 QMetaObject::invokeMethod(page, "select",
                                           Q_ARG(QVariant, parser.value(smoke_anime)));
             }
-        }
-        if (parser.value(smoke_page) == u"library-relations") {
-            auto* dialog = window->findChild<QObject*>(QStringLiteral("franchiseReviewDialog"));
-            if (!dialog || (smokeHidden && dialog->property("popupType").toInt() != 0) ||
-                !QMetaObject::invokeMethod(dialog, "show"))
-                return 5;
         }
         if (parser.value(smoke_page) == u"settings" ||
             parser.value(smoke_page) == u"linked-devices") {

@@ -33,22 +33,13 @@ public:
     Stored<void> removePersonalRecord(const QString& slug);
     Stored<qint64> createFranchise(const QString& title);
     Stored<qint64> createFranchise(const QString& title, const QString& initial_slug);
-    // Review only a still-pending candidate. Admission preserves existing personal state;
-    // new library entries follow updates, inherit the group's archive view and never download.
-    Stored<void> resolveFranchiseCandidate(const QString& slug, qint64 franchise_id);
-    Stored<qint64> resolveFranchiseCandidate(const QString& slug, const QString& new_title);
-    Stored<void> dismissFranchiseCandidate(const QString& slug);
     [[nodiscard]] Stored<QList<FranchiseRecord>> franchises() const;
     Stored<void> setFranchiseMember(qint64 id, const QString& slug, bool included);
-    // Caller resolves a unique target group and saves metadata first. Never reassigns a member,
-    // revives a manual exclusion or enables downloads; ambiguous relationships remain pending.
-    Stored<void> applyFranchiseRelations(qint64 id, const QStringList& slugs);
     // From the detail of an anime the user follows (nothing otherwise): updates its installment
-    // edges (prequel, sequel, side, main and full story), then adds only unambiguous
-    // personal-group candidates. Returns newly added slugs; never changes existing manual
+    // edges (prequel, sequel, side, main and full story), then adds the related works that belong
+    // to exactly one personal group. Returns newly added slugs; never changes existing manual
     // membership or download settings.
     Stored<QStringList> discoverFranchiseRelations(const api::AnimeDetail& detail);
-    [[nodiscard]] Stored<QList<FranchiseCandidate>> pendingFranchiseCandidates() const;
     [[nodiscard]] Stored<std::optional<LibraryEntry>> entry(const QString& slug) const;
 
     // Stores the episode list; returns the numbers that were not known before. With `flag_new`
@@ -82,8 +73,6 @@ public:
 
 private:
     Stored<void> writeFranchiseMember(qint64 id, const QString& slug, bool included);
-    Stored<void> admitFranchiseCandidate(const QString& slug, qint64 id);
-    Stored<QStringList> candidateStandaloneSlugs(const QString& slug) const;
     Stored<void> ensureEpisode(const QString& slug, double number);
     Stored<void> touch(const QString& slug);
     Stored<LibraryEntry> withProgress(LibraryEntry entry) const;
