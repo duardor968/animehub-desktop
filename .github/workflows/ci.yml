@@ -44,3 +44,35 @@ jobs:
       - name: Test
         shell: pwsh
         run: ctest --preset windows-debug
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the compiler, the libraries and the engines
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-14 ninja-build pkg-config \
+            libgl-dev libegl-dev libxkbcommon-dev libxcb-cursor0 libssl-dev libsecret-1-dev \
+            fonts-dejavu-core mpv aria2 dbus-daemon gnome-keyring
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: 4.4.1
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.0
+          arch: linux_gcc_64
+          modules: qtimageformats
+          cache: true
+          use-official: true
+          email: ${{ secrets.QT_EMAIL }}
+          pw: ${{ secrets.QT_PW }}
+      - name: Configure
+        run: CXX=g++-14 QT_ROOT="$QT_ROOT_DIR" cmake --fresh --preset linux-debug
+      - name: Build
+        run: cmake --build --preset linux-debug
+      - name: Test
+        # A throwaway session bus and keyring of its own, so the credential test runs too.
+        run: >-
+          dbus-run-session -- sh -c 'printf ci | gnome-keyring-daemon --unlock --components=secrets
+          >/dev/null && ANIMEHUB_TEST_KEYRING=private ctest --preset linux-debug'
