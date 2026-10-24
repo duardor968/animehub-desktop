@@ -2,7 +2,8 @@ import QtQuick
 import AnimeHub
 
 // Total download speed of the last minutes as bars, newest on the right, scaled to the highest
-// one on view. As Steam's, its area and its axis stay at rest: the bars rise inside them.
+// one on view. As Steam's, its area and its axis stay while something is in line: the bars rise
+// inside them.
 Item {
     id: root
 
@@ -56,12 +57,12 @@ Item {
         }
     }
 
-    // The axis.
+    // The axis, lighter than the guide so the empty graph still reads as one.
     Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         height: 1
-        color: Theme.stroke
+        color: Theme.faint
     }
 }

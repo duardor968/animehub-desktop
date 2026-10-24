@@ -32,8 +32,10 @@ AbstractButton {
         border.color: Theme.accent
     }
 
+    // The catalog's headings follow the same measures: the count 8 px after the name, the
+    // line 12 px after the count.
     contentItem: RowLayout {
-        spacing: 12
+        spacing: 0
 
         Label {
             text: root.text
@@ -44,14 +46,16 @@ AbstractButton {
         }
 
         Label {
+            Layout.leftMargin: 8
             text: "(" + root.count + ")"
-            color: Theme.faint
+            color: Theme.muted
             font.pixelSize: Theme.subtitle
             Accessible.ignored: true
         }
 
         Rectangle {
             Layout.fillWidth: true
+            Layout.leftMargin: 12
             Layout.alignment: Qt.AlignVCenter
             implicitHeight: 1
             color: Theme.stroke
@@ -59,11 +63,13 @@ AbstractButton {
 
         Row {
             id: actionRow
+            Layout.leftMargin: 12
             visible: children.length > 0
             spacing: 4
         }
 
         Glyph {
+            Layout.leftMargin: 12
             Layout.preferredWidth: 16
             glyph: root.folded ? "e70d" : "e70e"
             size: 12

@@ -156,12 +156,12 @@ Item {
                 }
 
                 // The summary gives way first when the row is narrow: the failures and their
-                // action stay whole.
+                // action stay whole. As high as its text: the action stands out of it, so the
+                // line sits where every row's does.
                 Item {
                     id: meta
                     Layout.fillWidth: true
-                    implicitHeight: Math.max(summaryLabel.implicitHeight,
-                                             retry.visible ? retry.implicitHeight : 0)
+                    implicitHeight: summaryLabel.implicitHeight
 
                     Row {
                         anchors.verticalCenter: parent.verticalCenter

@@ -4,9 +4,10 @@ import QtQuick.Layouts
 import AnimeHub
 
 // The top of the Downloads page, as in Steam: the series on view over its art, with its
-// episode, progress, failures and actions; on the right, the speed of the last minutes, whose
-// graph keeps its place at rest, and in the corner what acts on every download. The series is
-// not repeated in the line below: it unfolds into its episodes from here.
+// episode, progress and failures as wide as the room left of the speed; the speed of the last
+// minutes on the right; in the corner what acts on the series and on every download. At rest it
+// is one line. The series is not repeated in the line below: it unfolds into its episodes from
+// here.
 Rectangle {
     id: root
 
@@ -15,18 +16,19 @@ Rectangle {
     property bool expanded
 
     signal toggled(string slug)
+    // The series' menu, which also holds what the page's own would.
     signal menuRequested(var row, Item anchor)
     signal folderRequested()
 
     readonly property int mode: downloads.headerMode
     readonly property bool idle: mode === DownloadsView.Idle
     readonly property bool wide: width >= 1280
-    // Room at the top for the corner's buttons.
+    // The corner's line: at rest, the whole header.
     readonly property int topRoom: pageActions.y + pageActions.height + 16
 
-    // Without a download on view there is no art: the band keeps the speed and its graph.
-    implicitHeight: Math.max(topRoom + speed.implicitHeight + 28,
-                             idle ? 0 : Math.max(200, topRoom + subject.implicitHeight + 28))
+    implicitHeight: idle ? topRoom
+                         : Math.max(200, topRoom + subject.implicitHeight + 28,
+                                    topRoom + speed.implicitHeight + 28)
     Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
     color: Theme.pane
     clip: true
@@ -97,28 +99,49 @@ Rectangle {
         }
     }
 
+    // At rest, the line says so beside the corner's buttons.
+    Label {
+        anchors.left: parent.left
+        anchors.leftMargin: 32
+        anchors.right: pageActions.left
+        anchors.rightMargin: 16
+        anchors.verticalCenter: pageActions.verticalCenter
+        visible: root.idle
+        text: root.downloads.headerTitle
+        color: Theme.muted
+        font.pixelSize: Theme.subtitle
+        font.weight: Font.DemiBold
+        elide: Text.ElideRight
+        Accessible.role: Accessible.Heading
+    }
+
+    // The series on view, as wide as the room left of the speed.
     ColumnLayout {
         id: subject
         anchors.left: parent.left
         anchors.leftMargin: 32
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 28
-        width: Math.min(560, root.width - speed.width - 96)
+        width: Math.max(0, speed.x - 48 - anchors.leftMargin)
+        visible: !root.idle
         spacing: 4
 
+        // Cut in the middle, so the season at the end stays.
         Label {
             Layout.fillWidth: true
             text: root.downloads.headerTitle
-            color: root.idle ? Theme.muted : Theme.ink
-            font.pixelSize: root.idle ? Theme.subtitle : Theme.title
+            color: Theme.ink
+            font.pixelSize: Theme.title
             font.weight: Font.DemiBold
-            elide: Text.ElideRight
+            elide: Text.ElideMiddle
             Accessible.role: Accessible.Heading
+            ToolTip.visible: titleHover.hovered && truncated
+            ToolTip.text: text
+            HoverHandler { id: titleHover }
         }
 
         Label {
             Layout.fillWidth: true
-            visible: !root.idle
             text: root.downloads.headerEpisode
             color: Theme.muted
             font.pixelSize: Theme.body
@@ -168,69 +191,25 @@ Rectangle {
             }
         }
 
-        RowLayout {
+        ProgressLine {
             Layout.fillWidth: true
             Layout.topMargin: 12
-            visible: !root.idle
-            spacing: 16
+            implicitHeight: 4
+            value: root.downloads.headerProgress
+        }
 
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 8
-
-                ProgressLine {
-                    Layout.fillWidth: true
-                    implicitHeight: 4
-                    value: root.downloads.headerProgress
-                }
-
-                Label {
-                    Layout.fillWidth: true
-                    text: root.downloads.headerDetail
-                    color: Theme.muted
-                    font.pixelSize: Theme.caption
-                    elide: Text.ElideRight
-                }
-            }
-
-            Repeater {
-                model: root.idle ? null : root.downloads.current
-
-                // What the series rows below offer, for the series on view.
-                RowLayout {
-                    id: actions
-
-                    required property string slug
-                    required property string title
-                    required property bool first
-                    required property bool hasFolder
-                    required property string cancelText
-
-                    spacing: 4
-
-                    // One label for both states, so nothing beside it moves; the chevron turns.
-                    ToolButton {
-                        text: "Episodios"
-                        font.pixelSize: Theme.body
-                        icon.source: Theme.source(root.expanded ? "e70e" : "e70d")
-                        Accessible.description: root.expanded ? "Desplegados" : "Plegados"
-                        onClicked: root.toggled(actions.slug)
-                    }
-                    ToolButton {
-                        id: more
-                        icon.source: Theme.source(Theme.icon.more)
-                        display: AbstractButton.IconOnly
-                        text: "Más opciones"
-                        ToolTip.visible: hovered
-                        ToolTip.text: text
-                        onClicked: root.menuRequested(actions, more)
-                    }
-                }
-            }
+        Label {
+            Layout.fillWidth: true
+            Layout.topMargin: 4
+            text: root.downloads.headerDetail
+            color: Theme.muted
+            font.pixelSize: Theme.caption
+            elide: Text.ElideRight
         }
     }
 
-    // What acts on every download, as Steam's and as the bottom bar's and the tray's.
+    // What acts on every download, as Steam's and as the bottom bar's and the tray's, and on
+    // the series on view; one menu holds both.
     RowLayout {
         id: pageActions
         anchors.right: parent.right
@@ -240,6 +219,7 @@ Rectangle {
         spacing: 4
 
         Button {
+            Layout.rightMargin: 4
             visible: root.downloads.canPauseAll || root.downloads.canResumeAll
             text: root.downloads.canPauseAll ? "Pausar todo" : "Reanudar todo"
             icon.source: Theme.source(root.downloads.canPauseAll ? Theme.icon.pause
@@ -248,8 +228,45 @@ Rectangle {
                                                   : root.downloads.resumeAll()
         }
 
+        Repeater {
+            id: seriesActions
+            model: root.idle ? null : root.downloads.current
+
+            // What the series rows below offer, for the series on view.
+            RowLayout {
+                id: actions
+
+                required property string slug
+                required property string title
+                required property bool first
+                required property bool hasFolder
+                required property string cancelText
+
+                spacing: 4
+
+                // One label for both states, so nothing beside it moves; the chevron turns.
+                ToolButton {
+                    text: "Episodios"
+                    font.pixelSize: Theme.body
+                    icon.source: Theme.source(root.expanded ? "e70e" : "e70d")
+                    Accessible.description: root.expanded ? "Desplegados" : "Plegados"
+                    onClicked: root.toggled(actions.slug)
+                }
+                ToolButton {
+                    id: more
+                    icon.source: Theme.source(Theme.icon.more)
+                    display: AbstractButton.IconOnly
+                    text: "Más opciones"
+                    ToolTip.visible: hovered
+                    ToolTip.text: text
+                    onClicked: root.menuRequested(actions, more)
+                }
+            }
+        }
+
         ToolButton {
             id: pageMore
+            visible: seriesActions.count === 0
             icon.source: Theme.source(Theme.icon.more)
             display: AbstractButton.IconOnly
             text: "Más opciones de Descargas"
@@ -269,7 +286,8 @@ Rectangle {
         }
     }
 
-    // The speed as one block: its graph over the session's figures, in equal columns.
+    // The speed as one block: its graph over the session's figures, in equal columns. Only
+    // while something is in line: at rest there is nothing to measure.
     ColumnLayout {
         id: speed
         anchors.right: parent.right
@@ -277,6 +295,7 @@ Rectangle {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 28
         width: root.wide ? 312 : 252
+        visible: !root.idle
         spacing: 10
 
         // Narrow windows keep the series' line whole: the figures stay, the graph goes.

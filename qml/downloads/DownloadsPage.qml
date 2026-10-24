@@ -157,7 +157,7 @@ Item {
         downloads: page.downloads
         expanded: page.expanded[page.downloads.headerSlug] === true
         onToggled: slug => page.toggle(slug)
-        onMenuRequested: (row, anchor) => queueMenu.showFor(row, anchor)
+        onMenuRequested: (row, anchor) => queueMenu.showFor(row, anchor, true)
         onFolderRequested: page.app.openDownloadFolder()
     }
 
@@ -250,26 +250,16 @@ Item {
                 open: !page.queueFolded
 
                 // Nothing after the series on view, but episodes the library is missing: where
-                // someone who only downloads starts, as the library's own "Descargar N episodios".
-                RowLayout {
+                // someone who only downloads starts, with the library's own button.
+                Button {
                     visible: page.downloads.queue.count === 0 && page.library.pendingCount > 0
                     Layout.leftMargin: 32
                     Layout.bottomMargin: 8
-                    spacing: 16
-
-                    Label {
-                        text: page.library.pendingCount === 1 ? "1 episodio por descargar"
-                                                              : page.library.pendingCount + " episodios por descargar"
-                        color: Theme.ink
-                        font.pixelSize: Theme.body
-                    }
-
-                    Button {
-                        text: "Descargar"
-                        highlighted: true
-                        icon.source: Theme.source(Theme.icon.download)
-                        onClicked: page.downloadPending()
-                    }
+                    text: page.library.pendingCount === 1 ? "Descargar 1 episodio"
+                                                          : "Descargar " + page.library.pendingCount + " episodios"
+                    highlighted: true
+                    icon.source: Theme.source(Theme.icon.download)
+                    onClicked: page.downloadPending()
                 }
 
                 RowLayout {
@@ -373,7 +363,7 @@ Item {
         }
     }
 
-    // One menu for every series in line.
+    // One menu for every series in line; the header's also holds the page's own entry.
     ActionMenu {
         id: queueMenu
 
@@ -382,15 +372,18 @@ Item {
         property bool first
         property bool hasFolder
         property string consequence
+        property bool withPage
 
-        entries: [nowEntry, folderEntry, animeEntry, cancelSeparator, cancelEntry]
+        entries: [nowEntry, folderEntry, animeEntry, cancelSeparator, cancelEntry, pageSeparator,
+            downloadsFolderEntry]
 
-        function showFor(row, anchor) {
+        function showFor(row, anchor, fromHeader) {
             slug = row.slug
             name = row.title
             first = row.first
             hasFolder = row.hasFolder
             consequence = row.cancelText
+            withPage = fromHeader === true
             queueMenu.show(anchor, true)
         }
 
@@ -423,6 +416,17 @@ Item {
             text: queueMenu.consequence !== "" ? "Cancelar la descarga…" : "Cancelar la descarga"
             glyph: Theme.icon.cancel
             onTriggered: page.askCancel(queueMenu.slug, queueMenu.name, queueMenu.consequence)
+        }
+        MenuSeparator {
+            id: pageSeparator
+            property bool separator: true
+        }
+        MenuEntry {
+            id: downloadsFolderEntry
+            property bool wanted: queueMenu.withPage
+            text: "Abrir la carpeta de descargas"
+            glyph: Theme.icon.folder
+            onTriggered: page.app.openDownloadFolder()
         }
     }
 
