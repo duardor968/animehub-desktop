@@ -102,10 +102,20 @@ AbstractButton {
             anchors.topMargin: 8
             width: parent.width
             text: root.text
+            // Always two lines high, so the captions of a row line up.
+            height: Math.ceil(2 * titleMetrics.lineSpacing) + 4
             color: Theme.ink
             font.pixelSize: Theme.body
             font.weight: Font.DemiBold
-            elide: Text.ElideMiddle
+            wrapMode: Text.Wrap
+            maximumLineCount: 2
+            elide: Text.ElideRight
+            verticalAlignment: Text.AlignTop
+
+            FontMetrics {
+                id: titleMetrics
+                font: titleLabel.font
+            }
         }
 
         Label {

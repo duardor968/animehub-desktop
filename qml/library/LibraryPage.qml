@@ -3,50 +3,59 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// Steam-style library: the list on the left; on the right, the home with posters when nothing
-// is selected, or the selected anime.
+// Steam-style library: the list on the left; on the right, the home by task when nothing is
+// selected, the list as a grid, or the selected anime or franchise.
 Item {
     id: page
 
     required property AppController app
     property string selected
     property var selectedGroup: 0
-    // PROTOTYPE: "A" keeps what to watch and to download on the home, "B" in the list's filter.
-    property string variant: "A"
+    // The right pane shows the list as posters.
+    property bool showGrid: false
 
     signal browseCatalog()
     signal searchCatalog(string text)
     signal actionFailed(string text)
 
     // Why the list filter leaves nothing, by filter.
-    readonly property string emptyText: ({
-        [LibraryModel.Franchises]: "Ninguna franquicia",
-        [LibraryModel.ToWatch]: "Nada que ver en disco",
-        [LibraryModel.ToDownload]: "Nada por descargar",
-        [LibraryModel.Airing]: "Ningún anime en emisión",
+    readonly property string emptyText: app.library.archivedOnly ? "El Archivo está vacío" : ({
         [LibraryModel.Watching]: "No estás viendo ningún anime",
+        [LibraryModel.Airing]: "Ningún anime en emisión",
         [LibraryModel.NotStarted]: "Ningún anime sin empezar",
         [LibraryModel.Watched]: "Ningún anime visto",
-        [LibraryModel.Favorites]: "Ningún favorito",
-        [LibraryModel.OnDisk]: "Ningún anime en disco"
-    })[app.library.filter] ?? ""
+        [LibraryModel.Favorites]: "Ningún favorito"
+    })[app.library.filter] ?? (app.library.onDiskOnly ? "Ningún anime en disco" : "")
 
-    // The filter it was left with comes back; the model corrects an unknown one.
-    Component.onCompleted: app.library.filter = Number(app.settings.value("library/filter", 0))
+    // The list comes back as it was left; the model corrects an unknown value. INI settings
+    // come back as text.
+    Component.onCompleted: {
+        app.library.filter = Number(app.settings.value("library/filter", 0))
+        app.library.onDiskOnly = String(app.settings.value("library/onDiskOnly", false)) === "true"
+        app.library.grouped = String(app.settings.value("library/grouped", true)) === "true"
+    }
     Connections {
         target: page.app.library
-        function onFilterChanged() { page.app.settings.setValue("library/filter", page.app.library.filter) }
+        function onFilterChanged() {
+            page.app.settings.setValue("library/filter", page.app.library.filter)
+            page.app.settings.setValue("library/onDiskOnly", page.app.library.onDiskOnly)
+            page.app.settings.setValue("library/grouped", page.app.library.grouped)
+        }
     }
-    // PROTOTYPE: A has no task views in its filter.
-    onVariantChanged: if (variant === "A" && (app.library.filter === LibraryModel.ToWatch
-                                              || app.library.filter === LibraryModel.ToDownload))
-                          app.library.filter = LibraryModel.All
 
     function select(slug) {
         selectedGroup = 0
+        showGrid = false
         selected = slug
         if (slug)
             app.openLibraryAnime(slug)
+    }
+
+    function openFranchise(id) {
+        selected = ""
+        showGrid = false
+        selectedGroup = id
+        app.library.openFranchise(id)
     }
 
     function focusSearch() { list.focusSearch() }
@@ -70,29 +79,30 @@ Item {
 
         LibraryList {
             id: list
-            variant: page.variant
             SplitView.preferredWidth: page.app.settings.value("library/listWidth", 300)
             SplitView.minimumWidth: 240
             SplitView.maximumWidth: 480
             model: page.app.library
-            onActionFailed: text => page.actionFailed(text)
             selectedSlug: page.selected
-            homeVisible: !page.selected && !page.selectedGroup
             selectedGroup: page.selectedGroup
-            onFranchiseActivated: id => {
-                page.selected = ""
-                page.selectedGroup = id
-                page.app.library.openFranchise(id)
+            homeShown: !page.selected && !page.selectedGroup && !page.showGrid
+            gridShown: page.showGrid
+            emptyText: page.emptyText
+            onHomeRequested: page.select("")
+            onGridRequested: {
+                const open = !page.showGrid
+                page.select("")
+                page.showGrid = open
             }
-            onFilterChosen: page.select("")
+            onActivated: slug => page.select(slug)
+            onFranchiseActivated: id => page.openFranchise(id)
+            onActionFailed: text => page.actionFailed(text)
             onRemoveRequested: (slug, title) => removal.show([slug], title, page.app.library.archivedOnly)
             onCreateFranchiseRequested: (slug, title) => {
                 createGroup.slug = slug
                 groupTitle.text = title
                 createGroup.open()
             }
-            emptyText: page.emptyText
-            onActivated: slug => page.select(slug)
             onSearchCatalog: text => page.searchCatalog(text)
             onWidthChanged: if (width > 0) page.app.settings.setValue("library/listWidth", Math.round(width))
         }
@@ -102,18 +112,11 @@ Item {
             SplitView.minimumWidth: 480
             // Not the widest child's implicit width (an unwrapped synopsis): the split decides.
             implicitWidth: 480
-            currentIndex: page.selectedGroup ? 2 : page.selected ? 1 : 0
+            currentIndex: page.selectedGroup ? 2 : page.selected ? 1 : page.showGrid ? 3 : 0
 
             LibraryHome {
                 app: page.app
-                variant: page.variant
-                emptyText: page.emptyText
                 onActivated: slug => page.select(slug)
-                onFranchiseActivated: id => {
-                    page.selected = ""
-                    page.selectedGroup = id
-                    page.app.library.openFranchise(id)
-                }
                 onBrowseCatalog: page.browseCatalog()
             }
 
@@ -122,6 +125,7 @@ Item {
                 backText: "Inicio"
                 onBack: page.select("")
             }
+
             FranchisePage {
                 model: page.app.library
                 onActionFailed: text => page.actionFailed(text)
@@ -129,8 +133,16 @@ Item {
                 onBack: page.select("")
                 onRemoveRequested: (slugs, title) => removal.show(slugs, title, page.app.library.archivedOnly)
             }
+
+            LibraryGrid {
+                library: page.app.library
+                emptyText: page.emptyText
+                onActivated: slug => page.select(slug)
+                onFranchiseActivated: id => page.openFranchise(id)
+            }
         }
     }
+
     LibraryRemovalDialog {
         id: removal
         model: page.app.library

@@ -143,11 +143,13 @@ qt_add_qml_module(animehub-desktop
     qml/downloads/SpeedGraph.qml
     qml/library/FranchisePage.qml
     qml/library/LibraryRemovalDialog.qml
-    qml/library/FeaturedAnime.qml
+    qml/library/FeaturedCard.qml
+    qml/library/LibraryGrid.qml
     qml/library/LibraryHome.qml
     qml/library/LibraryList.qml
     qml/library/LibraryPage.qml
     qml/library/SearchBox.qml
+    qml/library/UpcomingAgenda.qml
   RESOURCES
     assets/animehub.png
 )

@@ -251,6 +251,18 @@ bool LibraryModel::unfolded(qint64 id) const {
            on_disk_only_;
 }
 
+// Under its franchise, a work says what sets it apart: "Part 2" under "Chitose-kun wa Ramune
+// Bin no Naka". One that only repeats the franchise, or does not start with it, stays whole.
+QString LibraryModel::distinctTitle(const QString& title, const QString& franchise) {
+    if (!title.startsWith(franchise, Qt::CaseInsensitive)) {
+        return title;
+    }
+    auto rest = title.sliced(franchise.size());
+    const auto first = std::ranges::find_if(rest, [](QChar c) { return c.isLetterOrNumber(); });
+    rest = first == rest.end() ? QString() : rest.sliced(first - rest.begin());
+    return rest.isEmpty() ? title : rest;
+}
+
 // Titles sort by their first letter or digit: "[Oshi no Ko]" goes with the O.
 QString LibraryModel::sortKey(const QString& title) {
     const auto first = std::ranges::find_if(title, [](QChar c) { return c.isLetterOrNumber(); });
@@ -730,6 +742,12 @@ QVariant LibraryModel::data(const QModelIndex& index, int role) const {
         return entry.slug;
     case TitleRole:
     case Qt::DisplayRole:
+        if (row.depth > 0) {
+            const auto it =
+                std::ranges::find(franchises_, row.group, &library::FranchiseRecord::id);
+            if (it != franchises_.end())
+                return distinctTitle(entry.title, it->title);
+        }
         return entry.title;
     case PosterRole:
         return entry.posterUrl;

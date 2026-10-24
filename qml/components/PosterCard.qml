@@ -2,10 +2,9 @@ import QtQuick
 import QtQuick.Controls
 import AnimeHub
 
-// An anime as a poster with its title and one line under it, each on one line so the captions
-// of a row line up. A long title keeps its end ("…Part 2", "…3rd Season"), where seasons
-// differ, and shows whole in a tooltip. Hovered, the poster offers what the card is for: play
-// the episode or download it.
+// An anime as a poster with its title on two lines and one line under it; a title cut even so
+// shows whole in a tooltip. Hovered, the poster offers what the card is for: play the episode
+// or download it.
 AbstractButton {
     id: root
 
@@ -14,7 +13,7 @@ AbstractButton {
     property real progress: -1
     property bool fresh: false
     // "play", "download" or nothing: the button over the poster.
-    property string action
+    property string quickAction
 
     // The poster's own button was pressed, not the card.
     signal act()
@@ -59,14 +58,14 @@ AbstractButton {
             }
 
             RoundButton {
-                visible: root.action !== "" && (root.hovered || root.visualFocus)
+                visible: root.quickAction !== "" && (root.hovered || root.visualFocus)
                 anchors.left: parent.left
                 anchors.bottom: parent.bottom
                 anchors.margins: 8
                 highlighted: true
-                text: root.action === "play" ? "Ver" : "Descargar"
+                text: root.quickAction === "play" ? "Ver" : "Descargar"
                 display: AbstractButton.IconOnly
-                icon.source: Theme.source(root.action === "play" ? Theme.icon.play : Theme.icon.download)
+                icon.source: Theme.source(root.quickAction === "play" ? Theme.icon.play : Theme.icon.download)
                 focusPolicy: Qt.NoFocus
                 onClicked: root.act()
                 Accessible.name: text + ", " + root.text
@@ -98,10 +97,20 @@ AbstractButton {
             anchors.topMargin: 8
             width: parent.width
             text: root.text
+            // Always two lines high, so the captions of a row line up.
+            height: Math.ceil(2 * titleMetrics.lineSpacing) + 4
             color: Theme.ink
             font.pixelSize: Theme.body
             font.weight: Font.DemiBold
-            elide: Text.ElideMiddle
+            wrapMode: Text.Wrap
+            maximumLineCount: 2
+            elide: Text.ElideRight
+            verticalAlignment: Text.AlignTop
+
+            FontMetrics {
+                id: titleMetrics
+                font: titleLabel.font
+            }
         }
 
         Label {

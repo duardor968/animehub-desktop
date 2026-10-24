@@ -57,6 +57,7 @@ Rectangle {
 
             ItemDelegate {
                 Layout.fillWidth: true
+                spacing: 12
                 text: "Inicio"
                 icon.source: Theme.source("e80f")
                 highlighted: root.homeShown
@@ -275,15 +276,17 @@ Rectangle {
                 contentItem: RowLayout {
                     spacing: 8
 
-                    // Unfolds the franchise in place; the row itself opens its page.
+                    // Unfolds the franchise in place; the row itself opens its page. Every row
+                    // keeps the column, so the posters line up.
                     Glyph {
-                        visible: row.isGroup
                         Layout.preferredWidth: 12
+                        opacity: row.isGroup ? 1 : 0
                         glyph: row.expanded ? "e70d" : "e76c"
                         size: 10
                         color: Theme.muted
 
                         TapHandler {
+                            enabled: row.isGroup
                             onTapped: root.model.toggleGroup(row.groupId)
                         }
                     }
@@ -297,7 +300,7 @@ Rectangle {
                     Label {
                         Layout.fillWidth: true
                         text: row.title
-                        elide: Text.ElideMiddle
+                        elide: Text.ElideRight
                         font.pixelSize: Theme.body
                         color: row.downloading ? Theme.accent : row.ready ? Theme.ink : Theme.muted
                     }

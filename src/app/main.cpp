@@ -134,8 +134,8 @@ int main(int argc, char* argv[]) {
         QStringLiteral("página"), QStringLiteral("library"));
     const QCommandLineOption smoke_view(
         QStringLiteral("smoke-library-view"),
-        QStringLiteral("Vista de biblioteca para la captura: collection, all o franchises."),
-        QStringLiteral("vista"), QStringLiteral("collection"));
+        QStringLiteral("Lista de la biblioteca para la captura: grouped (por franquicia) o flat."),
+        QStringLiteral("vista"), QStringLiteral("grouped"));
     const QCommandLineOption smoke_archive(QStringLiteral("smoke-archive"),
                                            QStringLiteral("Capturar el Archivo de la biblioteca."));
     const QCommandLineOption smoke_franchise(
@@ -190,8 +190,7 @@ int main(int argc, char* argv[]) {
                                  QStringLiteral("linked-devices")};
     if (smoke && (!sizeMatch.hasMatch() || !smokePages.contains(parser.value(smoke_page))))
         return 2;
-    const QStringList smokeViews{QStringLiteral("collection"), QStringLiteral("all"),
-                                 QStringLiteral("franchises")};
+    const QStringList smokeViews{QStringLiteral("grouped"), QStringLiteral("flat")};
     const bool librarySmokeOptions = parser.isSet(smoke_view) || parser.isSet(smoke_archive) ||
                                      parser.isSet(smoke_franchise) || parser.isSet(smoke_anime);
     bool franchiseIdValid = false;
@@ -300,8 +299,7 @@ int main(int argc, char* argv[]) {
                                                                        : QVariant(0)));
         if (parser.value(smoke_page).startsWith(u"library")) {
             if (parser.isSet(smoke_view))
-                controller.library()->setFilter(static_cast<animehub::app::LibraryModel::Filter>(
-                smokeViews.indexOf(parser.value(smoke_view))));
+                controller.library()->setGrouped(parser.value(smoke_view) == u"grouped");
             controller.library()->setArchivedOnly(parser.isSet(smoke_archive));
             auto* page = window->findChild<QObject*>(QStringLiteral("libraryPage"));
             if (!page)

@@ -66,7 +66,8 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
     };
     if (flow == u"create") {
         // "Crear franquicia…" from a work's menu in the list.
-        model->setFilter(LibraryModel::Filter::AllAnime);
+        model->setFilter(LibraryModel::Filter::All);
+        model->setGrouped(false);
         model->setArchivedOnly(false);
         settle();
         const QString slug = model->slugAt(0);
@@ -107,7 +108,8 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
         if (!check(!dialog->property("visible").toBool(), "dialog closes once created"))
             return false;
     } else if (flow == u"archive") {
-        model->setFilter(LibraryModel::Filter::AllAnime);
+        model->setFilter(LibraryModel::Filter::All);
+        model->setGrouped(false);
         model->setArchivedOnly(false);
         settle();
         const QString slug = model->slugAt(0);

@@ -8,8 +8,6 @@ ApplicationWindow {
 
     required property AppController app
     property bool smokeHidden: false
-    // PROTOTYPE: which library layout is on view; never committed.
-    property string variant: app.prototype === "B" ? "B" : "A"
 
     function showPage(index) {
         tabs.currentIndex = index
@@ -143,32 +141,6 @@ ApplicationWindow {
 
             Item { Layout.fillWidth: true }
 
-            // PROTOTYPE: switches the library layout, keeping everything else; never committed.
-            RowLayout {
-                visible: window.app.prototype !== ""
-                spacing: 6
-
-                Label {
-                    text: "Ejemplo"
-                    color: Theme.muted
-                    font.pixelSize: Theme.caption
-                }
-
-                Repeater {
-                    model: [{ key: "A", text: "A · Inicio por tareas" },
-                            { key: "B", text: "B · Vistas en la lista" }]
-                    delegate: Button {
-                        required property var modelData
-                        text: modelData.text
-                        highlighted: window.variant === modelData.key
-                        onClicked: {
-                            window.variant = modelData.key
-                            window.showPage(0)
-                        }
-                    }
-                }
-            }
-
             ToolButton {
                 icon.source: Theme.source(Theme.icon.settings)
                 display: AbstractButton.IconOnly
@@ -196,7 +168,6 @@ ApplicationWindow {
             id: libraryPage
             objectName: "libraryPage"
             app: window.app
-            variant: window.variant
             onActionFailed: text => toast.show(text, true)
             onBrowseCatalog: window.showPage(1)
             onSearchCatalog: text => window.searchCatalog(text)

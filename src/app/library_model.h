@@ -207,6 +207,7 @@ private:
     [[nodiscard]] QList<double> pendingOf(const library::LibraryEntry& entry) const;
     [[nodiscard]] bool unfolded(qint64 id) const;
     [[nodiscard]] static QString sortKey(const QString& title);
+    [[nodiscard]] static QString distinctTitle(const QString& title, const QString& franchise);
 
     library::LibraryService& library_;
     downloads::DownloadManager& downloads_;

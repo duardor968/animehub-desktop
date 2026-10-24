@@ -103,7 +103,7 @@ Column {
                                     text: entry.modelData.title
                                     color: Theme.ink
                                     font.pixelSize: Theme.body
-                                    elide: Text.ElideMiddle
+                                    elide: Text.ElideRight
                                 }
 
                                 Label {

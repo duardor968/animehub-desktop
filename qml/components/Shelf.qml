@@ -136,7 +136,7 @@ Column {
                 caption: model.caption
                 progress: model.progress
                 fresh: model.fresh
-                action: model.action ?? ""
+                quickAction: model.action ?? ""
                 onClicked: root.activated(model.slug, model.episode)
                 onAct: root.acted(model.slug, model.episode, model.action)
             }
