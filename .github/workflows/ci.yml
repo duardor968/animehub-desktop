@@ -72,7 +72,9 @@ jobs:
       - name: Build
         run: cmake --build --preset linux-debug
       - name: Test
-        # A throwaway session bus and keyring of its own, so the credential test runs too.
+        # A throwaway session bus and keyring (in a folder of its own, so no earlier keyring with
+        # another password asks to be unlocked), so the credential test runs too.
         run: >-
-          dbus-run-session -- sh -c 'printf ci | gnome-keyring-daemon --unlock --components=secrets
-          >/dev/null && ANIMEHUB_TEST_KEYRING=private ctest --preset linux-debug'
+          XDG_DATA_HOME="$(mktemp -d)" dbus-run-session -- sh -c 'printf ci |
+          gnome-keyring-daemon --unlock --components=secrets >/dev/null &&
+          ANIMEHUB_TEST_KEYRING=private ctest --preset linux-debug'
