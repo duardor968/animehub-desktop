@@ -21,22 +21,15 @@ ColumnLayout {
 
     spacing: 0
 
-    Label {
-        Layout.fillWidth: true
-        Layout.bottomMargin: 8
-        visible: !page.remote.registered
-        text: "Vincula este PC con la web de AnimeHub para enviarle descargas desde el navegador."
-        color: Theme.muted
-        wrapMode: Text.Wrap
-    }
-
     SettingRow {
         visible: !page.remote.registered
         label: "Nombre de este PC"
+        info: "Vincula este PC con la web de AnimeHub para enviarle descargas desde el navegador."
 
         TextField {
             id: deviceName
             Layout.fillWidth: true
+            Layout.preferredWidth: page.controlWidth
             Layout.maximumWidth: page.controlWidth
             text: "Mi PC"
             maximumLength: 80
@@ -54,12 +47,7 @@ ColumnLayout {
     SettingRow {
         visible: page.remote.registered
         label: "Este PC"
-
-        Label {
-            Layout.fillWidth: true
-            text: page.remote.deviceName
-            elide: Text.ElideRight
-        }
+        value: page.remote.deviceName
     }
 
     SettingRow {
@@ -72,12 +60,14 @@ ColumnLayout {
 
             // While the list is read, it is not yet empty.
             BusyIndicator {
+                Layout.alignment: Qt.AlignRight
                 Layout.preferredWidth: 20
                 Layout.preferredHeight: 20
                 visible: page.remote.busy && page.remote.links.length === 0
                 running: visible
             }
             Label {
+                Layout.alignment: Qt.AlignRight
                 visible: !page.remote.busy && page.remote.links.length === 0
                 text: "Ninguno"
                 color: Theme.muted
@@ -124,6 +114,7 @@ ColumnLayout {
                     }
                     // Windows order: the action, then Cancelar.
                     RowLayout {
+                        Layout.alignment: Qt.AlignRight
                         visible: link.confirming
                         spacing: 8
 
@@ -147,14 +138,21 @@ ColumnLayout {
     }
 
     SettingRow {
+        id: pairing
         visible: page.remote.registered
         label: "Vincular otro"
 
         ColumnLayout {
+            id: pairingColumn
+
+            // Under its name in a narrow window, it starts at the left.
+            readonly property int side: pairing.stacked ? Qt.AlignLeft : Qt.AlignRight
+
             Layout.fillWidth: true
             spacing: 8
 
             Label {
+                Layout.alignment: pairingColumn.side
                 visible: page.remote.code.length > 0
                 text: page.remote.code
                 font.pixelSize: Theme.title
@@ -170,9 +168,11 @@ ColumnLayout {
                          ? " antes de las " + new Date(page.remote.expiresAt).toLocaleTimeString(Qt.locale(), Locale.ShortFormat)
                          : "") + "."
                 color: Theme.muted
+                horizontalAlignment: pairing.stacked ? Text.AlignLeft : Text.AlignRight
                 wrapMode: Text.Wrap
             }
             Button {
+                Layout.alignment: pairingColumn.side
                 text: page.remote.code ? "Generar otro código" : "Generar código"
                 enabled: !page.remote.busy
                 onClicked: page.remote.generatePairingCode()

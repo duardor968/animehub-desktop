@@ -14,22 +14,24 @@ ModalDialog {
     readonly property AppSettings settings: app.settings
     readonly property JDownloaderView jd: app.jdownloader
 
-    // JDownloader takes part when it downloads, or when episodes send it their links.
+    // JDownloader takes part when it downloads, or, while AnimeHub does, when episodes send it
+    // the links of the servers AnimeHub does not download.
     readonly property bool jdEngine: settings.preferredJDownloader
     readonly property bool jdUsed: jdEngine || settings.jdownloader !== AppSettings.Off
-    readonly property bool jdAccount: (jdEngine && settings.cloudJDownloader)
-                                      || settings.jdownloader === AppSettings.Remote
+    readonly property bool jdAccount: jdEngine ? settings.cloudJDownloader
+                                               : settings.jdownloader === AppSettings.Remote
 
     // Shipped next to AnimeHub.exe by the installer and the portable zip, not by a build.
     readonly property url licenseFile: settings.bundledFile("LICENSE.txt")
     readonly property url noticeFile: settings.bundledFile("THIRD-PARTY.txt")
+    // A profile opened with --data-dir keeps its downloads inside it and never starts with Windows.
+    readonly property string isolatedReason: settings.isolated
+                                             ? "No disponible en un perfil de prueba" : ""
 
-    readonly property int controlWidth: 320
+    readonly property int controlWidth: 300
     readonly property var categories: [
         { key: "downloads", name: "Descargas" },
-        { key: "playback", name: "Reproducción" },
         { key: "general", name: "General" },
-        { key: "jdownloader", name: "JDownloader" },
         { key: "linked-devices", name: "Dispositivos vinculados" },
         { key: "about", name: "Acerca de" }
     ]
@@ -76,19 +78,44 @@ ModalDialog {
         }
     }
 
-    // Where episodes send their links; first while AnimeHub downloads, last once JDownloader does.
-    component SendLinksRow: SettingRow {
-        label: "Enviar enlaces a"
-        info: "Añade «Enviar a JDownloader» a cada episodio, con los enlaces de todos los "
-              + "servidores, también MP4Upload y 1Fichier."
+    // Lists and text fields share one width, against the rows' right edge.
+    component Choice: ComboBox {
+        Layout.fillWidth: true
+        Layout.preferredWidth: dialog.controlWidth
+        Layout.maximumWidth: dialog.controlWidth
+    }
+    component Field: TextField {
+        Layout.fillWidth: true
+        Layout.preferredWidth: dialog.controlWidth
+        Layout.maximumWidth: dialog.controlWidth
+    }
+    // A switch as Windows' settings show one: its text, then the knob against the right edge.
+    component Toggle: RowLayout {
+        id: toggle
 
-        ComboBox {
-            Layout.fillWidth: true
-            Layout.maximumWidth: dialog.controlWidth
-            model: ["No enviar", "JDownloader en este PC", "MyJDownloader"]
-            currentIndex: dialog.settings.jdownloader
-            onActivated: index => dialog.settings.jdownloader = index
-            Accessible.name: "Enviar enlaces a"
+        property alias text: caption.text
+        property alias checked: knob.checked
+        signal toggled
+
+        spacing: 12
+
+        Label {
+            id: caption
+            Accessible.ignored: true
+            // As a switch's own text, it switches it too.
+            TapHandler {
+                onTapped: {
+                    knob.toggle()
+                    knob.toggled()
+                }
+            }
+        }
+        Switch {
+            id: knob
+            // Without a text, as wide as its knob: flush with the edge.
+            Layout.preferredWidth: implicitIndicatorWidth
+            Accessible.name: caption.text
+            onToggled: toggle.toggled()
         }
     }
 
@@ -178,9 +205,7 @@ ModalDialog {
                         info: "AnimeHub descarga de MEGA y Pixeldrain. JDownloader descarga también de "
                               + "MP4Upload y 1Fichier, y su progreso se ve igual en Descargas."
 
-                        ComboBox {
-                            Layout.fillWidth: true
-                            Layout.maximumWidth: dialog.controlWidth
+                        Choice {
                             model: ["AnimeHub", "JDownloader"]
                             currentIndex: dialog.jdEngine ? 1 : 0
                             onActivated: index => dialog.settings.preferredJDownloader = index === 1
@@ -188,141 +213,28 @@ ModalDialog {
                         }
                     }
 
+                    // Only while AnimeHub downloads: JDownloader, as the engine, takes them all.
                     SettingRow {
-                        label: "Carpeta"
-
-                        Label {
-                            Layout.fillWidth: true
-                            text: dialog.settings.downloadDirectory.replace(/\//g, "\\")
-                            elide: Text.ElideMiddle
-                            ToolTip.visible: folderHover.hovered && truncated
-                            ToolTip.text: text
-                            HoverHandler { id: folderHover }
-                        }
-                        Button {
-                            text: "Cambiar…"
-                            // A profile opened with --data-dir keeps its downloads inside it.
-                            enabled: !dialog.settings.isolated
-                            onClicked: folderDialog.open()
-                            Accessible.name: "Cambiar la carpeta de descargas"
-                        }
-                    }
-
-                    SettingRow {
-                        label: "Servidor preferido"
-
-                        ComboBox {
-                            Layout.fillWidth: true
-                            Layout.maximumWidth: dialog.controlWidth
-                            model: ["MEGA", "Pixeldrain"]
-                            currentIndex: dialog.settings.providerOrder[0] === "PIXELDRAIN" ? 1 : 0
-                            onActivated: index => dialog.settings.providerOrder = index === 1
-                                         ? ["PIXELDRAIN", "MEGA"] : ["MEGA", "PIXELDRAIN"]
-                            Accessible.name: "Servidor preferido"
-                        }
-                    }
-
-                    SettingRow {
-                        label: "Audio"
-
-                        ComboBox {
-                            Layout.fillWidth: true
-                            Layout.maximumWidth: dialog.controlWidth
-                            model: ["Subtitulado", "Doblado"]
-                            currentIndex: dialog.settings.dubbed ? 1 : 0
-                            onActivated: index => dialog.settings.dubbed = index === 1
-                            Accessible.name: "Audio"
-                        }
-                    }
-
-                    SettingRow {
-                        label: "Descargas a la vez"
-
-                        SpinBox {
-                            from: 1
-                            to: 4
-                            value: dialog.settings.maxConcurrent
-                            onValueModified: dialog.settings.maxConcurrent = value
-                            Accessible.name: "Descargas a la vez"
-                        }
-                    }
-                }
-
-                SettingsPage {
-                    SettingRow {
-                        label: "Reproductor"
-                        info: "El reproductor incluido guarda el minuto en el que te quedas. Con la "
-                              + "aplicación de Windows, abrir un episodio lo marca como visto."
-
-                        ComboBox {
-                            Layout.fillWidth: true
-                            Layout.maximumWidth: dialog.controlWidth
-                            model: ["Incluido (mpv)", "Aplicación predeterminada de Windows"]
-                            currentIndex: dialog.settings.systemPlayer ? 1 : 0
-                            onActivated: index => dialog.settings.systemPlayer = index === 1
-                            Accessible.name: "Reproductor"
-                        }
-                    }
-                }
-
-                SettingsPage {
-                    SettingRow {
-                        label: "Avisos"
-
-                        Switch {
-                            leftPadding: 0 // its knob lines up with the controls of other rows
-                            text: "Episodios nuevos de la biblioteca"
-                            checked: dialog.settings.notifications
-                            onToggled: dialog.settings.notifications = checked
-                        }
-                    }
-
-                    SettingRow {
-                        label: "Al iniciar Windows"
-
-                        Switch {
-                            leftPadding: 0
-                            text: "Abrir AnimeHub en la bandeja"
-                            // A profile opened with --data-dir never starts with Windows.
-                            enabled: !dialog.settings.isolated
-                            checked: dialog.settings.startWithWindows
-                            onToggled: dialog.settings.startWithWindows = checked
-                        }
-                    }
-
-                    SettingRow {
-                        label: "Al cerrar la ventana"
-
-                        ComboBox {
-                            Layout.fillWidth: true
-                            Layout.maximumWidth: dialog.controlWidth
-                            model: ["Preguntar", "Seguir en la bandeja", "Salir"]
-                            currentIndex: dialog.settings.closeAction
-                            onActivated: index => dialog.settings.closeAction = index
-                            Accessible.name: "Al cerrar la ventana"
-                        }
-                    }
-                }
-
-                SettingsPage {
-                    Label {
-                        Layout.fillWidth: true
-                        Layout.bottomMargin: 8
                         visible: !dialog.jdEngine
-                        text: "Para MP4Upload y 1Fichier, los servidores que AnimeHub no descarga."
-                        color: Theme.muted
-                        wrapMode: Text.Wrap
+                        label: "Servidores que AnimeHub no descarga (MP4Upload, 1Fichier)"
+                        info: "Añade «Enviar a JDownloader» a cada episodio, con los enlaces de todos los "
+                              + "servidores, también MP4Upload y 1Fichier."
+
+                        Choice {
+                            model: ["No enviar", "Enviar a JDownloader en este PC",
+                                    "Enviar por MyJDownloader"]
+                            currentIndex: dialog.settings.jdownloader
+                            onActivated: index => dialog.settings.jdownloader = index
+                            Accessible.name: "Servidores que AnimeHub no descarga"
+                        }
                     }
 
-                    SendLinksRow { visible: !dialog.jdEngine }
-
+                    // How to reach JDownloader, only while it takes part.
                     SettingRow {
                         visible: dialog.jdEngine
-                        label: "Conexión"
+                        label: "Conexión con JDownloader"
 
-                        ComboBox {
-                            Layout.fillWidth: true
-                            Layout.maximumWidth: dialog.controlWidth
+                        Choice {
                             model: ["Este PC", "MyJDownloader"]
                             currentIndex: dialog.settings.cloudJDownloader ? 1 : 0
                             onActivated: index => dialog.settings.cloudJDownloader = index === 1
@@ -334,9 +246,7 @@ ModalDialog {
                         visible: dialog.jdEngine && !dialog.settings.cloudJDownloader
                         label: "API local"
 
-                        TextField {
-                            Layout.fillWidth: true
-                            Layout.maximumWidth: dialog.controlWidth
+                        Field {
                             text: dialog.settings.jdEndpoint
                             onEditingFinished: {
                                 dialog.settings.jdEndpoint = text
@@ -348,32 +258,22 @@ ModalDialog {
 
                     SettingRow {
                         visible: dialog.jdAccount
-                        label: "Cuenta"
+                        label: "Cuenta de MyJDownloader"
+                        value: dialog.jd.account
 
-                        Label {
-                            Layout.fillWidth: true
-                            visible: dialog.jd.account !== ""
-                            text: dialog.jd.account
-                            elide: Text.ElideRight
-                        }
                         // Signed out: the sign-in, in place.
                         ColumnLayout {
-                            Layout.fillWidth: true
                             visible: dialog.jd.account === ""
                             spacing: 8
 
-                            TextField {
+                            Field {
                                 id: email
-                                Layout.fillWidth: true
-                                Layout.maximumWidth: dialog.controlWidth
                                 placeholderText: "Correo"
                                 inputMethodHints: Qt.ImhEmailCharactersOnly
                                 Accessible.name: "Correo de MyJDownloader"
                             }
-                            TextField {
+                            Field {
                                 id: password
-                                Layout.fillWidth: true
-                                Layout.maximumWidth: dialog.controlWidth
                                 placeholderText: "Contraseña"
                                 echoMode: TextInput.Password
                                 Accessible.name: "Contraseña de MyJDownloader"
@@ -381,6 +281,7 @@ ModalDialog {
                             }
                             Button {
                                 id: signIn
+                                Layout.alignment: Qt.AlignRight
                                 text: "Conectar"
                                 enabled: !dialog.jd.busy && email.text.trim() !== "" && password.text !== ""
                                 onClicked: {
@@ -408,9 +309,7 @@ ModalDialog {
                         visible: dialog.jdAccount && dialog.jd.devices.length > 0
                         label: "Equipo"
 
-                        ComboBox {
-                            Layout.fillWidth: true
-                            Layout.maximumWidth: dialog.controlWidth
+                        Choice {
                             textRole: "name"
                             valueRole: "id"
                             model: dialog.jd.devices
@@ -420,21 +319,12 @@ ModalDialog {
                         }
                     }
 
-                    SendLinksRow { visible: dialog.jdEngine }
-
                     SettingRow {
                         visible: dialog.jdUsed
-                        label: "Aplicación"
+                        label: "Aplicación JDownloader"
+                        value: dialog.settings.jdExecutable || "Sin elegir"
+                        valueColor: dialog.settings.jdExecutable ? Theme.ink : Theme.muted
 
-                        Label {
-                            Layout.fillWidth: true
-                            text: dialog.settings.jdExecutable || "Sin elegir"
-                            color: dialog.settings.jdExecutable ? Theme.ink : Theme.muted
-                            elide: Text.ElideMiddle
-                            ToolTip.visible: appHover.hovered && truncated
-                            ToolTip.text: text
-                            HoverHandler { id: appHover }
-                        }
                         Button {
                             text: "Elegir…"
                             onClicked: jdFile.open()
@@ -451,10 +341,105 @@ ModalDialog {
                     Label {
                         Layout.fillWidth: true
                         Layout.topMargin: 12
+                        Layout.bottomMargin: 12
                         visible: dialog.jdUsed && dialog.jd.problem !== ""
                         text: dialog.jd.problem
                         color: Theme.danger
                         wrapMode: Text.Wrap
+                    }
+
+                    SettingRow {
+                        label: "Carpeta"
+                        value: dialog.settings.downloadDirectory.replace(/\//g, "\\")
+                        unavailable: dialog.isolatedReason
+
+                        Button {
+                            text: "Cambiar…"
+                            onClicked: folderDialog.open()
+                            Accessible.name: "Cambiar la carpeta de descargas"
+                        }
+                    }
+
+                    SettingRow {
+                        label: "Servidor preferido"
+
+                        Choice {
+                            model: ["MEGA", "Pixeldrain"]
+                            currentIndex: dialog.settings.providerOrder[0] === "PIXELDRAIN" ? 1 : 0
+                            onActivated: index => dialog.settings.providerOrder = index === 1
+                                         ? ["PIXELDRAIN", "MEGA"] : ["MEGA", "PIXELDRAIN"]
+                            Accessible.name: "Servidor preferido"
+                        }
+                    }
+
+                    SettingRow {
+                        label: "Audio"
+
+                        Choice {
+                            model: ["Subtitulado", "Doblado"]
+                            currentIndex: dialog.settings.dubbed ? 1 : 0
+                            onActivated: index => dialog.settings.dubbed = index === 1
+                            Accessible.name: "Audio"
+                        }
+                    }
+
+                    SettingRow {
+                        label: "Descargas a la vez"
+
+                        SpinBox {
+                            from: 1
+                            to: 4
+                            value: dialog.settings.maxConcurrent
+                            onValueModified: dialog.settings.maxConcurrent = value
+                            Accessible.name: "Descargas a la vez"
+                        }
+                    }
+                }
+
+                SettingsPage {
+                    SettingRow {
+                        label: "Reproductor"
+                        info: "El reproductor incluido guarda el minuto en el que te quedas. Con la "
+                              + "aplicación de Windows, abrir un episodio lo marca como visto."
+
+                        Choice {
+                            model: ["Incluido (mpv)", "Aplicación predeterminada de Windows"]
+                            currentIndex: dialog.settings.systemPlayer ? 1 : 0
+                            onActivated: index => dialog.settings.systemPlayer = index === 1
+                            Accessible.name: "Reproductor"
+                        }
+                    }
+
+                    SettingRow {
+                        label: "Avisos"
+
+                        Toggle {
+                            text: "Episodios nuevos de la biblioteca"
+                            checked: dialog.settings.notifications
+                            onToggled: dialog.settings.notifications = checked
+                        }
+                    }
+
+                    SettingRow {
+                        label: "Al iniciar Windows"
+
+                        unavailable: dialog.isolatedReason
+                        Toggle {
+                            text: "Abrir AnimeHub en la bandeja"
+                            checked: dialog.settings.startWithWindows
+                            onToggled: dialog.settings.startWithWindows = checked
+                        }
+                    }
+
+                    SettingRow {
+                        label: "Al cerrar la ventana"
+
+                        Choice {
+                            model: ["Preguntar", "Seguir en la bandeja", "Salir"]
+                            currentIndex: dialog.settings.closeAction
+                            onActivated: index => dialog.settings.closeAction = index
+                            Accessible.name: "Al cerrar la ventana"
+                        }
                     }
                 }
 
@@ -502,11 +487,8 @@ ModalDialog {
 
                     SettingRow {
                         label: "Licencia"
+                        value: "GNU GPL 3.0 o posterior"
 
-                        Label {
-                            Layout.fillWidth: true
-                            text: "GNU GPL 3.0 o posterior"
-                        }
                         Button {
                             visible: dialog.licenseFile.toString() !== ""
                             text: "Abrir"
@@ -518,11 +500,8 @@ ModalDialog {
                     SettingRow {
                         visible: dialog.noticeFile.toString() !== ""
                         label: "Software de terceros"
+                        value: "Qt, aria2 y mpv"
 
-                        Label {
-                            Layout.fillWidth: true
-                            text: "Qt, aria2 y mpv"
-                        }
                         Button {
                             text: "Abrir"
                             onClicked: dialog.app.openUrl(dialog.noticeFile)

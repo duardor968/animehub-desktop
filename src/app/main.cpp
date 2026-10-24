@@ -134,8 +134,8 @@ int main(int argc, char* argv[]) {
         QStringLiteral("página"), QStringLiteral("library"));
     const QCommandLineOption smoke_settings(
         QStringLiteral("smoke-settings-page"),
-        QStringLiteral("Categoría de Ajustes: downloads, playback, general, jdownloader, "
-                       "linked-devices o about."),
+        QStringLiteral("Categoría de Ajustes: downloads, general, linked-devices o about "
+                       "(playback abre general y jdownloader, downloads)."),
         QStringLiteral("categoría"), QStringLiteral("downloads"));
     const QCommandLineOption smoke_view(
         QStringLiteral("smoke-library-view"),
@@ -339,9 +339,13 @@ int main(int argc, char* argv[]) {
             const auto popupType = dialog->property("popupType");
             if (smokeHidden && (!popupType.isValid() || popupType.toInt() != 0))
                 return 5;
-            const auto category = parser.value(smoke_page) == u"linked-devices"
-                                      ? QStringLiteral("linked-devices")
-                                      : parser.value(smoke_settings);
+            // Reproducción joined General, and JDownloader joined Descargas.
+            const auto requested = parser.value(smoke_page) == u"linked-devices"
+                                       ? QStringLiteral("linked-devices")
+                                       : parser.value(smoke_settings);
+            const auto category = requested == u"playback"      ? QStringLiteral("general")
+                                  : requested == u"jdownloader" ? QStringLiteral("downloads")
+                                                                : requested;
             QVariant opened;
             if (!QMetaObject::invokeMethod(dialog, "openAt", Q_RETURN_ARG(QVariant, opened),
                                            Q_ARG(QVariant, category)) ||
