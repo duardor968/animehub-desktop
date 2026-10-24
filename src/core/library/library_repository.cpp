@@ -91,6 +91,27 @@ QString columnFor(Flag flag) {
     return {};
 }
 
+// Seasons, films and side stories of the same work. Spin-offs, summaries and alternative versions
+// are works of their own: they never join a franchise or become a proposal.
+bool isInstallment(api::RelationKind kind) {
+    using api::RelationKind;
+    switch (kind) {
+    case RelationKind::Prequel:
+    case RelationKind::Sequel:
+    case RelationKind::SideStory:
+    case RelationKind::MainStory:
+    case RelationKind::FullStory:
+        return true;
+    case RelationKind::SpinOff:
+    case RelationKind::Summary:
+    case RelationKind::Alternative:
+    case RelationKind::AlternativeSetting:
+    case RelationKind::Other:
+        break;
+    }
+    return false;
+}
+
 } // namespace
 
 LibraryRepository::LibraryRepository(storage::Database& database) : database_(database) {}
@@ -779,9 +800,48 @@ Stored<QStringList> LibraryRepository::discoverFranchiseRelations(const api::Ani
     const auto applied = database_.transaction([&]() -> Stored<void> {
         if (auto snapshot = saveSnapshot(snapshotOf(detail)); !snapshot)
             return snapshot;
+        // Only the relations of an anime the user follows reach the library.
+        auto followed = database_.run(
+            QStringLiteral("SELECT 1 FROM anime WHERE slug = ? AND in_library = 1 AND "
+                           "(notify = 1 OR auto_download = 1)"),
+            {detail.slug});
+        if (!followed)
+            return std::unexpected(followed.error());
+        if (!followed->next())
+            return {};
+        followed->finish();
+        const auto neighborsSql =
+            QStringLiteral("SELECT target_slug FROM anime_relation WHERE source_slug = ? UNION "
+                           "SELECT source_slug FROM anime_relation WHERE target_slug = ?");
         QStringList affected{detail.slug};
-        const auto remember = [&](const api::Relation& relation, bool incoming) -> Stored<void> {
-            if (relation.anime.slug.isEmpty() || relation.anime.slug == detail.slug)
+        const auto neighbors = [&]() -> Stored<void> {
+            auto query = database_.run(neighborsSql, {detail.slug, detail.slug});
+            if (!query)
+                return std::unexpected(query.error());
+            while (query->next())
+                affected.append(query->value(0).toString());
+            return {};
+        };
+        // Neighbors it no longer links to are evaluated again too: their proposal may be over.
+        if (auto former = neighbors(); !former)
+            return former;
+        // The detail lists every link it starts and the kind of each one it receives; only
+        // installments are kept.
+        auto outgoing = database_.run(
+            QStringLiteral("DELETE FROM anime_relation WHERE source_slug = ?"), {detail.slug});
+        if (!outgoing)
+            return std::unexpected(outgoing.error());
+        for (const auto& relation : detail.incomingRelations) {
+            auto incoming = database_.run(
+                QStringLiteral(
+                    "DELETE FROM anime_relation WHERE source_slug = ? AND target_slug = ?"),
+                {relation.anime.slug, detail.slug});
+            if (!incoming)
+                return std::unexpected(incoming.error());
+        }
+        const auto link = [&](const api::Relation& relation, bool incoming) -> Stored<void> {
+            if (relation.anime.slug.isEmpty() || relation.anime.slug == detail.slug ||
+                !isInstallment(relation.kind))
                 return {};
             if (auto saved = saveSnapshot(snapshotOf(relation.anime)); !saved)
                 return saved;
@@ -792,17 +852,18 @@ Stored<QStringList> LibraryRepository::discoverFranchiseRelations(const api::Ani
                  incoming ? detail.slug : relation.anime.slug});
             if (!edge)
                 return std::unexpected(edge.error());
-            affected.append(relation.anime.slug);
             return {};
         };
         for (const auto& relation : detail.relations) {
-            if (auto saved = remember(relation, false); !saved)
+            if (auto saved = link(relation, false); !saved)
                 return saved;
         }
         for (const auto& relation : detail.incomingRelations) {
-            if (auto saved = remember(relation, true); !saved)
+            if (auto saved = link(relation, true); !saved)
                 return saved;
         }
+        if (auto current = neighbors(); !current)
+            return current;
         affected.removeDuplicates();
         struct Admission {
             QString slug;
@@ -833,9 +894,6 @@ Stored<QStringList> LibraryRepository::discoverFranchiseRelations(const api::Ani
                 return std::unexpected(owner.error());
             if (owner->next())
                 continue;
-            const auto neighborsSql =
-                QStringLiteral("SELECT target_slug FROM anime_relation WHERE source_slug = ? UNION "
-                               "SELECT source_slug FROM anime_relation WHERE target_slug = ?");
             auto groups = database_.run(
                 QStringLiteral("SELECT DISTINCT m.franchise_id FROM franchise_member m JOIN anime "
                                "a ON a.slug = m.slug WHERE m.included = 1 AND a.in_library = 1 AND "

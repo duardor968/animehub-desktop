@@ -1,3 +1,5 @@
+#include "api/api_json.h"
+#include "http_test_server.h"
 #include "library/library_repository.h"
 #include "library/library_service.h"
 
@@ -122,6 +124,36 @@ QList<api::Episode> episodes(int count) {
     return list;
 }
 
+QByteArray fixture(const char* name) {
+    QFile file(QStringLiteral(ANIMEHUB_FIXTURES_DIR "/api/") + QLatin1StringView(name));
+    if (!file.open(QIODevice::ReadOnly)) {
+        qFatal("missing fixture %s", name);
+    }
+    return file.readAll();
+}
+
+constexpr auto kOneEpisode =
+    R"({"data":[{"id":"1","number":1,"title":null,"imageUrl":null,"publishedAt":null}],)"
+    R"("meta":{"page":1,"perPage":50,"totalPages":1,"totalRecords":1,"firstNumber":1,)"
+    R"("lastNumber":1}})";
+
+api::Relation relationTo(const QString& slug, api::RelationKind kind = api::RelationKind::Sequel) {
+    api::Relation relation;
+    relation.kind = kind;
+    relation.anime.slug = slug;
+    relation.anime.title = slug;
+    return relation;
+}
+
+// What the library's refresh of `slug` receives.
+api::AnimeDetail detailOf(const QString& slug, const QList<api::Relation>& relations) {
+    api::AnimeDetail detail;
+    detail.slug = slug;
+    detail.title = slug;
+    detail.relations = relations;
+    return detail;
+}
+
 } // namespace
 
 class LibraryRepositoryTest final : public QObject {
@@ -129,6 +161,16 @@ class LibraryRepositoryTest final : public QObject {
 
     std::unique_ptr<storage::Database> database_;
     std::unique_ptr<LibraryRepository> repository_;
+
+    [[nodiscard]] int storedRelations() const {
+        auto query = database_->run(QStringLiteral("SELECT COUNT(*) FROM anime_relation"));
+        return query && query->next() ? query->value(0).toInt() : -1;
+    }
+
+    [[nodiscard]] bool inLibrary(const QString& slug) const {
+        const auto record = repository_->anime(slug);
+        return record && *record && (*record)->inLibrary;
+    }
 
 private slots:
     void init() {
@@ -644,51 +686,44 @@ private slots:
         QCOMPARE(repository_->discoverFranchiseRelations(detail)->size(), 1);
     }
 
-    void newDetailFindsOldGroupAndDoesNotUndoManualExclusion() {
+    void newSeasonJoinsWithoutUndoingManualExclusion() {
         const auto old = frieren().slug;
+        const auto season = QStringLiteral("new-season");
         QVERIFY(repository_->setInLibrary(old, true));
-        const auto group = repository_->createFranchise(QStringLiteral("Personal"));
+        const auto group = repository_->createFranchise(QStringLiteral("Personal"), old);
         QVERIFY(group);
-        QVERIFY(repository_->setFranchiseMember(*group, old, true));
-        api::AnimeDetail detail;
-        detail.slug = QStringLiteral("new-season");
-        detail.title = QStringLiteral("New season");
-        api::Relation relation;
-        relation.anime.slug = old;
-        relation.anime.title = frieren().title;
-        detail.relations.append(relation);
-        QVERIFY(repository_->discoverFranchiseRelations(detail));
-        QVERIFY((*repository_->anime(detail.slug))->inLibrary);
-        QVERIFY(repository_->setFranchiseMember(*group, detail.slug, false));
+        const auto detail = detailOf(old, {relationTo(season)});
+        QCOMPARE(*repository_->discoverFranchiseRelations(detail), QStringList{season});
+        QVERIFY(inLibrary(season));
+        QVERIFY(repository_->setFranchiseMember(*group, season, false));
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
         QCOMPARE(repository_->franchises()->first().members, QStringList{old});
     }
 
     void ambiguousOrMissingRelationsDoNotCreateMembership() {
+        // A followed anime of its own, related to two personal franchises.
         auto other = frieren();
         other.slug = QStringLiteral("another-show");
         QVERIFY(repository_->saveSnapshot(other));
+        auto crossover = frieren();
+        crossover.slug = QStringLiteral("crossover");
+        QVERIFY(repository_->saveSnapshot(crossover));
         const auto first = repository_->createFranchise(QStringLiteral("First"));
         const auto second = repository_->createFranchise(QStringLiteral("Second"));
         QVERIFY(first && second);
         QVERIFY(repository_->setInLibrary(frieren().slug, true));
         QVERIFY(repository_->setInLibrary(other.slug, true));
+        QVERIFY(repository_->setInLibrary(crossover.slug, true));
         QVERIFY(repository_->setFranchiseMember(*first, frieren().slug, true));
         QVERIFY(repository_->setFranchiseMember(*second, other.slug, true));
-        api::AnimeDetail detail;
-        detail.slug = QStringLiteral("crossover");
-        detail.title = QStringLiteral("Crossover");
+        auto detail = detailOf(crossover.slug, {});
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
         QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
-        api::Relation first_relation;
-        first_relation.anime.slug = frieren().slug;
-        first_relation.anime.title = frieren().title;
-        api::Relation second_relation;
-        second_relation.anime.slug = other.slug;
-        second_relation.anime.title = other.title;
-        detail.relations = {first_relation, second_relation};
+        detail.relations = {relationTo(frieren().slug, api::RelationKind::Prequel),
+                            relationTo(other.slug, api::RelationKind::SideStory)};
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QVERIFY(!(*repository_->anime(detail.slug))->inLibrary);
+        QCOMPARE(repository_->franchises()->at(0).members, QStringList{frieren().slug});
+        QCOMPARE(repository_->franchises()->at(1).members, QStringList{other.slug});
         const auto pending = repository_->pendingFranchiseCandidates();
         QCOMPARE(pending->size(), 1);
         QCOMPARE(pending->first().reason, QStringLiteral("multiple_groups"));
@@ -709,23 +744,100 @@ private slots:
         QCOMPARE(repository_->franchises()->at(1).members.size(), 2);
     }
 
-    void unownedCatalogRelationsDoNotPollutePendingReview() {
-        api::AnimeDetail detail;
-        detail.slug = QStringLiteral("catalog-only");
-        detail.title = QStringLiteral("Catalog only");
-        api::Relation relation;
-        relation.anime.slug = QStringLiteral("other-catalog");
-        relation.anime.title = QStringLiteral("Other catalog");
-        detail.relations.append(relation);
+    void unfollowedAnimeAddsAndProposesNothing() {
+        // Its prequel is in a followed franchise and its side story is followed on its own.
+        const auto old = frieren().slug;
+        QVERIFY(repository_->setInLibrary(old, true));
+        QVERIFY(repository_->createFranchise(QStringLiteral("Personal"), old));
+        auto side = frieren();
+        side.slug = QStringLiteral("side-story");
+        QVERIFY(repository_->saveSnapshot(side));
+        QVERIFY(repository_->setInLibrary(side.slug, true));
+        const auto detail = detailOf(QStringLiteral("catalog-only"),
+                                     {relationTo(old, api::RelationKind::Prequel),
+                                      relationTo(side.slug, api::RelationKind::SideStory)});
+        QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
+        QVERIFY(!inLibrary(detail.slug));
+        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
+        QCOMPARE(storedRelations(), 0);
+        // In the library without notices or downloads, it is not followed either.
+        QVERIFY(repository_->setInLibrary(detail.slug, true));
+        QVERIFY(repository_->setFlag(detail.slug, Flag::Notify, false));
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
         QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
-        QVERIFY(repository_->entries(true)->isEmpty());
-        QVERIFY(repository_->setInLibrary(relation.anime.slug, true));
+        QCOMPARE(repository_->franchises()->first().members, QStringList{old});
+    }
+
+    void onlyInstallmentsJoinOrAreProposed_data() {
+        using api::RelationKind;
+        QTest::addColumn<int>("kind");
+        QTest::addColumn<bool>("installment");
+        QTest::newRow("prequel") << static_cast<int>(RelationKind::Prequel) << true;
+        QTest::newRow("sequel") << static_cast<int>(RelationKind::Sequel) << true;
+        QTest::newRow("side-story") << static_cast<int>(RelationKind::SideStory) << true;
+        QTest::newRow("main-story") << static_cast<int>(RelationKind::MainStory) << true;
+        QTest::newRow("full-story") << static_cast<int>(RelationKind::FullStory) << true;
+        QTest::newRow("spin-off") << static_cast<int>(RelationKind::SpinOff) << false;
+        QTest::newRow("summary") << static_cast<int>(RelationKind::Summary) << false;
+        QTest::newRow("alternative") << static_cast<int>(RelationKind::Alternative) << false;
+        QTest::newRow("alternative-setting")
+            << static_cast<int>(RelationKind::AlternativeSetting) << false;
+        QTest::newRow("other") << static_cast<int>(RelationKind::Other) << false;
+    }
+
+    void onlyInstallmentsJoinOrAreProposed() {
+        QFETCH(int, kind);
+        QFETCH(bool, installment);
+        const auto relation_kind = static_cast<api::RelationKind>(kind);
+        // A followed franchise and a followed anime of its own, each related to one more.
+        const auto old = frieren().slug;
+        QVERIFY(repository_->setInLibrary(old, true));
+        QVERIFY(repository_->createFranchise(QStringLiteral("Personal"), old));
+        auto solo = frieren();
+        solo.slug = QStringLiteral("solo");
+        QVERIFY(repository_->saveSnapshot(solo));
+        QVERIFY(repository_->setInLibrary(solo.slug, true));
+
+        const auto joined = repository_->discoverFranchiseRelations(
+            detailOf(old, {relationTo(QStringLiteral("related"), relation_kind)}));
+        QVERIFY2(joined, why(joined));
+        QCOMPARE(joined->size(), installment ? 1 : 0);
+        QCOMPARE(repository_->entries(true)->size(), installment ? 3 : 2);
+        QCOMPARE(repository_->franchises()->first().members.size(), installment ? 2 : 1);
+
+        QVERIFY(repository_->discoverFranchiseRelations(
+            detailOf(solo.slug, {relationTo(QStringLiteral("proposed"), relation_kind)})));
+        QCOMPARE(repository_->pendingFranchiseCandidates()->size(), installment ? 1 : 0);
+        QCOMPARE(storedRelations(), installment ? 2 : 0);
+    }
+
+    void refreshDropsLinksThatNoLongerCount() {
+        // Links stored when any relation counted, with the proposals they made.
+        const auto old = frieren().slug;
+        QVERIFY(repository_->setInLibrary(old, true));
+        for (const auto& slug : {QStringLiteral("spin-off"), QStringLiteral("gone")}) {
+            auto record = frieren();
+            record.slug = slug;
+            QVERIFY(repository_->saveSnapshot(record));
+            QVERIFY(database_->run(QStringLiteral("INSERT INTO anime_relation(source_slug, "
+                                                  "target_slug) VALUES (?, ?)"),
+                                   {old, slug}));
+            QVERIFY(database_->run(
+                QStringLiteral(
+                    "INSERT INTO franchise_candidate(slug, reason) VALUES (?, 'needs_group')"),
+                {slug}));
+        }
+        QVERIFY(database_->run(
+            QStringLiteral("INSERT INTO anime_relation(source_slug, target_slug) VALUES (?, ?)"),
+            {QStringLiteral("spin-off"), old}));
+        // The provider still relates the spin-off both ways and no longer relates the other one.
+        auto detail =
+            detailOf(old, {relationTo(QStringLiteral("spin-off"), api::RelationKind::SpinOff)});
+        detail.incomingRelations.append(
+            relationTo(QStringLiteral("spin-off"), api::RelationKind::SpinOff));
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QCOMPARE(repository_->pendingFranchiseCandidates()->size(), 1);
-        QCOMPARE(repository_->pendingFranchiseCandidates()->first().reason,
-                 QStringLiteral("needs_group"));
-        QVERIFY(repository_->pendingFranchiseCandidates()->first().franchiseTitles.isEmpty());
+        QCOMPARE(storedRelations(), 0);
+        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
     }
     void resolvesCandidateAtomically_data() {
         QTest::addColumn<bool>("new_group");
@@ -739,30 +851,25 @@ private slots:
         QFETCH(bool, new_group);
         QFETCH(bool, already_personal);
         const auto old = frieren().slug;
+        const auto candidate = QStringLiteral("pending-season");
         QVERIFY(repository_->setInLibrary(old, true));
-        api::AnimeDetail detail;
-        detail.slug = QStringLiteral("pending-season");
-        detail.title = QStringLiteral("Pending season");
-        api::Relation relation;
-        relation.anime.slug = old;
-        relation.anime.title = frieren().title;
-        detail.relations.append(relation);
+        const auto detail = detailOf(old, {relationTo(candidate)});
         QVERIFY(repository_->discoverFranchiseRelations(detail));
         QCOMPARE(repository_->pendingFranchiseCandidates()->size(), 1);
         api::Episode episode;
         episode.number = 1;
         episode.id = QStringLiteral("source-episode");
-        QVERIFY(repository_->syncEpisodes(detail.slug, {episode}, false));
-        QVERIFY(repository_->setWatchState(detail.slug, 1, WatchState::Watched));
+        QVERIFY(repository_->syncEpisodes(candidate, {episode}, false));
+        QVERIFY(repository_->setWatchState(candidate, 1, WatchState::Watched));
         if (already_personal) {
-            QVERIFY(repository_->setInLibrary(detail.slug, true));
-            QVERIFY(repository_->setFlag(detail.slug, Flag::Notify, false));
-            QVERIFY(repository_->setFlag(detail.slug, Flag::AutoDownload, true));
+            QVERIFY(repository_->setInLibrary(candidate, true));
+            QVERIFY(repository_->setFlag(candidate, Flag::Notify, false));
+            QVERIFY(repository_->setFlag(candidate, Flag::AutoDownload, true));
         }
         qint64 id = 0;
         if (new_group) {
             const auto created =
-                repository_->resolveFranchiseCandidate(detail.slug, QStringLiteral("Chosen"));
+                repository_->resolveFranchiseCandidate(candidate, QStringLiteral("Chosen"));
             QVERIFY(created);
             id = *created;
         } else {
@@ -770,18 +877,18 @@ private slots:
             QVERIFY(created);
             id = *created;
             QVERIFY(repository_->setArchived(old, true));
-            QVERIFY(repository_->resolveFranchiseCandidate(detail.slug, id));
+            QVERIFY(repository_->resolveFranchiseCandidate(candidate, id));
         }
-        const auto record = *repository_->anime(detail.slug);
+        const auto record = *repository_->anime(candidate);
         QVERIFY(record->inLibrary);
         QCOMPARE(record->archived, !new_group && !already_personal);
         QCOMPARE(record->notify, !already_personal);
         QCOMPARE(record->autoDownload, already_personal);
-        QCOMPARE((*repository_->episode(detail.slug, 1))->state, WatchState::Watched);
-        QCOMPARE((*repository_->episode(detail.slug, 1))->sourceEpisodeId, episode.id);
+        QCOMPARE((*repository_->episode(candidate, 1))->state, WatchState::Watched);
+        QCOMPARE((*repository_->episode(candidate, 1))->sourceEpisodeId, episode.id);
         QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QVERIFY(!repository_->resolveFranchiseCandidate(detail.slug, id));
+        QVERIFY(!repository_->resolveFranchiseCandidate(candidate, id));
         QCOMPARE(repository_->franchises()->size(), 1);
         QCOMPARE(repository_->franchises()->first().members.size(), 2);
     }
@@ -823,32 +930,27 @@ private slots:
 
     void dismissedCandidateIsNotRediscoveredAndManualExclusionWins() {
         const auto old = frieren().slug;
+        const auto candidate = QStringLiteral("dismissed-season");
         QVERIFY(repository_->setInLibrary(old, true));
-        api::AnimeDetail detail;
-        detail.slug = QStringLiteral("dismissed-season");
-        detail.title = QStringLiteral("Dismissed season");
-        api::Relation relation;
-        relation.anime.slug = old;
-        relation.anime.title = frieren().title;
-        detail.relations.append(relation);
+        const auto detail = detailOf(old, {relationTo(candidate)});
         QVERIFY(repository_->discoverFranchiseRelations(detail));
         QCOMPARE(repository_->pendingFranchiseCandidates()->size(), 1);
-        QVERIFY(repository_->dismissFranchiseCandidate(detail.slug));
+        QVERIFY(repository_->dismissFranchiseCandidate(candidate));
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
         QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
-        QVERIFY(!(*repository_->anime(detail.slug))->inLibrary);
+        QVERIFY(!inLibrary(candidate));
         const auto group = repository_->createFranchise(QStringLiteral("Personal"), old);
         QVERIFY(group);
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
-        QVERIFY(!(*repository_->anime(detail.slug))->inLibrary);
+        QVERIFY(!inLibrary(candidate));
         // An explicit personal correction is allowed; stale review after exclusion is not.
-        QVERIFY(repository_->setFranchiseMember(*group, detail.slug, true));
-        QVERIFY(repository_->setFranchiseMember(*group, detail.slug, false));
+        QVERIFY(repository_->setFranchiseMember(*group, candidate, true));
+        QVERIFY(repository_->setFranchiseMember(*group, candidate, false));
         QVERIFY(database_->run(
             QStringLiteral(
                 "INSERT INTO franchise_candidate(slug, reason) VALUES (?, 'multiple_groups')"),
-            {detail.slug}));
-        QVERIFY(!repository_->resolveFranchiseCandidate(detail.slug, *group));
+            {candidate}));
+        QVERIFY(!repository_->resolveFranchiseCandidate(candidate, *group));
         QCOMPARE(repository_->franchises()->first().members, QStringList{old});
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
         QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
@@ -861,24 +963,19 @@ private slots:
         QVERIFY(repository_->setArchived(old, true));
         QVERIFY(repository_->setFlag(old, Flag::AutoDownload, true));
         QVERIFY(repository_->setWatchState(old, 1, WatchState::Watched));
-        api::AnimeDetail detail;
-        detail.slug = candidate;
-        detail.title = QStringLiteral("Candidate");
-        for (const auto& slug :
-             QStringList{old, QStringLiteral("second"), QStringLiteral("excluded"),
-                         QStringLiteral("grouped")}) {
+        const QStringList neighbors{old, QStringLiteral("second"), QStringLiteral("excluded"),
+                                    QStringLiteral("grouped")};
+        for (const auto& slug : neighbors) {
             auto record = frieren();
             record.slug = slug;
             QVERIFY(repository_->saveSnapshot(record));
             QVERIFY(repository_->setInLibrary(slug, true));
             QVERIFY(repository_->setArchived(slug, true));
-            api::Relation relation;
-            relation.anime.slug = slug;
-            relation.anime.title = record.title;
-            detail.relations.append(relation);
         }
         // Discover before personal corrections; the review must re-read current eligibility.
-        QVERIFY(repository_->discoverFranchiseRelations(detail));
+        for (const auto& slug : neighbors)
+            QVERIFY(
+                repository_->discoverFranchiseRelations(detailOf(slug, {relationTo(candidate)})));
         const auto other =
             repository_->createFranchise(QStringLiteral("Other"), QStringLiteral("grouped"));
         QVERIFY(other);
@@ -916,22 +1013,78 @@ private slots:
 
     void existingCandidateTargetDoesNotPullStandaloneNeighbors() {
         const auto old = frieren().slug;
+        const auto candidate = QStringLiteral("candidate");
         QVERIFY(repository_->setInLibrary(old, true));
-        api::AnimeDetail detail;
-        detail.slug = QStringLiteral("candidate");
-        detail.title = QStringLiteral("Candidate");
-        api::Relation relation;
-        relation.anime.slug = old;
-        relation.anime.title = frieren().title;
-        detail.relations.append(relation);
-        QVERIFY(repository_->discoverFranchiseRelations(detail));
+        QVERIFY(repository_->discoverFranchiseRelations(detailOf(old, {relationTo(candidate)})));
         QCOMPARE(repository_->pendingFranchiseCandidates()->first().standaloneSlugs,
                  QStringList{old});
         const auto group = repository_->createFranchise(QStringLiteral("Existing"));
         QVERIFY(group);
-        QVERIFY(repository_->resolveFranchiseCandidate(detail.slug, *group));
-        QCOMPARE(repository_->franchises()->first().members, QStringList{detail.slug});
+        QVERIFY(repository_->resolveFranchiseCandidate(candidate, *group));
+        QCOMPARE(repository_->franchises()->first().members, QStringList{candidate});
         QVERIFY((*repository_->anime(old))->inLibrary);
+    }
+
+    void openingAnAnimePageAddsNothing() {
+        testing::HttpTestServer server;
+        QVERIFY(server.listen());
+        server.json("/api/v1/anime/sousou-no-frieren/episodes", kOneEpisode);
+        QNetworkAccessManager network;
+        api::ApiClient api(network, {.baseUrl = server.url(QStringLiteral("/api/v1/"))});
+        LibraryService service(*repository_, api);
+        QSignalSpy members(&service, &LibraryService::newFranchiseMembers);
+        // Not in the library, while its sequel is in a followed franchise.
+        const auto detail = api::json::decodeAnime(fixture("anime.json"));
+        QVERIFY(detail);
+        const auto sequel = detail->relations.first().anime;
+        QCOMPARE(detail->relations.first().kind, api::RelationKind::Sequel);
+        QVERIFY(repository_->saveSnapshot(snapshotOf(sequel)));
+        QVERIFY(repository_->setInLibrary(sequel.slug, true));
+        QVERIFY(repository_->createFranchise(QStringLiteral("Frieren"), sequel.slug));
+
+        service.refresh(*detail, false);
+        QTRY_VERIFY(!service.isRefreshing(detail->slug));
+        QCOMPARE(repository_->episodes(detail->slug)->size(), 1); // its page still gets episodes
+        QVERIFY(!inLibrary(detail->slug));
+        QVERIFY(repository_->pendingFranchiseCandidates()->isEmpty());
+        QCOMPARE(repository_->franchises()->first().members, QStringList{sequel.slug});
+        QCOMPARE(storedRelations(), 0);
+        QVERIFY(members.isEmpty());
+    }
+
+    void libraryRefreshAddsTheNewSeasonOfAFollowedFranchise() {
+        testing::HttpTestServer server;
+        QVERIFY(server.listen());
+        server.json("/api/v1/anime/sousou-no-frieren", fixture("anime.json"));
+        server.json("/api/v1/anime/sousou-no-frieren/episodes", kOneEpisode);
+        QNetworkAccessManager network;
+        api::ApiClient api(network, {.baseUrl = server.url(QStringLiteral("/api/v1/"))});
+        LibraryService service(*repository_, api);
+        QSignalSpy members(&service, &LibraryService::newFranchiseMembers);
+        const auto slug = frieren().slug;
+        QVERIFY(repository_->setInLibrary(slug, true));
+        QVERIFY(repository_->createFranchise(QStringLiteral("Frieren"), slug));
+        const auto detail = api::json::decodeAnime(fixture("anime.json"));
+        QVERIFY(detail);
+        const auto sequel = detail->relations.first().anime.slug;
+
+        // Its page does not add the sequel either; the library's own refresh does.
+        service.refresh(*detail, false);
+        QTRY_VERIFY(!service.isRefreshing(slug));
+        QVERIFY(!inLibrary(sequel));
+        QVERIFY(members.isEmpty());
+
+        service.refresh(slug, true);
+        QTRY_COMPARE(members.size(), 1);
+        QCOMPARE(members.first().first().toStringList(), QStringList{sequel});
+        QTRY_VERIFY(!service.isRefreshing(slug));
+        const auto added = repository_->anime(sequel);
+        QVERIFY(added && *added);
+        QVERIFY((*added)->inLibrary);
+        QVERIFY((*added)->notify);
+        QVERIFY(!(*added)->autoDownload);
+        QCOMPARE(repository_->franchises()->first().members, (QStringList{slug, sequel}));
+        QCOMPARE(server.count("/api/v1/anime/" + sequel.toUtf8() + "/episodes"), 0);
     }
 
     void listsOnlyTheLibrary() {

@@ -42,8 +42,10 @@ public:
     // Caller resolves a unique target group and saves metadata first. Never reassigns a member,
     // revives a manual exclusion or enables downloads; ambiguous relationships remain pending.
     Stored<void> applyFranchiseRelations(qint64 id, const QStringList& slugs);
-    // Updates explicit provider edges, then adds only unambiguous personal-group candidates.
-    // Returns newly added slugs; never changes existing manual membership or download settings.
+    // From the detail of an anime the user follows (nothing otherwise): updates its installment
+    // edges (prequel, sequel, side, main and full story), then adds only unambiguous
+    // personal-group candidates. Returns newly added slugs; never changes existing manual
+    // membership or download settings.
     Stored<QStringList> discoverFranchiseRelations(const api::AnimeDetail& detail);
     [[nodiscard]] Stored<QList<FranchiseCandidate>> pendingFranchiseCandidates() const;
     [[nodiscard]] Stored<std::optional<LibraryEntry>> entry(const QString& slug) const;

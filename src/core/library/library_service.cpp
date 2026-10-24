@@ -251,7 +251,7 @@ void LibraryService::refresh(const QString& slug, bool flag_new) {
                 emit refreshFailed(slug, detail.error().message);
                 return;
             }
-            store(detail->value, flag_new);
+            store(detail->value, flag_new, true);
         },
         api::CachePolicy::NetworkOnly);
 }
@@ -261,15 +261,19 @@ void LibraryService::refresh(const api::AnimeDetail& detail, bool flag_new) {
         return;
     }
     refreshing_.insert(detail.slug);
-    store(detail, flag_new);
+    store(detail, flag_new, false);
 }
 
-void LibraryService::store(const api::AnimeDetail& detail, bool flag_new) {
+void LibraryService::store(const api::AnimeDetail& detail, bool flag_new, bool discover) {
     const auto& slug = detail.slug;
-    const auto discovered = repository_.discoverFranchiseRelations(detail);
-    if (!discovered) {
+    if (!discover) {
+        if (auto saved = repository_.saveSnapshot(snapshotOf(detail)); !saved) {
+            qWarning("library: %s", qPrintable(saved.error().message));
+        }
+    } else if (const auto discovered = repository_.discoverFranchiseRelations(detail);
+               !discovered) {
         qWarning("library: %s", qPrintable(discovered.error().message));
-    } else if (!discovered->isEmpty()) {
+    } else {
         QStringList notify;
         for (const auto& added : *discovered) {
             emit animeChanged(added);
@@ -279,9 +283,9 @@ void LibraryService::store(const api::AnimeDetail& detail, bool flag_new) {
         }
         if (!notify.isEmpty())
             emit newFranchiseMembers(notify);
+        emit listChanged(); // franchises and proposals may have changed
     }
     emit animeChanged(slug);
-    emit listChanged();
     // Episodes arrive in ascending pages of fifty; a known list only needs its tail.
     const auto record = repository_.anime(slug);
     const bool synced = record && *record && (*record)->episodesSyncedAt.isValid();

@@ -68,10 +68,12 @@ public:
     // Brings trashed files back to their episodes; says how many came back.
     Stored<int> restore(const QString& slug, const QList<TrashedFile>& files);
 
-    // Refreshes metadata and episodes from the API. With `flag_new`, episodes unknown so far are
-    // new arrivals (the watcher); otherwise they are simply stored (first sync, browsing).
+    // Refreshes metadata and episodes from the API, and the franchises a followed anime grows
+    // into. With `flag_new`, episodes unknown so far are new arrivals (the watcher); otherwise
+    // they are simply stored (first sync).
     void refresh(const QString& slug, bool flag_new);
-    // The same with the anime's detail already fetched (the anime's page needs it too).
+    // The same with the anime's detail already fetched by its page; looking at an anime never
+    // adds it, or anything related to it, to the library.
     void refresh(const api::AnimeDetail& detail, bool flag_new);
     [[nodiscard]] bool isRefreshing(const QString& slug) const {
         return refreshing_.contains(slug);
@@ -94,7 +96,7 @@ signals:
     void newFranchiseMembers(const QStringList& slugs);
 
 private:
-    void store(const api::AnimeDetail& detail, bool flag_new);
+    void store(const api::AnimeDetail& detail, bool flag_new, bool discover);
     void fetchEpisodes(const QString& slug, int page, bool flag_new, QList<double> added);
     void finishRefresh(const QString& slug, bool flag_new, const QList<double>& added);
     void sweep();
