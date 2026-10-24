@@ -193,14 +193,6 @@ if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
   animehub_deploy_runtime(animehub-desktop)
 endif()
 
-qt_add_executable(animehub-library-import
-  src/tools/library_import.cpp
-  tests/support/noninteractive_guard.cpp
-)
-target_link_libraries(animehub-library-import PRIVATE animehub-core Qt6::Core Qt6::Sql)
-animehub_configure_target(animehub-library-import)
-set_target_properties(animehub-library-import PROPERTIES WIN32_EXECUTABLE FALSE)
-
 include(CTest)
 if(BUILD_TESTING)
   add_subdirectory(tests)
