@@ -74,7 +74,7 @@ private slots:
         QTemporaryDir directory;
         RemoteService service(
             network, QUrl(QStringLiteral("http://127.0.0.1:%1/api/v1/").arg(server.serverPort())),
-            directory.path(), {});
+            directory.path(), {}, {});
         service.setCredentialStore(
             [] { return std::optional<Credentials>{{QStringLiteral("device"), "fake"}}; },
             [](const Credentials&) { return true; });
@@ -164,7 +164,10 @@ private slots:
                 nativeNetwork,
                 directApi ? QUrl(QStringLiteral("http://127.0.0.1:18091/api/v1/"))
                           : proxy.url(QStringLiteral("/api/v1/")),
-                directory.path(), [&](const Submission& submission) {
+                directory.path(),
+                // The fixture anime is not in the catalog; its queue rows need no anime row.
+                [](const QString&, std::function<void(Readiness)> done) { done(Readiness::Ready); },
+                [&](const Submission& submission) {
                     const auto state =
                         call("GET", QStringLiteral("devices/me/inbox/") + submission.requestId, {},
                              credentials->token);

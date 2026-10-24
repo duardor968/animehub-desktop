@@ -102,7 +102,16 @@ AppController::AppController(AppPaths paths, QObject* parent)
                                              myjd_.get()},
         [this] { return settings_->downloads(); });
     remote_service_ = std::make_unique<remote::RemoteService>(
-        network_, api_options.baseUrl, paths_.data, [this](const remote::Submission& submission) {
+        network_, api_options.baseUrl, paths_.data,
+        [this](const QString& slug, std::function<void(remote::Readiness)> done) {
+            // A profile without transfers would accept requests it can never queue.
+            if (!paths_.transfers) {
+                done(remote::Readiness::Never);
+                return;
+            }
+            remote::rememberAnime(*api_, *library_, slug, this, std::move(done));
+        },
+        [this](const remote::Submission& submission) {
             if (!paths_.transfers)
                 return false;
             auto fixed = settings_->downloads();
@@ -116,12 +125,13 @@ AppController::AppController(AppPaths paths, QObject* parent)
             if (fixed.engine == downloads::DownloadEngine::JDownloaderLocal)
                 fixed.jdEndpoint = QUrl(submission.profile.connection);
             fixed.jdDeviceId = submission.profile.device;
-            auto title = submission.animeSlug;
-            if (const auto entry = library_repository_->entry(submission.animeSlug);
-                entry && *entry)
-                title = (*entry)->title;
+            // The request was accepted once its anime was saved (rememberAnime): its title
+            // names the files, and the library can record them.
+            const auto anime = library_repository_->anime(submission.animeSlug);
+            if (!anime || !*anime)
+                return false;
             return downloads_
-                ->enqueueMany(submission.animeSlug, submission.episodes, title,
+                ->enqueueMany(submission.animeSlug, submission.episodes, (*anime)->title,
                               downloads::TaskOrigin::Manual, submission.requestId, fixed)
                 .has_value();
         });
