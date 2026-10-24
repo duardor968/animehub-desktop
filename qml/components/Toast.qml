@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import AnimeHub
 
-// A short outcome at the bottom of the window ("Enlaces enviados a JDownloader"), with an
+// A short outcome at the bottom of the window ("12 episodios en cola"), with an
 // optional action such as "Deshacer".
 Rectangle {
     id: root

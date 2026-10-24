@@ -67,7 +67,6 @@ QtObject {
         readonly property string warning: "e7ba"
         readonly property string clock: "e823"
         readonly property string video: "e714"
-        readonly property string send: "e724"
         readonly property string trash: "e74d"
         readonly property string info: "e946"
         readonly property string filter: "e71c"

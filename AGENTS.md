@@ -9,7 +9,7 @@ AnimeHub Desktop es una aplicación nativa C++26 con Qt Quick para Windows: bibl
 - No replica AnimeHub Web. Consume `animehub-api` bajo `/api/v1`, con caché local de respuestas para uso sin conexión.
 - Sin scraping en C++: AnimeAV1 se procesa solo en el servidor.
 - La biblioteca es local, privada y reconstruible (SQLite). Visto y favorito son datos, no carpetas.
-- Descargas nativas solo de MEGA (API pública, descifrado AES-CTR y verificación del MAC) y Pixeldrain, siempre con aria2 por JSON-RPC. Otros servidores, solo a través de JDownloader (Click'n'Load local o MyJDownloader).
+- Descargas nativas solo de MEGA (API pública, descifrado AES-CTR y verificación del MAC) y Pixeldrain, siempre con aria2 por JSON-RPC. Otros servidores, solo a través de JDownloader (API local o MyJDownloader), como tareas seguidas de la misma cola: nada se envía sin seguimiento.
 - La cola nunca guarda URLs firmadas, claves de enlace ni credenciales; una tarea reanudada vuelve a resolver su origen.
 - Reproducción externa: mpv incluido por defecto (seguimiento por IPC) o la aplicación predeterminada del sistema (abrir marca visto). Nada de reproductor embebido sin una nueva decisión. Cerrar AnimeHub no detiene un vídeo.
 - Avisos de episodios nuevos activados por defecto; la descarga automática se activa por anime y con consentimiento explícito (destino y forma de desactivarla).
