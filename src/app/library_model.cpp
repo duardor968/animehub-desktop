@@ -12,13 +12,6 @@ namespace {
 
 using library::LibraryEntry;
 
-// The home's captions start with a capital: "Jueves 22:00 · Ep. 14", "Retrasado · Ep. 8".
-QString upcomingCaption(const schedule::Next& next, const QDateTime& now) {
-    auto caption = schedule::text(next, now);
-    caption[0] = caption[0].toUpper();
-    return caption;
-}
-
 } // namespace
 
 LibraryModel::LibraryModel(library::LibraryService& library, downloads::DownloadManager& downloads,
@@ -119,10 +112,6 @@ QList<double> LibraryModel::pendingOf(const LibraryEntry& entry) const {
     return pending;
 }
 
-// The whole library lists a franchise as one row; any other filter, anime by anime.
-bool LibraryModel::byFranchise() const {
-    return filter_ == Filter::All || filter_ == Filter::Franchises;
-}
 
 // Where the user is with the anime; whether it airs is the page's business, not the list's.
 QString LibraryModel::captionOf(const LibraryEntry& entry) {
@@ -169,21 +158,10 @@ QString LibraryModel::pendingCaption(const QList<double>& pending) {
                : QStringLiteral("%1 episodios").arg(pending.size());
 }
 
-QString LibraryModel::captionFor(const LibraryEntry& entry) const {
-    if (filter_ == Filter::ToWatch && ready(entry)) {
-        return readyCaption(entry);
-    }
-    if (filter_ == Filter::ToDownload) {
-        if (const auto pending = pendingOf(entry); !pending.isEmpty()) {
-            return pendingCaption(pending);
-        }
-    }
-    return captionOf(entry);
-}
-
+// How far a series is, while it is under way: a seen one needs no full bar.
 double LibraryModel::progressOf(const LibraryEntry& entry) {
     const int total = std::max(entry.episodeCount.value_or(0), entry.knownEpisodes);
-    if (!started(entry)) {
+    if (!started(entry) || entry.finished()) {
         return -1;
     }
     return total > 0 ? std::clamp(static_cast<double>(entry.watchedEpisodes) / total, 0.0, 1.0)
@@ -191,15 +169,12 @@ double LibraryModel::progressOf(const LibraryEntry& entry) {
 }
 
 bool LibraryModel::passes(const LibraryEntry& entry) const {
+    if (on_disk_only_ && entry.downloadedEpisodes == 0) {
+        return false;
+    }
     switch (filter_) {
     case Filter::All:
-    case Filter::AllAnime:
-    case Filter::Franchises:
         return true;
-    case Filter::ToWatch:
-        return ready(entry);
-    case Filter::ToDownload:
-        return !pendingOf(entry).isEmpty();
     case Filter::Airing:
         return entry.status == api::AnimeStatus::Airing;
     case Filter::Watching:
@@ -210,8 +185,6 @@ bool LibraryModel::passes(const LibraryEntry& entry) const {
         return entry.finished();
     case Filter::Favorites:
         return entry.favorite;
-    case Filter::OnDisk:
-        return entry.downloadedEpisodes > 0;
     }
     return true;
 }
@@ -223,7 +196,7 @@ const LibraryEntry* LibraryModel::entryFor(const QString& slug) const {
 
 void LibraryModel::setFilter(Filter filter) {
     // A saved value from another version falls back to the whole library.
-    if (filter < Filter::All || filter > Filter::OnDisk) {
+    if (filter < Filter::All || filter > Filter::Favorites) {
         filter = Filter::All;
     }
     if (filter_ == filter) {
@@ -233,6 +206,55 @@ void LibraryModel::setFilter(Filter filter) {
     emit filterChanged();
     rebuildRows();
     rebuildShelves();
+}
+
+void LibraryModel::setOnDiskOnly(bool on_disk_only) {
+    if (on_disk_only_ == on_disk_only) {
+        return;
+    }
+    on_disk_only_ = on_disk_only;
+    emit filterChanged();
+    rebuildRows();
+    rebuildShelves();
+}
+
+void LibraryModel::setGrouped(bool grouped) {
+    if (grouped_ == grouped) {
+        return;
+    }
+    grouped_ = grouped;
+    emit filterChanged();
+    rebuildRows();
+    rebuildShelves();
+}
+
+QList<int> LibraryModel::filterCounts() const {
+    QList<int> counts(static_cast<int>(Filter::Favorites) + 1, 0);
+    for (const auto& entry : entries_) {
+        if (entry.archived || (on_disk_only_ && entry.downloadedEpisodes == 0)) {
+            continue;
+        }
+        ++counts[static_cast<int>(Filter::All)];
+        counts[static_cast<int>(Filter::Watching)] += started(entry) && !entry.finished();
+        counts[static_cast<int>(Filter::Airing)] += entry.status == api::AnimeStatus::Airing;
+        counts[static_cast<int>(Filter::NotStarted)] += !started(entry);
+        counts[static_cast<int>(Filter::Watched)] += entry.finished();
+        counts[static_cast<int>(Filter::Favorites)] += entry.favorite;
+    }
+    return counts;
+}
+
+// A franchise shows its anime when the user unfolded it, or when a search or a filter narrows
+// the list: then only the ones that pass are under it.
+bool LibraryModel::unfolded(qint64 id) const {
+    return expanded_.contains(id) || !search_.isEmpty() || filter_ != Filter::All ||
+           on_disk_only_;
+}
+
+// Titles sort by their first letter or digit: "[Oshi no Ko]" goes with the O.
+QString LibraryModel::sortKey(const QString& title) {
+    const auto first = std::ranges::find_if(title, [](QChar c) { return c.isLetterOrNumber(); });
+    return first == title.end() ? title : title.sliced(first - title.begin());
 }
 
 void LibraryModel::setSearch(const QString& search) {
@@ -335,7 +357,8 @@ void LibraryModel::rebuildShelves() {
                             .caption = readyCaption(*entry),
                             .progress = progressOf(*entry),
                             .episode = *entry->resumeNumber,
-                            .fresh = entry->newEpisodes > 0});
+                            .fresh = entry->newEpisodes > 0,
+                            .action = QStringLiteral("play")});
     }
     ready_shelf_.setCards(std::move(ready_cards));
 
@@ -349,7 +372,8 @@ void LibraryModel::rebuildShelves() {
                                .caption = pendingCaption(pending),
                                .progress = progressOf(*entry),
                                .episode = pending.first(),
-                               .fresh = entry->newEpisodes > 0});
+                               .fresh = entry->newEpisodes > 0,
+                               .action = QStringLiteral("download")});
     }
     download_shelf_.setCards(std::move(download_cards));
 
@@ -358,14 +382,32 @@ void LibraryModel::rebuildShelves() {
         all_cards.append({.slug = entry->slug,
                           .title = entry->title,
                           .posterUrl = entry->posterUrl,
-                          .caption = captionFor(*entry),
+                          .caption = captionOf(*entry),
                           .progress = progressOf(*entry),
                           .fresh = entry->newEpisodes > 0});
     }
     all_shelf_.setCards(std::move(all_cards));
     emit countChanged();
 
-    rebuildUpcoming(archived_only_ ? QList<const LibraryEntry*>{} : shown);
+    // The home's agenda is not the list's: every anime of the library that airs.
+    QList<const LibraryEntry*> library;
+    for (const auto& entry : entries_) {
+        if (!entry.archived) {
+            library.append(&entry);
+        }
+    }
+    rebuildUpcoming(library);
+}
+
+QString LibraryModel::downloadPendingOf(const QString& slug) {
+    const auto* entry = entryFor(slug);
+    const auto pending = entry ? pendingOf(*entry) : QList<double>{};
+    if (pending.isEmpty()) {
+        return {};
+    }
+    const auto queued =
+        downloads_.enqueueMany(slug, pending, entry->title, downloads::TaskOrigin::Manual);
+    return queued ? QString() : queued.error();
 }
 
 QString LibraryModel::downloadPending() {
@@ -414,15 +456,29 @@ void LibraryModel::rebuildUpcoming(const QList<const LibraryEntry*>& shown) {
     std::ranges::sort(upcoming, [](const Upcoming& a, const Upcoming& b) {
         return a.next.late != b.next.late ? b.next.late : a.next.at < b.next.at;
     });
-    QList<Card> cards;
+    // One column per day, in the order they come: [{day, items: [{slug, title, posterUrl,
+    // caption}]}].
+    QVariantList days;
     for (const auto& item : upcoming) {
-        cards.append({.slug = item.entry->slug,
-                      .title = item.entry->title,
-                      .posterUrl = item.entry->posterUrl,
-                      .caption = upcomingCaption(item.next, now),
-                      .episode = item.next.number});
+        const auto day = schedule::day(item.next, now);
+        if (days.isEmpty() || days.last().toMap().value(QStringLiteral("day")) != day) {
+            days.append(QVariantMap{{QStringLiteral("day"), day},
+                                    {QStringLiteral("items"), QVariantList{}}});
+        }
+        auto column = days.last().toMap();
+        auto items = column.value(QStringLiteral("items")).toList();
+        items.append(QVariantMap{{QStringLiteral("slug"), item.entry->slug},
+                                 {QStringLiteral("title"), item.entry->title},
+                                 {QStringLiteral("posterUrl"), item.entry->posterUrl},
+                                 {QStringLiteral("caption"), schedule::slot(item.next, now)}});
+        column.insert(QStringLiteral("items"), items);
+        days.last() = column;
     }
-    upcoming_shelf_.setCards(std::move(cards));
+    upcoming_count_ = static_cast<int>(upcoming.size());
+    if (days != upcoming_days_) {
+        upcoming_days_ = std::move(days);
+        emit upcomingChanged();
+    }
 }
 
 void LibraryModel::updateFeatured() {
@@ -452,7 +508,7 @@ void LibraryModel::updateFeatured() {
         QString action_text = QStringLiteral("Descargar");
         if (featured_on_disk_) {
             action = FeaturedAction::Play;
-            action_text = QStringLiteral("Continuar");
+            action_text = started(*entry) ? QStringLiteral("Continuar") : QStringLiteral("Empezar");
         } else if (const auto task = downloads_.activeTaskFor(entry->slug, number);
                    task && task->state != downloads::TaskState::Paused) {
             action = FeaturedAction::Downloading;
@@ -474,14 +530,22 @@ void LibraryModel::updateFeatured() {
 }
 
 void LibraryModel::rebuildRows() {
+    downloading_.clear();
+    for (const auto& task : downloads_.tasks()) {
+        if (task.state != downloads::TaskState::Completed &&
+            task.state != downloads::TaskState::Cancelled &&
+            task.state != downloads::TaskState::Failed) {
+            downloading_.insert(task.slug);
+        }
+    }
     QList<Row> rows;
     const auto matches = [this](const LibraryEntry& entry) {
         return entry.archived == archived_only_ && passes(entry) &&
                (search_.isEmpty() || entry.title.contains(search_, Qt::CaseInsensitive) ||
                 entry.alternativeTitle.contains(search_, Qt::CaseInsensitive));
     };
-    QSet<QString> grouped;
-    if (byFranchise()) {
+    QSet<QString> in_group;
+    if (grouped_) {
         for (const auto& group : franchises_) {
             QList<int> members;
             const bool group_matches = group.title.contains(search_, Qt::CaseInsensitive);
@@ -489,7 +553,7 @@ void LibraryModel::rebuildRows() {
                 const auto& entry = entries_[i];
                 if (!group.members.contains(entry.slug))
                     continue;
-                grouped.insert(entry.slug);
+                in_group.insert(entry.slug);
                 if (entry.archived == archived_only_ && passes(entry) &&
                     (group_matches || matches(entry)))
                     members.append(i);
@@ -499,25 +563,23 @@ void LibraryModel::rebuildRows() {
             rows.append({-1, group.id, 0});
         }
     }
-    if (filter_ != Filter::Franchises) {
-        for (int i = 0; i < entries_.size(); ++i) {
-            if (matches(entries_[i]) && !grouped.contains(entries_[i].slug))
-                rows.append({i, 0, 0});
-        }
+    for (int i = 0; i < entries_.size(); ++i) {
+        if (matches(entries_[i]) && !in_group.contains(entries_[i].slug))
+            rows.append({i, 0, 0});
     }
     const auto title = [this](const Row& row) {
         if (row.entry >= 0)
-            return entries_[row.entry].title;
+            return sortKey(entries_[row.entry].title);
         const auto it = std::ranges::find(franchises_, row.group, &library::FranchiseRecord::id);
-        return it == franchises_.end() ? QString() : it->title;
+        return it == franchises_.end() ? QString() : sortKey(it->title);
     };
     std::ranges::stable_sort(rows, [&](const Row& a, const Row& b) {
         return QString::localeAwareCompare(title(a), title(b)) < 0;
     });
-    if (filter_ == Filter::All) {
+    if (grouped_) {
         for (int row = 0; row < rows.size(); ++row) {
             const auto id = rows[row].group;
-            if (!id || (!expanded_.contains(id) && search_.isEmpty()))
+            if (!id || !unfolded(id))
                 continue;
             const auto it = std::ranges::find(franchises_, id, &library::FranchiseRecord::id);
             if (it == franchises_.end())
@@ -619,7 +681,16 @@ QVariant LibraryModel::data(const QModelIndex& index, int role) const {
     if (role == DepthRole)
         return row.depth;
     if (role == ExpandedRole)
-        return expanded_.contains(row.group) || !search_.isEmpty();
+        return unfolded(row.group);
+    if (row.entry < 0 && (role == ReadyRole || role == DownloadingRole)) {
+        const auto it = std::ranges::find(franchises_, row.group, &library::FranchiseRecord::id);
+        return it != franchises_.end() &&
+               std::ranges::any_of(entries_, [&](const LibraryEntry& member) {
+                   return it->members.contains(member.slug) &&
+                          (role == ReadyRole ? member.unwatchedOnDisk > 0
+                                             : downloading_.contains(member.slug));
+               });
+    }
     if (row.entry < 0) {
         const auto it = std::ranges::find(franchises_, row.group, &library::FranchiseRecord::id);
         if (it == franchises_.end())
@@ -663,13 +734,17 @@ QVariant LibraryModel::data(const QModelIndex& index, int role) const {
     case PosterRole:
         return entry.posterUrl;
     case CaptionRole:
-        return captionFor(entry);
+        return captionOf(entry);
     case ProgressRole:
         return progressOf(entry);
     case FreshRole:
         return entry.newEpisodes > 0;
     case FavoriteRole:
         return entry.favorite;
+    case ReadyRole:
+        return entry.unwatchedOnDisk > 0;
+    case DownloadingRole:
+        return downloading_.contains(entry.slug);
     default:
         return {};
     }
@@ -709,7 +784,7 @@ QVariantMap LibraryModel::workMap(const LibraryEntry& entry) const {
     return {{QStringLiteral("slug"), entry.slug},
             {QStringLiteral("title"), entry.title},
             {QStringLiteral("posterUrl"), entry.posterUrl},
-            {QStringLiteral("caption"), captionFor(entry)},
+            {QStringLiteral("caption"), captionOf(entry)},
             {QStringLiteral("progress"), progressOf(entry)},
             {QStringLiteral("archived"), entry.archived},
             {QStringLiteral("bytesText"),
@@ -918,7 +993,8 @@ QHash<int, QByteArray> LibraryModel::roleNames() const {
     return {{SlugRole, "slug"},         {TitleRole, "title"},       {PosterRole, "posterUrl"},
             {CaptionRole, "caption"},   {ProgressRole, "progress"}, {FreshRole, "fresh"},
             {FavoriteRole, "favorite"}, {GroupIdRole, "groupId"},   {IsGroupRole, "isGroup"},
-            {DepthRole, "depth"},       {ExpandedRole, "expanded"}};
+            {DepthRole, "depth"},       {ExpandedRole, "expanded"}, {ReadyRole, "ready"},
+            {DownloadingRole, "downloading"}};
 }
 
 } // namespace animehub::app

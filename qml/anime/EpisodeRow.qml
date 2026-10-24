@@ -91,36 +91,21 @@ ItemDelegate {
                 radius: 0
             }
 
-            // On the thumbnail's corner, as on the web; shown on hover or while choosing.
-            CheckBox {
-                id: box
-                x: 6
-                y: 6
-                // Fluent gives a check box without text a 120 px wide plate and centres the box
-                // in it: only the box, so it sits on the corner.
-                width: implicitIndicatorWidth
-                height: implicitIndicatorHeight
-                padding: 0
-                focusPolicy: Qt.NoFocus
+            // On the thumbnail's top-right corner, as on the web; shown on hover or while
+            // choosing.
+            SelectionMark {
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.margins: 5
                 checked: row.selected
                 opacity: row.selected || row.selecting || row.hovered ? 1 : 0
                 visible: opacity > 0
                 Behavior on opacity { NumberAnimation { duration: 120 } }
                 Accessible.name: "Seleccionar " + row.label.toLowerCase()
-                // Keyboard and screen readers toggle the box itself.
-                onToggled: {
-                    row.toggle(false)
-                    checked = Qt.binding(() => row.selected)
-                }
-
-                // Mayús+clic marks a span: a click's modifiers do not reach the box's signal.
                 // The row takes the focus, so Esc and Space reach the page from here.
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: mouse => {
-                        row.forceActiveFocus(Qt.MouseFocusReason)
-                        row.toggle(mouse.modifiers & Qt.ShiftModifier)
-                    }
+                onChosen: extend => {
+                    row.forceActiveFocus(Qt.MouseFocusReason)
+                    row.toggle(extend)
                 }
             }
         }

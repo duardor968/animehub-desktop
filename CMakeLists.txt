@@ -131,6 +131,7 @@ qt_add_qml_module(animehub-desktop
     qml/components/Poster.qml
     qml/components/PosterCard.qml
     qml/components/ProgressLine.qml
+    qml/components/SelectionMark.qml
     qml/components/Shelf.qml
     qml/components/Toast.qml
     qml/downloads/DownloadBar.qml

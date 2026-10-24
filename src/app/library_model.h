@@ -24,6 +24,12 @@ class LibraryModel final : public QAbstractListModel {
     QML_UNCREATABLE("Provided by the application")
 
     Q_PROPERTY(Filter filter READ filter WRITE setFilter NOTIFY filterChanged)
+    // Two ways of showing, beside the filter: only what has an episode on disk, and a
+    // franchise's anime under it.
+    Q_PROPERTY(bool onDiskOnly READ onDiskOnly WRITE setOnDiskOnly NOTIFY filterChanged)
+    Q_PROPERTY(bool grouped READ grouped WRITE setGrouped NOTIFY filterChanged)
+    // How many anime each filter lets through, by Filter value, with "solo en disco" applied.
+    Q_PROPERTY(QList<int> filterCounts READ filterCounts NOTIFY countChanged)
     Q_PROPERTY(QString search READ search WRITE setSearch NOTIFY searchChanged)
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
     Q_PROPERTY(int total READ total NOTIFY countChanged)
@@ -47,24 +53,14 @@ class LibraryModel final : public QAbstractListModel {
     // How many anime each shelf holds, the featured one counted with "Para ver".
     Q_PROPERTY(int readyCount READ readyCount NOTIFY countChanged)
     Q_PROPERTY(int downloadCount READ downloadCount NOTIFY countChanged)
-    Q_PROPERTY(CardModel* upcomingShelf READ upcomingShelf CONSTANT)
+    // What airs next among the anime of the library, by day: [{day, items}].
+    Q_PROPERTY(QVariantList upcomingDays READ upcomingDays NOTIFY upcomingChanged)
+    Q_PROPERTY(int upcomingCount READ upcomingCount NOTIFY upcomingChanged)
     Q_PROPERTY(CardModel* allShelf READ allShelf CONSTANT)
 
 public:
-    // All groups the anime of a franchise under it; AllAnime lists them one by one.
-    enum class Filter {
-        All,
-        AllAnime,
-        Franchises,
-        ToWatch,
-        ToDownload,
-        Airing,
-        Watching,
-        NotStarted,
-        Watched,
-        Favorites,
-        OnDisk,
-    };
+    // Where the user is with an anime, or whether it airs; one at a time.
+    enum class Filter { All, Watching, Airing, NotStarted, Watched, Favorites };
     Q_ENUM(Filter)
     // What the featured anime's button does with the episode it resumes.
     enum class FeaturedAction { Play, Download, Downloading };
@@ -82,6 +78,10 @@ public:
         IsGroupRole,
         DepthRole,
         ExpandedRole,
+        // Something unwatched is on disk: the row reads bright, as Steam's installed games.
+        ReadyRole,
+        // An episode of it is queued or transferring.
+        DownloadingRole,
     };
 
     LibraryModel(library::LibraryService& library, downloads::DownloadManager& downloads,
@@ -94,6 +94,15 @@ public:
         return filter_;
     }
     void setFilter(Filter filter);
+    [[nodiscard]] bool onDiskOnly() const {
+        return on_disk_only_;
+    }
+    void setOnDiskOnly(bool on_disk_only);
+    [[nodiscard]] bool grouped() const {
+        return grouped_;
+    }
+    [[nodiscard]] QList<int> filterCounts() const;
+    void setGrouped(bool grouped);
     [[nodiscard]] QString search() const {
         return search_;
     }
@@ -149,10 +158,15 @@ public:
     [[nodiscard]] int downloadCount() const {
         return download_count_;
     }
-    // Queues every episode of the "Para descargar" shelf; the error, if one could not be.
+    // Queues every episode of the "Para descargar" shelf, or those of one anime on it; the
+    // error, if one could not be.
     Q_INVOKABLE QString downloadPending();
-    [[nodiscard]] CardModel* upcomingShelf() {
-        return &upcoming_shelf_;
+    Q_INVOKABLE QString downloadPendingOf(const QString& slug);
+    [[nodiscard]] QVariantList upcomingDays() const {
+        return upcoming_days_;
+    }
+    [[nodiscard]] int upcomingCount() const {
+        return upcoming_count_;
     }
     [[nodiscard]] CardModel* allShelf() {
         return &all_shelf_;
@@ -171,6 +185,7 @@ signals:
     void searchChanged();
     void countChanged();
     void featuredChanged();
+    void upcomingChanged();
     void archivedOnlyChanged();
     void franchiseChanged();
     void errorChanged();
@@ -192,14 +207,13 @@ private:
     [[nodiscard]] static QString captionOf(const library::LibraryEntry& entry);
     [[nodiscard]] static QString readyCaption(const library::LibraryEntry& entry);
     [[nodiscard]] static QString pendingCaption(const QList<double>& pending);
-    // The caption the current filter calls for: what to watch or to download, else captionOf.
-    [[nodiscard]] QString captionFor(const library::LibraryEntry& entry) const;
     [[nodiscard]] static double progressOf(const library::LibraryEntry& entry);
     [[nodiscard]] static bool started(const library::LibraryEntry& entry);
     [[nodiscard]] static bool following(const library::LibraryEntry& entry);
     [[nodiscard]] static bool ready(const library::LibraryEntry& entry);
     [[nodiscard]] QList<double> pendingOf(const library::LibraryEntry& entry) const;
-    [[nodiscard]] bool byFranchise() const;
+    [[nodiscard]] bool unfolded(qint64 id) const;
+    [[nodiscard]] static QString sortKey(const QString& title);
 
     library::LibraryService& library_;
     downloads::DownloadManager& downloads_;
@@ -215,6 +229,7 @@ private:
     QList<Row> rows_;
     QList<library::FranchiseRecord> franchises_;
     QSet<qint64> expanded_;
+    QSet<QString> downloading_; // anime with an episode queued or transferring
     bool archived_only_ = false;
     int total_ = 0;
     int archived_count_ = 0;
@@ -223,6 +238,8 @@ private:
     QVariantList overview_;
     QString error_;
     Filter filter_ = Filter::All;
+    bool on_disk_only_ = false;
+    bool grouped_ = true;
     QString search_;
     QString featured_slug_;
     bool featured_on_disk_ = false;
@@ -232,7 +249,8 @@ private:
     int pending_count_ = 0;
     int ready_count_ = 0;
     int download_count_ = 0;
-    CardModel upcoming_shelf_;
+    QVariantList upcoming_days_;
+    int upcoming_count_ = 0;
     CardModel all_shelf_;
     QList<api::ScheduleEntry> schedule_;
     bool schedule_stale_ = false; // the last answer came from the cache

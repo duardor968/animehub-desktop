@@ -3,7 +3,9 @@ import QtQuick.Controls
 import AnimeHub
 
 // An anime as a poster with its title and one line under it, each on one line so the captions
-// of a row line up; a cut title shows whole in a tooltip.
+// of a row line up. A long title keeps its end ("…Part 2", "…3rd Season"), where seasons
+// differ, and shows whole in a tooltip. Hovered, the poster offers what the card is for: play
+// the episode or download it.
 AbstractButton {
     id: root
 
@@ -11,6 +13,11 @@ AbstractButton {
     property string caption
     property real progress: -1
     property bool fresh: false
+    // "play", "download" or nothing: the button over the poster.
+    property string action
+
+    // The poster's own button was pressed, not the card.
+    signal act()
 
     implicitWidth: 156
     implicitHeight: poster.height + titleLabel.height + captionLabel.height + 14
@@ -20,6 +27,7 @@ AbstractButton {
 
     background: null
     ToolTip.visible: hovered && titleLabel.truncated
+    ToolTip.delay: 500
     ToolTip.text: text
 
     contentItem: Item {
@@ -28,8 +36,43 @@ AbstractButton {
             width: parent.width
             height: Math.round(width * 1.42)
             source: root.posterUrl
-            scale: root.hovered ? 1.02 : 1
-            Behavior on scale { NumberAnimation { duration: 120 } }
+            scale: root.hovered ? 1.03 : 1
+            Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
+            // The new episode stands on the poster, as Steam's badges do.
+            Label {
+                visible: root.fresh
+                x: 6
+                y: 6
+                leftPadding: 6
+                rightPadding: 6
+                topPadding: 2
+                bottomPadding: 2
+                text: "Nuevo"
+                color: Theme.accentInk
+                font.pixelSize: Theme.caption
+                font.weight: Font.DemiBold
+                background: Rectangle {
+                    radius: 3
+                    color: Theme.accent
+                }
+            }
+
+            RoundButton {
+                visible: root.action !== "" && (root.hovered || root.visualFocus)
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.margins: 8
+                highlighted: true
+                text: root.action === "play" ? "Ver" : "Descargar"
+                display: AbstractButton.IconOnly
+                icon.source: Theme.source(root.action === "play" ? Theme.icon.play : Theme.icon.download)
+                focusPolicy: Qt.NoFocus
+                onClicked: root.act()
+                Accessible.name: text + ", " + root.text
+                ToolTip.visible: hovered
+                ToolTip.text: text
+            }
 
             ProgressLine {
                 anchors.left: parent.left
@@ -42,7 +85,6 @@ AbstractButton {
 
             Rectangle {
                 anchors.fill: parent
-                radius: Theme.radius
                 color: "transparent"
                 border.color: Theme.accent
                 border.width: 2
@@ -59,34 +101,18 @@ AbstractButton {
             color: Theme.ink
             font.pixelSize: Theme.body
             font.weight: Font.DemiBold
-            elide: Text.ElideRight
+            elide: Text.ElideMiddle
         }
 
-        // New episodes read as in the library list: a dot and the accent colour.
-        Row {
-            id: captionRow
+        Label {
+            id: captionLabel
             anchors.top: titleLabel.bottom
             anchors.topMargin: 2
             width: parent.width
-            spacing: 6
-
-            Rectangle {
-                visible: root.fresh
-                anchors.verticalCenter: parent.verticalCenter
-                width: 6
-                height: 6
-                radius: 3
-                color: Theme.accent
-            }
-
-            Label {
-                id: captionLabel
-                width: parent.width - (root.fresh ? 12 : 0)
-                text: root.caption
-                color: root.fresh ? Theme.accent : Theme.muted
-                font.pixelSize: Theme.caption
-                elide: Text.ElideRight
-            }
+            text: root.caption
+            color: Theme.muted
+            font.pixelSize: Theme.caption
+            elide: Text.ElideRight
         }
     }
 }

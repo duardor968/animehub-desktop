@@ -56,6 +56,8 @@ QVariant CardModel::data(const QModelIndex& index, int role) const {
         return card.episode;
     case FreshRole:
         return card.fresh;
+    case ActionRole:
+        return card.action;
     default:
         return {};
     }
@@ -64,7 +66,7 @@ QVariant CardModel::data(const QModelIndex& index, int role) const {
 QHash<int, QByteArray> CardModel::roleNames() const {
     return {{SlugRole, "slug"},       {TitleRole, "title"},       {PosterRole, "posterUrl"},
             {CaptionRole, "caption"}, {ProgressRole, "progress"}, {EpisodeRole, "episode"},
-            {FreshRole, "fresh"}};
+            {FreshRole, "fresh"},     {ActionRole, "action"}};
 }
 
 } // namespace animehub::app

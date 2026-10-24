@@ -16,6 +16,8 @@ struct Card {
     double progress = -1; // < 0 hides the bar
     double episode = -1;  // the episode a click acts on, when there is one
     bool fresh = false;   // has episodes the user has not seen yet
+    // What the poster's own button does with the episode: "play", "download" or nothing.
+    QString action;
 };
 
 class CardModel : public QAbstractListModel {
@@ -33,6 +35,7 @@ public:
         ProgressRole,
         EpisodeRole,
         FreshRole,
+        ActionRole,
     };
 
     using QAbstractListModel::QAbstractListModel;

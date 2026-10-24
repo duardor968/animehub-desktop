@@ -4,7 +4,8 @@ import QtQuick.Layouts
 import AnimeHub
 
 // A titled row of whole posters; the arrows page through the rest. Items declared inside it
-// (a button acting on the whole row) go beside the title.
+// (a button acting on the whole row) go beside the title. A `lead` card may open the row, two
+// posters wide, as Steam's recent games do with the last one played.
 Column {
     id: root
 
@@ -13,12 +14,18 @@ Column {
     // Shown after the title, muted; below 0, nothing.
     property int count: -1
     default property alias actions: actionsRow.data
+    property Component lead
+    readonly property bool hasLead: lead !== null
 
     signal activated(string slug, real episode)
+    // A poster's own button: play the episode or download what it lists.
+    signal acted(string slug, real episode, string action)
 
     readonly property int gap: Theme.posterGap
-    readonly property int columns: Theme.posterColumns(width)
-    readonly property real cardWidth: (width - (columns - 1) * gap) / columns
+    // Columns as if every card were a poster; the lead takes two of them.
+    readonly property int allColumns: Theme.posterColumns(width)
+    readonly property real cardWidth: (width - (allColumns - 1) * gap) / allColumns
+    readonly property int columns: Math.max(1, allColumns - (hasLead ? 2 : 0))
     // The first whole poster on view; kept across resizes so the row never stops mid-poster.
     property int first: 0
     property bool paging: false
@@ -34,7 +41,7 @@ Column {
     onCardWidthChanged: show(first, false)
 
     spacing: 12
-    visible: list.count > 0
+    visible: list.count > 0 || hasLead
 
     RowLayout {
         width: root.width
@@ -85,51 +92,66 @@ Column {
         }
     }
 
-    ListView {
-        id: list
-        width: root.width
-        // Fixed so the row exists before its delegates.
-        height: Theme.posterCardHeight(root.cardWidth)
-        orientation: ListView.Horizontal
+    Row {
         spacing: root.gap
-        clip: true
-        interactive: false
-        highlightRangeMode: ListView.NoHighlightRange
-        keyNavigationEnabled: true
-        Accessible.name: root.title
-        Behavior on contentX {
-            enabled: root.paging
-            NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+
+        Loader {
+            id: leadLoader
+            active: root.hasLead
+            visible: active
+            width: 2 * root.cardWidth + root.gap
+            height: list.height
+            sourceComponent: root.lead
         }
 
-        // New posters start the row again.
-        Connections {
-            target: list.model
-            function onModelReset() { root.first = 0 }
-        }
+        ListView {
+            id: list
+            width: root.width - (root.hasLead ? leadLoader.width + root.gap : 0)
+            // Fixed so the row exists before its delegates.
+            height: Theme.posterCardHeight(root.cardWidth)
+            orientation: ListView.Horizontal
+            spacing: root.gap
+            clip: true
+            interactive: false
+            highlightRangeMode: ListView.NoHighlightRange
+            keyNavigationEnabled: true
+            Accessible.name: root.title
+            Behavior on contentX {
+                enabled: root.paging
+                NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+            }
 
-        delegate: PosterCard {
-            required property var model
+            // New posters start the row again.
+            Connections {
+                target: list.model
+                function onModelReset() { root.first = 0 }
+            }
 
-            width: root.cardWidth
-            text: model.title
-            posterUrl: model.posterUrl
-            caption: model.caption
-            progress: model.progress
-            fresh: model.fresh
-            onClicked: root.activated(model.slug, model.episode)
-        }
+            delegate: PosterCard {
+                required property var model
 
-        // Wheel and touchpad scroll sideways, a page at a time.
-        WheelHandler {
-            // Sideways gestures only: vertical wheel keeps scrolling the page.
-            orientation: Qt.Horizontal
-            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-            onWheel: event => {
-                const delta = event.angleDelta.x !== 0 ? event.angleDelta.x : event.angleDelta.y
-                if (delta === 0 || list.count <= root.columns)
-                    return
-                root.page(delta < 0 ? 1 : -1)
+                width: root.cardWidth
+                text: model.title
+                posterUrl: model.posterUrl
+                caption: model.caption
+                progress: model.progress
+                fresh: model.fresh
+                action: model.action ?? ""
+                onClicked: root.activated(model.slug, model.episode)
+                onAct: root.acted(model.slug, model.episode, model.action)
+            }
+
+            // Wheel and touchpad scroll sideways, a page at a time.
+            WheelHandler {
+                // Sideways gestures only: vertical wheel keeps scrolling the page.
+                orientation: Qt.Horizontal
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                onWheel: event => {
+                    const delta = event.angleDelta.x !== 0 ? event.angleDelta.x : event.angleDelta.y
+                    if (delta === 0 || list.count <= root.columns)
+                        return
+                    root.page(delta < 0 ? 1 : -1)
+                }
             }
         }
     }

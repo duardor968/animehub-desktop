@@ -1,15 +1,14 @@
 import QtQuick
 import AnimeHub
 
-// A cover image with a quiet placeholder while it loads or when there is none.
+// A cover image with a quiet placeholder while it loads or when there is none. Square, like the
+// image it waits for: an Image cannot be rounded without an offscreen layer per poster.
 Rectangle {
     id: root
 
     property url source
-    property bool rounded: true
 
     color: Theme.raised
-    radius: rounded ? Theme.radius : 0
     clip: true
     onSourceChanged: image.retries = 0
 
