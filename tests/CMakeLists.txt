@@ -8,6 +8,12 @@ target_include_directories(animehub-test-support PUBLIC "${CMAKE_CURRENT_SOURCE_
 target_link_libraries(animehub-test-support PUBLIC Qt6::Core Qt6::Network Qt6::Test)
 animehub_configure_target(animehub-test-support)
 
+# Offscreen tests find the system fonts through fontconfig on Linux; Windows points Qt at them.
+set(ANIMEHUB_TEST_ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
+if(WIN32)
+  list(APPEND ANIMEHUB_TEST_ENVIRONMENT "QT_QPA_FONTDIR=C:/Windows/Fonts")
+endif()
+
 # One executable per suite keeps failures and timings readable in ctest.
 function(animehub_add_test name)
   qt_add_executable(${name} ${ARGN} support/noninteractive_guard.cpp)
@@ -20,7 +26,7 @@ function(animehub_add_test name)
   # reach a pipe: console tests with TAP output let ctest show why one failed.
   set_target_properties(${name} PROPERTIES WIN32_EXECUTABLE FALSE)
   add_test(NAME ${name} COMMAND ${name} -o -,tap)
-  set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_QPA_FONTDIR=C:/Windows/Fonts")
+  set_tests_properties(${name} PROPERTIES ENVIRONMENT "${ANIMEHUB_TEST_ENVIRONMENT}")
 endfunction()
 
 animehub_add_test(api-json-test api_json_test.cpp)
@@ -46,12 +52,16 @@ target_include_directories(downloads-view-test PRIVATE ../src)
 target_link_libraries(downloads-view-test PRIVATE Qt6::Qml Qt6::Gui)
 if(WIN32)
   target_link_libraries(downloads-view-test PRIVATE dwmapi)
+elseif(LINUX)
+  target_link_libraries(downloads-view-test PRIVATE Qt6::DBus)
 endif()
 animehub_add_test(anime-view-test anime_view_test.cpp ../src/app/anime_view.cpp ../src/app/episode_model.cpp ../src/app/card_model.cpp ../src/app/display.cpp ../src/app/schedule.cpp ../src/app/shell.cpp ../src/app/app_settings.cpp)
 target_include_directories(anime-view-test PRIVATE ../src)
 target_link_libraries(anime-view-test PRIVATE Qt6::Qml Qt6::Gui)
 if(WIN32)
   target_link_libraries(anime-view-test PRIVATE dwmapi)
+elseif(LINUX)
+  target_link_libraries(anime-view-test PRIVATE Qt6::DBus)
 endif()
 
 # QML components on their own, as Qt Quick Test cases, in the style the app uses.
@@ -65,16 +75,28 @@ animehub_configure_target(qml-components-test)
 set_target_properties(qml-components-test PROPERTIES WIN32_EXECUTABLE FALSE)
 add_test(NAME qml-components-test COMMAND qml-components-test -o -,tap)
 set_tests_properties(qml-components-test PROPERTIES ENVIRONMENT
-  "QT_QPA_PLATFORM=offscreen;QT_QUICK_CONTROLS_STYLE=FluentWinUI3;QT_QUICK_BACKEND=software;QT_QPA_FONTDIR=C:/Windows/Fonts"
+  "${ANIMEHUB_TEST_ENVIRONMENT};QT_QUICK_CONTROLS_STYLE=FluentWinUI3"
 )
-if(ANIMEHUB_BUNDLE_ENGINES)
+# The real engines: the bundled ones on Windows, the system's on Linux.
+if(WIN32 AND ANIMEHUB_BUNDLE_ENGINES)
+  set(ANIMEHUB_TEST_ARIA2 "${PROJECT_BINARY_DIR}/engines/aria2/aria2c.exe")
+  set(ANIMEHUB_TEST_MPV "${PROJECT_BINARY_DIR}/engines/mpv/mpv.exe")
+elseif(LINUX)
+  find_program(ANIMEHUB_TEST_ARIA2 aria2c REQUIRED)
+  find_program(ANIMEHUB_TEST_MPV mpv REQUIRED)
+endif()
+if(ANIMEHUB_TEST_ARIA2)
   animehub_add_test(aria2-test aria2_test.cpp)
   animehub_add_test(download-manager-test download_manager_test.cpp)
   animehub_add_test(player-test player_test.cpp)
   foreach(test IN ITEMS aria2-test download-manager-test player-test)
     target_compile_definitions(${test} PRIVATE
-      ANIMEHUB_ARIA2_EXECUTABLE="${PROJECT_BINARY_DIR}/engines/aria2/aria2c.exe"
-      ANIMEHUB_MPV_EXECUTABLE="${PROJECT_BINARY_DIR}/engines/mpv/mpv.exe"
+      ANIMEHUB_ARIA2_EXECUTABLE="${ANIMEHUB_TEST_ARIA2}"
+      ANIMEHUB_MPV_EXECUTABLE="${ANIMEHUB_TEST_MPV}"
     )
   endforeach()
+endif()
+
+if(LINUX)
+  animehub_add_test(platform-linux-test platform_linux_test.cpp)
 endif()

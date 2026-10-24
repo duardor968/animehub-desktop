@@ -44,7 +44,7 @@ bool ProcessJob::assign(qint64 pid) {
     return assigned;
 }
 
-void hideConsoleWindow(QProcess& process) {
+void prepareHelperProcess(QProcess& process) {
     process.setCreateProcessArgumentsModifier(
         [](QProcess::CreateProcessArguments* arguments) { arguments->flags |= CREATE_NO_WINDOW; });
 }

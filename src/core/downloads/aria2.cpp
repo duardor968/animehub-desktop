@@ -62,7 +62,7 @@ Aria2::Aria2(QNetworkAccessManager& network, QString executable, QByteArray user
              QObject* parent)
     : QObject(parent), network_(network), executable_(std::move(executable)),
       user_agent_(std::move(user_agent)) {
-    platform::hideConsoleWindow(process_);
+    platform::prepareHelperProcess(process_);
     process_.setProcessChannelMode(QProcess::MergedChannels);
     process_.setStandardOutputFile(QProcess::nullDevice());
     connect(&process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {

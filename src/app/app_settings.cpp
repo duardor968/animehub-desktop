@@ -105,8 +105,7 @@ void AppSettings::setNotifications(bool enabled) {
 }
 
 QString AppSettings::startCommand() const {
-    auto command = QLatin1Char('"') +
-                   QDir::toNativeSeparators(QCoreApplication::applicationFilePath()) +
+    auto command = QLatin1Char('"') + QDir::toNativeSeparators(platform::launcherPath()) +
                    QStringLiteral("\" --tray");
     const QDir data = QFileInfo(settings_.fileName()).absoluteDir();
     if (data != QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))) {

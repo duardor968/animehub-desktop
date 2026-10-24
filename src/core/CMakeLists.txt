@@ -49,8 +49,19 @@ if(WIN32)
     platform/aes_win.cpp platform/autostart_win.cpp platform/credentials_win.cpp
     platform/process_job_win.cpp platform/trash_win.cpp)
   target_link_libraries(animehub-core PRIVATE bcrypt advapi32)
+elseif(LINUX)
+  # AES from OpenSSL's libcrypto and secrets in the desktop's keyring (Secret Service).
+  find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(LIBSECRET REQUIRED IMPORTED_TARGET libsecret-1)
+  target_sources(animehub-core PRIVATE
+    platform/aes_linux.cpp platform/autostart_linux.cpp platform/credentials_linux.cpp
+    platform/process_job_linux.cpp platform/trash_linux.cpp)
+  target_link_libraries(animehub-core PRIVATE OpenSSL::Crypto PkgConfig::LIBSECRET)
+  # The desktop entry, icon and autostart entry share this name.
+  target_compile_definitions(animehub-core PUBLIC ANIMEHUB_APP_ID="io.github.duardor968.AnimeHub")
 else()
-  message(FATAL_ERROR "AnimeHub Desktop needs a platform AES backend for this OS.")
+  message(FATAL_ERROR "AnimeHub Desktop has no platform backend for ${CMAKE_SYSTEM_NAME}.")
 endif()
 
 target_include_directories(animehub-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

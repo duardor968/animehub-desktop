@@ -26,8 +26,9 @@ private:
     std::unique_ptr<State> state_;
 };
 
-// Starts console helpers without flashing a console window.
-void hideConsoleWindow(QProcess& process);
+// Called before a helper starts. On Windows it opens no console window; on Linux, which has no
+// job objects, it is what ties the helper to AnimeHub.
+void prepareHelperProcess(QProcess& process);
 
 } // namespace animehub::platform
 
