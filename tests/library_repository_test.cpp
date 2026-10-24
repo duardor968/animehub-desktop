@@ -3,6 +3,7 @@
 #include "library/library_repository.h"
 #include "library/library_service.h"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QNetworkAccessManager>
@@ -399,9 +400,11 @@ private slots:
     void tracksDownloadedFiles() {
         const auto slug = QStringLiteral("sousou-no-frieren");
         QVERIFY(repository_->setInLibrary(slug, true));
-        QVERIFY(repository_->setEpisodeFile(slug, 2, QStringLiteral("D:/Anime/Frieren - 02.mp4"),
+        // Absolute on every system; the files need not exist.
+        const auto folder = QDir::rootPath() + QStringLiteral("Anime/");
+        QVERIFY(repository_->setEpisodeFile(slug, 2, folder + QStringLiteral("Frieren - 02.mp4"),
                                             1234));
-        QVERIFY(repository_->setEpisodeFile(slug, 3, QStringLiteral("D:/Anime/Frieren - 03.mp4"),
+        QVERIFY(repository_->setEpisodeFile(slug, 3, folder + QStringLiteral("Frieren - 03.mp4"),
                                             1000));
         QCOMPARE((*repository_->entry(slug))->downloadedEpisodes, 2);
         QCOMPARE((*repository_->entry(slug))->downloadedBytes, 2234);
