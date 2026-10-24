@@ -249,7 +249,8 @@ private slots:
         const auto copy = QStringLiteral("%1.schema-%2.bak").arg(path).arg(version);
         QVERIFY(QFileInfo::exists(copy));
         {
-            auto saved = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("copy"));
+            auto saved =
+                QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("copy"));
             saved.setDatabaseName(copy);
             QVERIFY(saved.open());
             QSqlQuery query(saved);

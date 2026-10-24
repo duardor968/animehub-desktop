@@ -60,6 +60,18 @@ Item {
 
     function focusSearch() { list.focusSearch() }
 
+    // Where it is, for the window's back and forward: an anime, a franchise, the grid or home.
+    function location() {
+        return { slug: selected, group: selectedGroup, grid: showGrid }
+    }
+    function restore(place) {
+        if (place.group)
+            openFranchise(place.group)
+        else
+            select(place.slug)
+        showGrid = place.grid
+    }
+
     SplitView {
         id: split
         anchors.fill: parent

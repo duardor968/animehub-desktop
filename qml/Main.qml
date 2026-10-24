@@ -13,6 +13,46 @@ ApplicationWindow {
         tabs.currentIndex = index
     }
 
+    // Where the user has been, for ← and → as in Steam: the tab and what it showed. A new place
+    // drops the places ahead of the current one, as a browser does.
+    property var history: []
+    property int historyIndex: -1
+    property bool travelling: false
+    function here() {
+        return { page: tabs.currentIndex, library: libraryPage.location(),
+                 catalog: catalogPage.depth > 1 ? app.catalogAnime.slug : "" }
+    }
+    function remember() {
+        if (travelling)
+            return
+        const now = here()
+        if (historyIndex >= 0 && JSON.stringify(history[historyIndex]) === JSON.stringify(now))
+            return
+        history = history.slice(0, historyIndex + 1).concat([now])
+        historyIndex = history.length - 1
+    }
+    function travel(step) {
+        const index = historyIndex + step
+        if (index < 0 || index >= history.length)
+            return
+        travelling = true
+        const place = history[index]
+        tabs.currentIndex = place.page
+        libraryPage.restore(place.library)
+        if (place.catalog)
+            catalogPage.openAnime(place.catalog)
+        else
+            catalogPage.home()
+        historyIndex = index
+        travelling = false
+    }
+    // Places change after the click that changes them: one record per move, not per property.
+    Timer {
+        id: rememberLater
+        interval: 0
+        onTriggered: window.remember()
+    }
+
     // An anime's page: in the library if it is there, otherwise in the catalog.
     function openAnime(slug) {
         if (app.library.contains(slug)) {
@@ -78,6 +118,7 @@ ApplicationWindow {
         // It opens on the page it was left on.
         const page = Number(app.settings.value("window/page", 0))
         tabs.currentIndex = page >= 0 && page <= 2 ? page : 0
+        rememberLater.restart()
         tintTitleBar()
         // Started in the tray, it stays hidden until asked for.
         if (visible)
@@ -122,11 +163,34 @@ ApplicationWindow {
             anchors.rightMargin: 8
             spacing: 8
 
+            ToolButton {
+                text: "Atrás"
+                display: AbstractButton.IconOnly
+                icon.source: Theme.source(Theme.icon.back)
+                enabled: window.historyIndex > 0
+                onClicked: window.travel(-1)
+                ToolTip.visible: hovered
+                ToolTip.text: "Atrás (Alt+←)"
+            }
+
+            ToolButton {
+                text: "Adelante"
+                display: AbstractButton.IconOnly
+                icon.source: Theme.source("e72a")
+                enabled: window.historyIndex < window.history.length - 1
+                onClicked: window.travel(1)
+                ToolTip.visible: hovered
+                ToolTip.text: "Adelante (Alt+→)"
+            }
+
             TabBar {
                 id: tabs
                 Layout.alignment: Qt.AlignBottom
                 background: null
-                onCurrentIndexChanged: window.app.settings.setValue("window/page", currentIndex)
+                onCurrentIndexChanged: {
+                    window.app.settings.setValue("window/page", currentIndex)
+                    rememberLater.restart()
+                }
                 // The tab of the page on view takes that page back to its start, as in Steam.
                 PageTab {
                     text: "Biblioteca"
@@ -171,12 +235,16 @@ ApplicationWindow {
             onActionFailed: text => toast.show(text, true)
             onBrowseCatalog: window.showPage(1)
             onSearchCatalog: text => window.searchCatalog(text)
+            onSelectedChanged: rememberLater.restart()
+            onSelectedGroupChanged: rememberLater.restart()
+            onShowGridChanged: rememberLater.restart()
         }
 
         CatalogPage {
             id: catalogPage
             app: window.app
             active: StackLayout.isCurrentItem
+            onDepthChanged: rememberLater.restart()
         }
 
         DownloadsPage {
@@ -184,6 +252,14 @@ ApplicationWindow {
             onBrowseCatalog: window.showPage(1)
             onOpenAnime: slug => window.openAnime(slug)
         }
+    }
+
+    // The mouse's side buttons go back and forward, as in Explorer; other buttons pass through.
+    MouseArea {
+        anchors.fill: parent
+        z: 100
+        acceptedButtons: Qt.BackButton | Qt.ForwardButton
+        onClicked: mouse => window.travel(mouse.button === Qt.BackButton ? -1 : 1)
     }
 
     footer: DownloadBar {
@@ -211,6 +287,7 @@ ApplicationWindow {
     Connections {
         target: window.app.catalogAnime
         function onMessage(text, problem) { toast.show(text, problem) }
+        function onSlugChanged() { rememberLater.restart() }
     }
     Connections {
         target: window.app.libraryAnime
@@ -235,6 +312,8 @@ ApplicationWindow {
         app: window.app
     }
 
+    Shortcut { sequence: "Alt+Left"; onActivated: window.travel(-1) }
+    Shortcut { sequence: "Alt+Right"; onActivated: window.travel(1) }
     Shortcut { sequence: "Ctrl+1"; onActivated: window.showPage(0) }
     Shortcut { sequence: "Ctrl+2"; onActivated: window.showPage(1) }
     Shortcut { sequence: "Ctrl+3"; onActivated: window.showPage(2) }

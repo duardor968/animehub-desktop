@@ -295,8 +295,8 @@ int main(int argc, char* argv[]) {
         QMetaObject::invokeMethod(
             window, "showPage",
             Q_ARG(QVariant, parser.value(smoke_page) == u"downloads" ? QVariant(2)
-                            : parser.value(smoke_page) == u"catalog"   ? QVariant(1)
-                                                                       : QVariant(0)));
+                            : parser.value(smoke_page) == u"catalog" ? QVariant(1)
+                                                                     : QVariant(0)));
         if (parser.value(smoke_page).startsWith(u"library")) {
             if (parser.isSet(smoke_view))
                 controller.library()->setGrouped(parser.value(smoke_view) == u"grouped");

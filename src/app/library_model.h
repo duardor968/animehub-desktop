@@ -38,9 +38,8 @@ class LibraryModel final : public QAbstractListModel {
     Q_PROPERTY(QVariantMap franchise READ franchise NOTIFY franchiseChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
     Q_PROPERTY(QVariantList overview READ overview NOTIFY countChanged)
-    // The anime watched last, shown in large on the home: slug, title, backdropUrl, posterUrl,
-    // detail, progress (< 0 hides the bar), action (FeaturedAction) and actionText. Empty when
-    // nothing that passes the filter is being watched.
+    // The first of "Para ver", two posters wide at its head: slug, title, backdropUrl, posterUrl,
+    // detail, progress (< 0 hides the bar) and actionText. Empty when nothing is ready to watch.
     Q_PROPERTY(QVariantMap featured READ featured NOTIFY featuredChanged)
     // What is followed, split by what it waits for: its next episode is on disk, or episodes
     // still have to be downloaded.
@@ -60,9 +59,6 @@ public:
     // Where the user is with an anime, or whether it airs; one at a time.
     enum class Filter { All, Watching, Airing, NotStarted, Watched, Favorites };
     Q_ENUM(Filter)
-    // What the featured anime's button does with the episode it resumes.
-    enum class FeaturedAction { Play, Download, Downloading };
-    Q_ENUM(FeaturedAction)
 
     enum Role {
         SlugRole = Qt::UserRole + 1,
@@ -236,7 +232,6 @@ private:
     bool grouped_ = true;
     QString search_;
     QString featured_slug_;
-    bool featured_on_disk_ = false;
     QVariantMap featured_;
     CardModel ready_shelf_;
     CardModel download_shelf_;

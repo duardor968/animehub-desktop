@@ -27,18 +27,6 @@ LibraryModel::LibraryModel(library::LibraryService& library, downloads::Download
     // A new episode moves its slot in the schedule.
     connect(&library_, &library::LibraryService::newEpisodes, this, &LibraryModel::fetchSchedule);
 
-    // The featured episode's button follows its download.
-    const auto on_task = [this](qint64 id) {
-        const auto task = downloads_.task(id);
-        if (task && task->slug == featured_slug_) {
-            updateFeatured();
-        }
-    };
-    connect(&downloads_, &downloads::DownloadManager::taskAdded, this, on_task);
-    connect(&downloads_, &downloads::DownloadManager::taskChanged, this, on_task);
-    connect(&downloads_, &downloads::DownloadManager::taskRemoved, this,
-            &LibraryModel::updateFeatured);
-    connect(&downloads_, &downloads::DownloadManager::loaded, this, &LibraryModel::updateFeatured);
     // A queued episode is no longer missing; a removed one is again.
     rebuild_timer_.setSingleShot(true);
     rebuild_timer_.setInterval(40);
@@ -46,8 +34,8 @@ LibraryModel::LibraryModel(library::LibraryService& library, downloads::Download
         rebuildRows();
         rebuildShelves();
     });
-    for (const auto signal : {&downloads::DownloadManager::taskAdded,
-                              &downloads::DownloadManager::taskRemoved}) {
+    for (const auto signal :
+         {&downloads::DownloadManager::taskAdded, &downloads::DownloadManager::taskRemoved}) {
         connect(&downloads_, signal, &rebuild_timer_, qOverload<>(&QTimer::start));
     }
     connect(&downloads_, &downloads::DownloadManager::loaded, &rebuild_timer_,
@@ -111,7 +99,6 @@ QList<double> LibraryModel::pendingOf(const LibraryEntry& entry) const {
     }
     return pending;
 }
-
 
 // Where the user is with the anime; whether it airs is the page's business, not the list's.
 QString LibraryModel::captionOf(const LibraryEntry& entry) {
@@ -247,8 +234,7 @@ QList<int> LibraryModel::filterCounts() const {
 // A franchise shows its anime when the user unfolded it, or when a search or a filter narrows
 // the list: then only the ones that pass are under it.
 bool LibraryModel::unfolded(qint64 id) const {
-    return expanded_.contains(id) || !search_.isEmpty() || filter_ != Filter::All ||
-           on_disk_only_;
+    return expanded_.contains(id) || !search_.isEmpty() || filter_ != Filter::All || on_disk_only_;
 }
 
 // Under its franchise, a work says what sets it apart: "Part 2" under "Chitose-kun wa Ramune
@@ -352,13 +338,7 @@ void LibraryModel::rebuildShelves() {
     download_count_ = static_cast<int>(missing.size());
 
     // The first one to watch is featured; the shelf goes on with the rest.
-    if (const auto* featured = watchable.value(0)) {
-        featured_slug_ = featured->slug;
-        featured_on_disk_ = featured->resumeOnDisk;
-    } else {
-        featured_slug_.clear();
-        featured_on_disk_ = false;
-    }
+    featured_slug_ = watchable.isEmpty() ? QString() : watchable.first()->slug;
     updateFeatured();
 
     QList<Card> ready_cards;
@@ -516,24 +496,15 @@ void LibraryModel::updateFeatured() {
             detail += QStringLiteral(" · %1 de %2 vistos").arg(entry->watchedEpisodes).arg(total);
             progress = progressOf(*entry);
         }
-        auto action = FeaturedAction::Download;
-        QString action_text = QStringLiteral("Descargar");
-        if (featured_on_disk_) {
-            action = FeaturedAction::Play;
-            action_text = started(*entry) ? QStringLiteral("Continuar") : QStringLiteral("Empezar");
-        } else if (const auto task = downloads_.activeTaskFor(entry->slug, number);
-                   task && task->state != downloads::TaskState::Paused) {
-            action = FeaturedAction::Downloading;
-            action_text = QStringLiteral("Descargando");
-        }
+        // It is on disk: the button plays it.
         featured = {{QStringLiteral("slug"), entry->slug},
                     {QStringLiteral("title"), entry->title},
                     {QStringLiteral("backdropUrl"), entry->backdropUrl},
                     {QStringLiteral("posterUrl"), entry->posterUrl},
                     {QStringLiteral("detail"), detail},
                     {QStringLiteral("progress"), progress},
-                    {QStringLiteral("action"), static_cast<int>(action)},
-                    {QStringLiteral("actionText"), action_text}};
+                    {QStringLiteral("actionText"),
+                     started(*entry) ? QStringLiteral("Continuar") : QStringLiteral("Empezar")}};
     }
     if (featured != featured_) {
         featured_ = std::move(featured);
@@ -928,10 +899,18 @@ bool LibraryModel::createFranchise(const QString& title, const QString& slug) {
 }
 
 QHash<int, QByteArray> LibraryModel::roleNames() const {
-    return {{SlugRole, "slug"},         {TitleRole, "title"},       {PosterRole, "posterUrl"},
-            {CaptionRole, "caption"},   {ProgressRole, "progress"}, {FreshRole, "fresh"},
-            {FavoriteRole, "favorite"}, {GroupIdRole, "groupId"},   {IsGroupRole, "isGroup"},
-            {DepthRole, "depth"},       {ExpandedRole, "expanded"}, {ReadyRole, "ready"},
+    return {{SlugRole, "slug"},
+            {TitleRole, "title"},
+            {PosterRole, "posterUrl"},
+            {CaptionRole, "caption"},
+            {ProgressRole, "progress"},
+            {FreshRole, "fresh"},
+            {FavoriteRole, "favorite"},
+            {GroupIdRole, "groupId"},
+            {IsGroupRole, "isGroup"},
+            {DepthRole, "depth"},
+            {ExpandedRole, "expanded"},
+            {ReadyRole, "ready"},
             {DownloadingRole, "downloading"}};
 }
 

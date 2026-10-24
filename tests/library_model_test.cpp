@@ -146,7 +146,8 @@ private slots:
         add(QStringLiteral("hole"), api::AnimeStatus::Finished, 3);
         add(QStringLiteral("done"), api::AnimeStatus::Finished, 2);
         QVERIFY(repo.setWatchState(QStringLiteral("ready"), 1, library::WatchState::Watched));
-        QVERIFY(repo.setEpisodeFile(QStringLiteral("ready"), 2, cache.filePath(QStringLiteral("r2.mkv")), 1));
+        QVERIFY(repo.setEpisodeFile(QStringLiteral("ready"), 2,
+                                    cache.filePath(QStringLiteral("r2.mkv")), 1));
         QVERIFY(repo.setWatchState(QStringLiteral("hole"), 1, library::WatchState::Watched));
         QVERIFY(repo.setWatchState(QStringLiteral("hole"), 3, library::WatchState::Watched));
         QVERIFY(repo.setWatchedThrough(QStringLiteral("done"), 2));
@@ -157,7 +158,8 @@ private slots:
 
         LibraryModel model(service, downloads, api);
         QCOMPARE(model.readyCount(), 1);
-        QCOMPARE(model.featured().value(QStringLiteral("slug")).toString(), QStringLiteral("ready"));
+        QCOMPARE(model.featured().value(QStringLiteral("slug")).toString(),
+                 QStringLiteral("ready"));
         QCOMPARE(model.downloadCount(), 2);
         QCOMPARE(model.pendingCount(), 2); // ready's 3 and hole's 2
 

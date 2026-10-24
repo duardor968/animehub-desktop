@@ -71,8 +71,7 @@ AbstractButton {
                 anchors.margins: 12
                 highlighted: true
                 text: root.featured.actionText ?? ""
-                icon.source: Theme.source(root.featured.action === LibraryModel.Play ? Theme.icon.play
-                                                                                      : Theme.icon.download)
+                icon.source: Theme.source(Theme.icon.play)
                 focusPolicy: Qt.NoFocus
                 onClicked: root.act(root.featured.slug)
                 Accessible.name: text + ", " + root.text

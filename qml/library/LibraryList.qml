@@ -276,9 +276,10 @@ Rectangle {
                 contentItem: RowLayout {
                     spacing: 8
 
-                    // Unfolds the franchise in place; the row itself opens its page. Every row
-                    // keeps the column, so the posters line up.
+                    // Unfolds the franchise in place; the row itself opens its page. While the list
+                    // groups, every row keeps the column, so the posters line up.
                     Glyph {
+                        visible: root.model.grouped
                         Layout.preferredWidth: 12
                         opacity: row.isGroup ? 1 : 0
                         glyph: row.expanded ? "e70d" : "e76c"
@@ -300,7 +301,9 @@ Rectangle {
                     Label {
                         Layout.fillWidth: true
                         text: row.title
-                        elide: Text.ElideRight
+                        // Ungrouped, the seasons of a franchise sit one above the other and
+                        // differ at their end ("…Part 2"): that end stays.
+                        elide: root.model.grouped ? Text.ElideRight : Text.ElideMiddle
                         font.pixelSize: Theme.body
                         color: row.downloading ? Theme.accent : row.ready ? Theme.ink : Theme.muted
                     }
