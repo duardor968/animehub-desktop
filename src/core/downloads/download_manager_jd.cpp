@@ -1,12 +1,50 @@
 #include "download_manager.h"
 #include "util/file_names.h"
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QUuid>
 
+#include <algorithm>
+
 namespace animehub::downloads {
 using namespace Qt::StringLiterals;
+
+namespace {
+
+// The folder JDownloader downloaded into goes once its videos have left it, but only if nothing
+// else is in it: whatever stays (an archive, a file AnimeHub does not know) keeps it, untouched.
+void removeStaging(const QString& path) {
+    QStringList folders;
+    QStringList left;
+    QDirIterator it(path, QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const auto entry = it.nextFileInfo();
+        if (entry.isDir() && !entry.isSymLink() && !entry.isJunction()) {
+            folders.append(entry.absoluteFilePath());
+        } else {
+            left.append(entry.absoluteFilePath());
+        }
+    }
+    if (!left.isEmpty()) {
+        qWarning("download queue: kept %s, it still holds %s", qPrintable(path),
+                 qPrintable(left.join(u", ")));
+        return;
+    }
+    // Inner folders first: a folder's path is longer than its parent's.
+    std::ranges::sort(folders, std::ranges::greater{}, &QString::size);
+    folders.append(path);
+    for (const auto& folder : folders) {
+        if (!QDir().rmdir(folder)) {
+            qWarning("download queue: could not remove the empty folder %s", qPrintable(folder));
+            return;
+        }
+    }
+}
+
+} // namespace
 
 void DownloadManager::jdRequest(qint64 id, const QString& path, const QJsonArray& params,
                                 myjd::Client::Callback<QJsonValue> done) {
@@ -234,9 +272,21 @@ void DownloadManager::collectJd(qint64 id) {
                                 }
                                 if (ids.isEmpty()) {
                                     // Missing IDs are not completion, even if JD purged its
-                                    // history.
-                                    tasks_[id].enginePhase = u"waiting"_s;
-                                    store(tasks_[id]);
+                                    // history. Nor is there anything left in JDownloader to
+                                    // wait for: the task lets the job go, so a retry hands the
+                                    // episode over again.
+                                    auto& task = tasks_[id];
+                                    const auto detail =
+                                        task.engineLinkIds.isEmpty()
+                                            ? u"JDownloader no encontró ningún archivo en el "
+                                              u"enlace."_s
+                                            : u"JDownloader ya no tiene los archivos de este "
+                                              u"episodio."_s;
+                                    task.engineSubmission.clear();
+                                    task.engineJobId = 0;
+                                    task.engineLinkIds.clear();
+                                    task.enginePhase.clear();
+                                    fail(id, TaskIssue::SourceRemoved, detail);
                                     return;
                                 }
                                 auto& task = tasks_[id];
@@ -310,9 +360,7 @@ void DownloadManager::observeJd(qint64 id, const QJsonArray& links) {
         return;
     const auto files = jd::verifiedMedia(task.engineDestination);
     if (files.isEmpty()) {
-        fail(
-            id, TaskIssue::Storage,
-            u"JDownloader terminó, pero no hay vídeo local verificable en el destino del trabajo."_s);
+        fail(id, TaskIssue::Storage, u"JDownloader terminó, pero no dejó ningún vídeo."_s);
         return;
     }
     // Move only verified media after JD has closed the transfer and extractor. The
@@ -320,7 +368,8 @@ void DownloadManager::observeJd(qint64 id, const QJsonArray& links) {
     const QFileInfo staging(task.engineDestination);
     if (QDir::cleanPath(staging.absoluteFilePath())
             .compare(staging.canonicalFilePath(), Qt::CaseInsensitive) != 0) {
-        fail(id, TaskIssue::Storage, u"El destino de JDownloader redirige fuera del trabajo."_s);
+        fail(id, TaskIssue::Storage,
+             u"La carpeta de JDownloader lleva fuera de la carpeta de descargas."_s);
         return;
     }
     QString firstDestination;
@@ -329,22 +378,22 @@ void DownloadManager::observeJd(qint64 id, const QJsonArray& links) {
             util::uniquePath(task.targetPath + u'.' + QFileInfo(path).suffix());
         if (!QDir().mkpath(QFileInfo(destination).absolutePath()) ||
             !QFile::rename(path, destination)) {
-            fail(
-                id, TaskIssue::Storage,
-                u"No se pudo organizar el vídeo terminado. Se conserva el trabajo de JDownloader."_s);
+            fail(id, TaskIssue::Storage, u"No se pudo mover el vídeo terminado a su carpeta."_s);
             return;
         }
         if (!services_.library.setEpisodeFile(task.slug, task.number, destination,
                                               QFileInfo(destination).size())) {
             const bool restored = QFile::rename(destination, path);
             fail(id, TaskIssue::Storage,
-                 restored ? u"No se pudo registrar el vídeo terminado."_s
-                          : u"No se pudo registrar el vídeo; se conserva en: "_s + destination);
+                 restored ? u"No se pudo guardar el vídeo en la biblioteca."_s
+                          : u"No se pudo guardar el vídeo en la biblioteca; está en "_s +
+                                QDir::toNativeSeparators(destination));
             return;
         }
         if (firstDestination.isEmpty())
             firstDestination = destination;
     }
+    removeStaging(task.engineDestination);
     task.enginePhase = u"completed"_s;
     complete(id, firstDestination);
 }

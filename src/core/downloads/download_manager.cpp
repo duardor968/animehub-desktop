@@ -24,6 +24,9 @@ constexpr int kMaxSourceAttempts = 3;
 constexpr qint64 kSpaceMargin = 256LL * 1024 * 1024;
 constexpr auto kQuotaWait = 30min;
 constexpr auto kProgressSaveInterval = 5s;
+// Each look at JDownloader is a request to it, through MyJDownloader's servers when it is not
+// local; its transfers last minutes, so a look every few seconds is enough.
+constexpr auto kJdPollInterval = 5s;
 
 // aria2 exit statuses (https://aria2.github.io/manual/en/html/aria2c.html#exit-status).
 enum Aria2Code {
@@ -64,6 +67,8 @@ DownloadManager::DownloadManager(Services services, std::function<DownloadSettin
     jd_network_.setProxy(QNetworkProxy::NoProxy);
     poll_timer_.setInterval(700);
     connect(&poll_timer_, &QTimer::timeout, this, &DownloadManager::poll);
+    jd_poll_timer_.setInterval(kJdPollInterval);
+    connect(&jd_poll_timer_, &QTimer::timeout, this, &DownloadManager::pollJdTasks);
     wake_timer_.setSingleShot(true);
     connect(&wake_timer_, &QTimer::timeout, this, &DownloadManager::pump);
     connect(&services_.aria2, &Aria2::ready, this, &DownloadManager::pump);
@@ -133,6 +138,7 @@ void DownloadManager::shutdown(std::function<void()> done) {
     }
     stopping_ = true;
     poll_timer_.stop();
+    jd_poll_timer_.stop();
     wake_timer_.stop();
     for (auto it = tasks_.begin(); it != tasks_.end(); ++it) {
         if (auto live = live_.find(it.key()); live != live_.end() && live->cancel) {
@@ -349,10 +355,15 @@ DownloadManager::enqueueMany(const QString& slug, const QList<double>& numbers,
     return result;
 }
 
-int DownloadManager::running() const {
-    return static_cast<int>(std::ranges::count_if(tasks_, [](const Task& task) {
-        return task.state == TaskState::Resolving || task.state == TaskState::Downloading ||
-               task.state == TaskState::Verifying;
+int DownloadManager::running(bool native) const {
+    return static_cast<int>(std::ranges::count_if(tasks_, [native](const Task& task) {
+        if ((task.engine == DownloadEngine::Native) != native) {
+            return false;
+        }
+        return native
+                   ? task.state == TaskState::Resolving || task.state == TaskState::Downloading ||
+                         task.state == TaskState::Verifying
+                   : task.state == TaskState::Resolving;
     }));
 }
 
@@ -382,22 +393,30 @@ void DownloadManager::pump() {
         auto queued = tasks_.values();
         queued.removeIf([](const Task& task) { return task.state != TaskState::Queued; });
         sortByQueue(queued);
+        // Each kind fills its own slots in queue order: a full aria2 never holds back what goes
+        // to JDownloader, nor the other way round.
         for (const auto& task : queued) {
-            if (running() >= limit) {
-                break;
-            }
-            if (task.engine == DownloadEngine::Native && !services_.aria2.isReady())
+            const bool native = task.engine == DownloadEngine::Native;
+            if (running(native) >= limit || (native && !services_.aria2.isReady())) {
                 continue;
+            }
             resolve(task.id);
         }
     }
-    const bool transferring = std::ranges::any_of(
-        tasks_, [](const Task& task) { return task.state == TaskState::Downloading; });
-    if (transferring && !poll_timer_.isActive()) {
-        poll_timer_.start();
-    } else if (!transferring) {
-        poll_timer_.stop();
-    }
+    // aria2 and JDownloader are watched each at its own pace, only while they transfer.
+    const auto watch = [this](QTimer& timer, bool native) {
+        const bool transferring = std::ranges::any_of(tasks_, [native](const Task& task) {
+            return task.state == TaskState::Downloading &&
+                   (task.engine == DownloadEngine::Native) == native;
+        });
+        if (!transferring) {
+            timer.stop();
+        } else if (!timer.isActive()) {
+            timer.start();
+        }
+    };
+    watch(poll_timer_, true);
+    watch(jd_poll_timer_, false);
 }
 
 bool DownloadManager::isCurrent(qint64 id, quint64 generation, TaskState state) const {
@@ -416,7 +435,7 @@ void DownloadManager::resolve(qint64 id) {
     task.issueDetail.clear();
     store(task);
 
-    if (task.engine != DownloadEngine::Native && !task.engineSubmission.isEmpty()) {
+    if (task.handedOver()) {
         task.state = TaskState::Downloading;
         store(task);
         pollJd(id);
@@ -628,11 +647,15 @@ void DownloadManager::startTransfer(qint64 id, api::Provider provider, const QSt
                         });
 }
 
-void DownloadManager::poll() {
+void DownloadManager::pollJdTasks() {
     for (const auto& task : tasks_.values()) {
-        if (task.engine != DownloadEngine::Native && task.state == TaskState::Downloading)
+        if (task.engine != DownloadEngine::Native && task.state == TaskState::Downloading) {
             pollJd(task.id);
+        }
     }
+}
+
+void DownloadManager::poll() {
     QStringList gids;
     QHash<QString, qint64> owners;
     for (auto it = live_.begin(); it != live_.end(); ++it) {
@@ -956,8 +979,9 @@ bool DownloadManager::pauseTask(qint64 id, bool with_all) {
     if (it == tasks_.end()) {
         return false;
     }
-    if (it->engine != DownloadEngine::Native && !it->engineSubmission.isEmpty())
+    if (it->handedOver()) {
         return false;
+    }
     switch (it->state) {
     case TaskState::Downloading:
         services_.aria2.pause(live_[id].gid);
@@ -1015,7 +1039,7 @@ void DownloadManager::cancelTask(qint64 id) {
     if (!transfers_enabled_)
         return;
     auto& task = tasks_[id];
-    if (task.engine != DownloadEngine::Native && !task.engineSubmission.isEmpty()) {
+    if (task.handedOver()) {
         if (task.engineJobId <= 0 || live_[id].jdBusy) {
             task.enginePhase = QStringLiteral("cancel_requested");
             store(task);
@@ -1055,7 +1079,8 @@ bool DownloadManager::retryTask(qint64 id) {
     if (!transfers_enabled_)
         return false;
     const auto it = tasks_.find(id);
-    if (it == tasks_.end() || (it->state != TaskState::Failed && it->state != TaskState::Waiting)) {
+    if (it == tasks_.end() || (it->state != TaskState::Failed && it->state != TaskState::Waiting) ||
+        it->unconfirmed()) {
         return false;
     }
     it->attempts = 0;
@@ -1071,8 +1096,6 @@ bool DownloadManager::retryTask(qint64 id) {
 // transfer later continues where it stopped.
 void DownloadManager::requeue(qint64 id) {
     if (!transfers_enabled_)
-        return;
-    if (tasks_[id].engine != DownloadEngine::Native)
         return;
     dropTransfer(id);
     auto& task = tasks_[id];
@@ -1118,9 +1141,11 @@ void DownloadManager::pauseAll() {
 }
 
 void DownloadManager::resumeAll() {
-    // What pausing all stopped goes on; what was paused on its own waits, unless nothing was
-    // paused all together.
-    const bool together = std::ranges::any_of(tasks_, &Task::pausedWithAll);
+    // What pausing all stopped goes on; what was paused on its own waits, unless nothing still
+    // paused was paused all together (one cancelled since keeps its mark).
+    const bool together = std::ranges::any_of(tasks_, [](const Task& task) {
+        return task.state == TaskState::Paused && task.pausedWithAll;
+    });
     for (const auto id : tasks_.keys()) {
         if (!together || tasks_.value(id).pausedWithAll) {
             resumeTask(id);
@@ -1195,14 +1220,17 @@ void DownloadManager::prioritize(const QString& slug) {
     for (const auto id : idsOf(slug)) {
         resumeTask(id);
     }
-    // It takes the slots it can fill. A MEGA file being decrypted keeps its slot: that is local
-    // work about to end.
+    // It takes the native slots it can fill. A MEGA file being decrypted keeps its slot: that is
+    // local work about to end. JDownloader's tasks hold none and give none.
     const int limit = std::max(1, settings_().maxConcurrent);
     int own_running = 0;
     int own_queued = 0;
     int verifying = 0;
     QList<Task> others;
     for (const auto& task : tasks_) {
+        if (task.engine != DownloadEngine::Native) {
+            continue;
+        }
         const bool own = task.slug == slug;
         switch (task.state) {
         case TaskState::Queued:
@@ -1224,7 +1252,7 @@ void DownloadManager::prioritize(const QString& slug) {
         }
     }
     const int usable = std::min(own_queued, limit - own_running - verifying);
-    int to_free = usable - (limit - running());
+    int to_free = usable - (limit - running(true));
     sortByQueue(others);
     while (to_free-- > 0 && !others.isEmpty()) {
         requeue(others.takeLast().id); // the last in line gives way first

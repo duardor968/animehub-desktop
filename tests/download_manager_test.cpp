@@ -481,7 +481,9 @@ private slots:
         jd.extracting = true;
         QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->enginePhase, QStringLiteral("extracting"), kTimeout);
         QVERIFY(taskOf(id)->state != TaskState::Completed);
-        QFile media(QDir(destination).filePath(QStringLiteral("episode.mkv")));
+        // The video lands in a folder of its own, which empties with it.
+        QVERIFY(QDir(destination).mkpath(QStringLiteral("Extracted/Season 1")));
+        QFile media(QDir(destination).filePath(QStringLiteral("Extracted/episode.mkv")));
         QVERIFY(media.open(QIODevice::WriteOnly));
         QCOMPARE(media.write("12345678"), 8);
         media.close();
@@ -498,6 +500,7 @@ private slots:
                  QString::fromLatin1(
                      QCryptographicHash::hash("12345678", QCryptographicHash::Sha256).toHex()));
         QVERIFY(!QFileInfo::exists(media.fileName()));
+        QVERIFY(!QFileInfo::exists(destination)); // nothing else was in it
         for (const auto& r : server_->requests()) {
             QVERIFY(r.path != "/downloadcontroller/start" && r.path != "/downloadcontroller/stop" &&
                     r.path != "/downloadcontroller/pause");
@@ -520,19 +523,77 @@ private slots:
         QCOMPARE(existing.write("old-copy"), 8);
         existing.close();
         const auto oldHash = sha256File(existing.fileName());
-        QFile media(QDir(taskOf(id)->engineDestination).filePath(QStringLiteral("provider.mkv")));
+        const auto stage = taskOf(id)->engineDestination;
+        QFile media(QDir(stage).filePath(QStringLiteral("provider.mkv")));
         QVERIFY(media.open(QIODevice::WriteOnly));
         QCOMPARE(media.write("new-copy"), 8);
         media.close();
         const auto newHash = sha256File(media.fileName());
+        // What is not a video stays where JDownloader left it, and so does its folder.
+        QVERIFY(QDir(stage).mkpath(QStringLiteral("Sample")));
+        QFile notes(QDir(stage).filePath(QStringLiteral("provider.nfo")));
+        QVERIFY(notes.open(QIODevice::WriteOnly));
+        QCOMPARE(notes.write("notes"), 5);
+        notes.close();
         jd.finished = true;
         QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->state, TaskState::Completed, kTimeout);
         QCOMPARE(taskOf(id)->targetPath, base + QStringLiteral(" (2).mkv"));
         QCOMPARE(sha256File(taskOf(id)->targetPath), newHash);
         QCOMPARE(sha256File(existing.fileName()), oldHash);
         QVERIFY(!QFileInfo::exists(media.fileName()));
+        QVERIFY(QFileInfo::exists(notes.fileName()));
+        QVERIFY(QFileInfo(QDir(stage).filePath(QStringLiteral("Sample"))).isDir());
         QCOMPARE(jd.submissions, 1);
         QVERIFY(jd.scoped);
+    }
+
+    void jdTasksLeaveTheNativeSlotsFree() {
+        max_concurrent_ = 1;
+        engine_ = DownloadEngine::JDownloaderLocal;
+        FakeJd jd;
+        jd.install(*server_);
+        resolveTo(
+            resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
+        const auto handed = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(handed);
+        QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
+        engine_ = DownloadEngine::Native;
+        resolveTo(resolution({{"MEGA", megaUrl()}}), kBebop);
+        serveMega();
+        const auto native = manager_->enqueue(kBebop, 1, titleOf(kBebop), TaskOrigin::Manual);
+        QVERIFY(native);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*native)->state, TaskState::Completed, kTimeout);
+        QCOMPARE(taskOf(*handed)->state, TaskState::Downloading); // still JDownloader's
+        // JDownloader is asked every few seconds, not at aria2's pace.
+        const auto before = server_->count("/downloadsV2/queryLinks");
+        QTest::qWait(5500);
+        QVERIFY(server_->count("/downloadsV2/queryLinks") - before <= 2);
+    }
+
+    void jdJobWithoutFilesFailsAndARetryHandsItOverAgain() {
+        engine_ = DownloadEngine::JDownloaderLocal;
+        FakeJd jd;
+        jd.install(*server_);
+        // The link grabber ends without anything from the link.
+        server_->route("GET", "/linkgrabberv2/queryLinks", [](const auto&) {
+            return HttpTestServer::Response{.body = "{\"data\":[]}"};
+        });
+        resolveTo(
+            resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::SourceRemoved);
+        QCOMPARE(taskOf(*id)->issueDetail,
+                 QStringLiteral("JDownloader no encontró ningún archivo en el enlace."));
+        QVERIFY(!taskOf(*id)->handedOver());
+        QCOMPARE(jd.submissions, 1);
+
+        jd.install(*server_); // the link gives its file now
+        manager_->retry(*id);
+        QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
+        QCOMPARE(jd.submissions, 2);
+        QCOMPARE(taskOf(*id)->state, TaskState::Downloading);
     }
 
     void jdOrganizationFailurePreservesSourceAndRetriesSameJob() {

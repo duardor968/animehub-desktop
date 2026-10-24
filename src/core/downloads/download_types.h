@@ -75,6 +75,15 @@ struct Task {
         return state != TaskState::Completed && state != TaskState::Cancelled &&
                state != TaskState::Failed;
     }
+    // Handed over to JDownloader: from then on JDownloader moves the bytes and AnimeHub only
+    // watches, so it can neither pause nor resume it.
+    [[nodiscard]] bool handedOver() const {
+        return engine != DownloadEngine::Native && !engineSubmission.isEmpty();
+    }
+    // Handed over without JDownloader's answer: sending it again could add the episode twice.
+    [[nodiscard]] bool unconfirmed() const {
+        return handedOver() && engineJobId <= 0;
+    }
 };
 
 [[nodiscard]] QString stateKey(TaskState state);

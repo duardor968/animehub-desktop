@@ -129,6 +129,7 @@ private:
                        qint64 size, const QString& provider_name,
                        std::optional<mega::FileLink> mega_link);
     void poll();
+    void pollJdTasks();
     void submitJd(qint64 id, const api::ResolvedLink& link);
     void pollJd(qint64 id);
     void collectJd(qint64 id);
@@ -151,7 +152,10 @@ private:
     void deletePartials(const QString& final_path);
     void removeFiles(const QStringList& paths, int attempts_left);
     [[nodiscard]] bool isCurrent(qint64 id, quint64 generation, TaskState state) const;
-    [[nodiscard]] int running() const;
+    // Tasks holding one of the `maxConcurrent` slots of their kind: native ones looking for
+    // their file, transferring or being checked; for JDownloader, the ones being handed over.
+    // What JDownloader already has runs on its own and holds none.
+    [[nodiscard]] int running(bool native) const;
 
     // The single-task steps behind the public calls; the callers pump once at the end.
     bool pauseTask(qint64 id, bool with_all = false);
@@ -170,6 +174,7 @@ private:
     QHash<qint64, Task> tasks_;
     QHash<qint64, Live> live_;
     QTimer poll_timer_;
+    QTimer jd_poll_timer_;
     QTimer wake_timer_;
     QNetworkAccessManager jd_network_;
     bool started_ = false;
