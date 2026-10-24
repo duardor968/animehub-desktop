@@ -10,9 +10,8 @@ Item {
     id: page
 
     required property AnimeView view
-    // Unused: the window has its own back and forward.
-    property string backText
 
+    // Esc leaves the page; the window's ← and → go anywhere it has been.
     signal back()
 
     // "Elegir episodios": every row shows its check box until the selection is used or emptied.

@@ -90,7 +90,6 @@ StackView {
 
         AnimePage {
             view: stack.app.catalogAnime
-            backText: "Catálogo"
             onBack: stack.pop()
         }
     }

@@ -134,7 +134,6 @@ Item {
 
             AnimePage {
                 view: page.app.libraryAnime
-                backText: "Inicio"
                 onBack: page.select("")
             }
 

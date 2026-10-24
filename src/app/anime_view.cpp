@@ -598,8 +598,11 @@ QString AnimeView::downloadFolder() const {
     return QDir::toNativeSeparators(folderPath());
 }
 
+// Only while AnimeHub downloads: with JDownloader as the engine, "Descargar" already sends it
+// there, followed and into the library's folder.
 bool AnimeView::canSendToJDownloader() const {
-    return services_.settings.jdownloader() != AppSettings::JDownloader::Off;
+    return services_.settings.jdownloader() != AppSettings::JDownloader::Off &&
+           !services_.settings.preferredJDownloader();
 }
 
 double AnimeView::firstNumber() const {

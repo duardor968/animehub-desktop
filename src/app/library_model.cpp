@@ -33,6 +33,7 @@ LibraryModel::LibraryModel(library::LibraryService& library, downloads::Download
     connect(&rebuild_timer_, &QTimer::timeout, this, [this] {
         rebuildRows();
         rebuildShelves();
+        rebuildFranchise();
     });
     for (const auto signal :
          {&downloads::DownloadManager::taskAdded, &downloads::DownloadManager::taskRemoved}) {
@@ -240,13 +241,31 @@ bool LibraryModel::unfolded(qint64 id) const {
 // Under its franchise, a work says what sets it apart: "Part 2" under "Chitose-kun wa Ramune
 // Bin no Naka". One that only repeats the franchise, or does not start with it, stays whole.
 QString LibraryModel::distinctTitle(const QString& title, const QString& franchise) {
-    if (!title.startsWith(franchise, Qt::CaseInsensitive)) {
-        return title;
+    // Letter by letter, punctuation aside: "Re:Zero kara…" starts with "ReZero kara…".
+    qsizetype at = 0;
+    for (const auto c : franchise) {
+        if (!c.isLetterOrNumber()) {
+            continue;
+        }
+        while (at < title.size() && !title[at].isLetterOrNumber()) {
+            ++at;
+        }
+        if (at == title.size() || title[at].toCaseFolded() != c.toCaseFolded()) {
+            return title;
+        }
+        ++at;
     }
-    auto rest = title.sliced(franchise.size());
-    const auto first = std::ranges::find_if(rest, [](QChar c) { return c.isLetterOrNumber(); });
-    rest = first == rest.end() ? QString() : rest.sliced(first - rest.begin());
-    return rest.isEmpty() ? title : rest;
+    while (at < title.size() && !title[at].isLetterOrNumber()) {
+        ++at;
+    }
+    const auto rest = title.sliced(at);
+    // "…The Animation", "… TV" say nothing of their own: the first work keeps its name.
+    static const QStringList kGeneric{QStringLiteral("the"), QStringLiteral("animation"),
+                                      QStringLiteral("tv"), QStringLiteral("anime")};
+    const auto words = rest.toLower().split(u' ', Qt::SkipEmptyParts);
+    const bool generic =
+        std::ranges::all_of(words, [](const QString& word) { return kGeneric.contains(word); });
+    return rest.isEmpty() || generic ? title : rest;
 }
 
 // Titles sort by their first letter or digit: "[Oshi no Ko]" goes with the O.

@@ -237,10 +237,10 @@ void AppController::publishRemoteProfiles() {
                                  QCryptographicHash::Sha256)
             .toHex();
     const int revision = settings_->remoteProfileRevision(fingerprint);
-    remote_service_->setProfiles(
-        revision, {{QStringLiteral("default"), label,
-                    jd ? QStringLiteral("jdownloader") : QStringLiteral("direct"), config.directory,
-                    connection, device, true, audio}});
+    remote_service_->setProfiles(revision,
+                                 {{QStringLiteral("default"), label,
+                                   jd ? QStringLiteral("jdownloader") : QStringLiteral("direct"),
+                                   config.directory, connection, device, true, audio}});
 }
 
 bool AppController::handOffToRunningInstance(const QString& data_directory, bool show) {
