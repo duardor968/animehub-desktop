@@ -59,16 +59,19 @@ AbstractButton {
                 }
             }
 
-            // An opaque plate, so it reads over any picture; not the accent, which marks a choice.
+            // SelectionMark's plate, opaque and with its light edge, so it reads over dark
+            // pictures too; the check in green, not the accent, which marks a choice.
             Rectangle {
                 visible: root.owned
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.margins: 6
-                width: 20
-                height: 20
-                radius: 3
-                color: Theme.pane
+                width: 22
+                height: 22
+                radius: 5
+                color: Theme.canvas
+                border.width: 1.5
+                border.color: Qt.rgba(1, 1, 1, 0.75)
                 ToolTip.visible: ownedHover.hovered
                 ToolTip.text: "En la biblioteca"
 

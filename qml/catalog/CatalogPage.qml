@@ -195,7 +195,7 @@ StackView {
                 Shelf {
                     width: parent.width
                     visible: !stack.catalog.browsing && count > 0
-                    readonly property int count: model ? model.count : 0
+                    count: model ? model.count : 0
                     title: "Episodios recientes"
                     model: stack.catalog.recentEpisodes
                     onActivated: slug => stack.openAnime(slug)
@@ -214,12 +214,24 @@ StackView {
 
                     Waiting on opacity { running: shelfShape.visible }
 
-                    Label {
-                        text: "Episodios recientes"
-                        color: Theme.ink
-                        font.pixelSize: Theme.subtitle
-                        font.weight: Font.DemiBold
-                        Accessible.role: Accessible.Heading
+                    RowLayout {
+                        width: parent.width
+                        spacing: 0
+
+                        Label {
+                            text: "Episodios recientes"
+                            color: Theme.ink
+                            font.pixelSize: Theme.subtitle
+                            font.weight: Font.DemiBold
+                            Accessible.role: Accessible.Heading
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 12
+                            implicitHeight: 1
+                            color: Theme.stroke
+                        }
                     }
 
                     Row {
@@ -237,10 +249,12 @@ StackView {
                     width: parent.width
                     spacing: 12
 
-                    // The order is this section's own, so it sits on its line.
+                    // As the Downloads headings: the count 8 px after the name, the line 12 px
+                    // after the count. The order is this section's own, so it ends the line;
+                    // when nothing came, there is nothing to order.
                     RowLayout {
                         width: parent.width
-                        spacing: 12
+                        spacing: 0
 
                         Label {
                             text: stack.catalog.browsing ? "Resultados" : "Todo el catálogo"
@@ -251,6 +265,7 @@ StackView {
                         }
 
                         Label {
+                            Layout.leftMargin: 8
                             visible: text !== ""
                             text: stack.catalog.loading && stack.catalog.refreshing
                                   ? (stack.catalog.browsing ? "Buscando…" : "")
@@ -261,11 +276,18 @@ StackView {
                             font.pixelSize: Theme.subtitle
                         }
 
-                        Item { Layout.fillWidth: true }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 12
+                            implicitHeight: 1
+                            color: Theme.stroke
+                        }
 
                         ComboBox {
+                            Layout.leftMargin: 12
                             Layout.preferredWidth: 180
                             Layout.minimumWidth: 130
+                            visible: !(grid.failed && grid.count === 0)
                             textRole: "text"
                             valueRole: "value"
                             model: [
