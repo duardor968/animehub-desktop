@@ -2,6 +2,8 @@
 
 #include "display.h"
 
+#include <QLocale>
+
 #include <algorithm>
 
 namespace animehub::app {
@@ -15,7 +17,33 @@ bool sameNumbers(const QList<library::EpisodeRecord>& a, const QList<library::Ep
                               &library::EpisodeRecord::number);
 }
 
+// When an episode came out: "12 oct" this year, "12 oct 2012" before.
+QString published(const QDateTime& at) {
+    if (!at.isValid()) {
+        return {};
+    }
+    static const QLocale kSpanish(QLocale::Spanish, QLocale::Spain);
+    const auto date = at.toLocalTime().date();
+    auto month = kSpanish.monthName(date.month(), QLocale::ShortFormat);
+    if (month.endsWith(QLatin1Char('.'))) {
+        month.chop(1);
+    }
+    auto text = QString::number(date.day()) + QLatin1Char(' ') + month;
+    if (date.year() != QDate::currentDate().year()) {
+        text += QLatin1Char(' ') + QString::number(date.year());
+    }
+    return text;
+}
+
 } // namespace
+
+QString EpisodeModel::countText(const QList<double>& numbers) {
+    if (numbers.isEmpty()) {
+        return {};
+    }
+    return numbers.size() == 1 ? QStringLiteral("ep. ") + display::episodeNumber(numbers.first())
+                               : QStringLiteral("%1 episodios").arg(numbers.size());
+}
 
 int EpisodeModel::rowsOn(qsizetype size, int page) {
     return static_cast<int>(
@@ -191,6 +219,16 @@ int EpisodeModel::selectedMissing() const {
     }));
 }
 
+QString EpisodeModel::selectedMissingText() const {
+    QList<double> numbers;
+    for (const auto& episode : episodes_) {
+        if (selected_.contains(episode.number) && missing(episode)) {
+            numbers.append(episode.number);
+        }
+    }
+    return countText(numbers);
+}
+
 int EpisodeModel::pageSelection() const {
     int selected = 0;
     for (int row = 0; row < rowCount(); ++row) {
@@ -276,6 +314,8 @@ QVariant EpisodeModel::data(const QModelIndex& index, int role) const {
         return display::episode(episode.number);
     case TitleRole:
         return episode.title;
+    case DateRole:
+        return published(episode.publishedAt);
     case ImageRole:
         return episode.imageUrl;
     case WatchStateRole:
@@ -318,6 +358,7 @@ QHash<int, QByteArray> EpisodeModel::roleNames() const {
     return {{NumberRole, "number"},
             {LabelRole, "label"},
             {TitleRole, "title"},
+            {DateRole, "date"},
             {ImageRole, "imageUrl"},
             {WatchStateRole, "watchState"},
             {ProgressRole, "progress"},

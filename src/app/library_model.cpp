@@ -770,7 +770,44 @@ QVariantMap LibraryModel::workMap(const LibraryEntry& entry) const {
     const bool single =
         entry.episodeCount.value_or(0) == 1 || (!entry.episodeCount && entry.knownEpisodes == 1 &&
                                                 entry.status == api::AnimeStatus::Finished);
+    // "TV · 2012 · 26 ep.": what the work is, short enough for a card.
+    QStringList facts;
+    if (!entry.category.isEmpty()) {
+        facts.append(entry.category == QStringLiteral("TV Anime") ? QStringLiteral("TV")
+                                                                  : entry.category);
+    }
+    if (entry.startYear) {
+        facts.append(QString::number(*entry.startYear));
+    }
+    if (const int count = std::max(entry.episodeCount.value_or(0), entry.knownEpisodes);
+        count > 1) {
+        facts.append(QStringLiteral("%1 ep.").arg(count));
+    }
+    // Where the user is with it: "Siguiente: Ep. 6".
+    QString state = QStringLiteral("Sin empezar");
+    if (entry.resumeNumber && entry.resumePositionMs > 0) {
+        state = QStringLiteral("Continuar: ") + display::shortEpisode(*entry.resumeNumber);
+    } else if (entry.resumeNumber && entry.watchedEpisodes > 0) {
+        state = QStringLiteral("Siguiente: ") + display::shortEpisode(*entry.resumeNumber);
+    } else if (entry.finished()) {
+        state = QStringLiteral("Visto");
+    } else if (entry.watchedEpisodes > 0) {
+        state = QStringLiteral("Al día");
+    }
+    // The poster's own button, as on the home: play the episode it goes on with, or fetch it.
+    QString action;
+    if (entry.resumeNumber && !entry.finished()) {
+        if (entry.resumeOnDisk) {
+            action = QStringLiteral("play");
+        } else if (!downloads_.activeTaskFor(entry.slug, *entry.resumeNumber)) {
+            action = QStringLiteral("download");
+        }
+    }
     return {{QStringLiteral("slug"), entry.slug},
+            {QStringLiteral("facts"), facts.join(QStringLiteral(" · "))},
+            {QStringLiteral("state"), state},
+            {QStringLiteral("action"), action},
+            {QStringLiteral("fresh"), entry.newEpisodes > 0},
             {QStringLiteral("title"), entry.title},
             {QStringLiteral("posterUrl"), entry.posterUrl},
             {QStringLiteral("caption"), captionOf(entry)},
@@ -778,9 +815,6 @@ QVariantMap LibraryModel::workMap(const LibraryEntry& entry) const {
             {QStringLiteral("archived"), entry.archived},
             {QStringLiteral("bytesText"),
              entry.downloadedBytes > 0 ? display::bytes(entry.downloadedBytes) : QString()},
-            {QStringLiteral("metadata"),
-             entry.category +
-                 (entry.startYear ? QStringLiteral(" · %1").arg(*entry.startYear) : QString())},
             {QStringLiteral("diskText"),
              entry.downloadedEpisodes > 0
                  ? (single ? QStringLiteral("En disco")
@@ -801,7 +835,14 @@ void LibraryModel::rebuildFranchise() {
         QVariantList works;
         QStringList slugs;
         QUrl backdrop;
+        QUrl poster;
         int files = 0;
+        qint64 bytes = 0;
+        int started_works = 0;
+        int seen_works = 0;
+        std::optional<int> first_year;
+        std::optional<int> last_year;
+        const LibraryEntry* next = nullptr;
         QList<const LibraryEntry*> members;
         for (const auto& entry : entries_) {
             if (it->members.contains(entry.slug) && entry.archived == archived_only_)
@@ -814,20 +855,72 @@ void LibraryModel::rebuildFranchise() {
         });
         for (const auto* member : members) {
             const auto& entry = *member;
-            {
-                works.append(workMap(entry));
-                if (backdrop.isEmpty())
-                    backdrop = entry.backdropUrl;
-                files += entry.downloadedEpisodes;
-                slugs.append(entry.slug);
+            auto work = workMap(entry);
+            // Under its franchise, a work goes by what sets it apart.
+            work.insert(QStringLiteral("shortTitle"), distinctTitle(entry.title, it->title));
+            works.append(work);
+            if (backdrop.isEmpty())
+                backdrop = entry.backdropUrl;
+            if (poster.isEmpty())
+                poster = entry.posterUrl;
+            files += entry.downloadedEpisodes;
+            bytes += entry.downloadedBytes;
+            slugs.append(entry.slug);
+            started_works += started(entry) ? 1 : 0;
+            seen_works += entry.finished() ? 1 : 0;
+            if (entry.startYear) {
+                first_year = std::min(first_year.value_or(*entry.startYear), *entry.startYear);
+                last_year = std::max(last_year.value_or(*entry.startYear), *entry.startYear);
             }
+            // The main button goes on with the first work under way whose next episode is on disk.
+            if (!next && ready(entry))
+                next = &entry;
+        }
+        // "2012–2026 · 195 episodios en disco · 44,1 GB": how many works heads the grid.
+        QStringList facts;
+        if (first_year) {
+            facts.append(*first_year == *last_year
+                             ? QString::number(*first_year)
+                             : QStringLiteral("%1–%2").arg(*first_year).arg(*last_year));
+        }
+        if (files > 0) {
+            facts.append(files == 1 ? QStringLiteral("1 episodio en disco")
+                                    : QStringLiteral("%1 episodios en disco").arg(files));
+            facts.append(display::bytes(bytes));
+        }
+        // Beside the main button: which work it plays and how many are seen.
+        QVariantList figures;
+        QString next_text;
+        if (next) {
+            const auto title = distinctTitle(next->title, it->title);
+            figures.append(QVariantMap{{QStringLiteral("caption"), QStringLiteral("Entrega")},
+                                       {QStringLiteral("value"), title},
+                                       {QStringLiteral("progress"), -1.0},
+                                       {QStringLiteral("problem"), false}});
+            const auto number = display::episodeNumber(*next->resumeNumber);
+            next_text = next->resumePositionMs > 0 ? QStringLiteral("Continuar ep. ") + number
+                                                   : QStringLiteral("Ver ep. ") + number;
+        }
+        if (started_works > 0) {
+            figures.append(QVariantMap{
+                {QStringLiteral("caption"), QStringLiteral("Vistas")},
+                {QStringLiteral("value"),
+                 QStringLiteral("%1/%2").arg(seen_works).arg(members.size())},
+                {QStringLiteral("progress"),
+                 members.isEmpty() ? -1.0 : static_cast<double>(seen_works) / members.size()},
+                {QStringLiteral("problem"), false}});
         }
         value = {{QStringLiteral("id"), it->id},
                  {QStringLiteral("title"), it->title},
                  {QStringLiteral("works"), works},
                  {QStringLiteral("slugs"), slugs},
                  {QStringLiteral("backdropUrl"), backdrop},
-                 {QStringLiteral("files"), files}};
+                 {QStringLiteral("posterUrl"), poster},
+                 {QStringLiteral("files"), files},
+                 {QStringLiteral("facts"), facts.join(QStringLiteral(" · "))},
+                 {QStringLiteral("figures"), figures},
+                 {QStringLiteral("nextSlug"), next ? next->slug : QString()},
+                 {QStringLiteral("nextText"), next_text}};
     }
     if (value != franchise_) {
         franchise_ = std::move(value);

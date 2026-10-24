@@ -22,8 +22,9 @@ class EpisodeModel : public QAbstractListModel {
     Q_PROPERTY(int pageCount READ pageCount NOTIFY pageChanged)
     Q_PROPERTY(QStringList pageLabels READ pageLabels NOTIFY pageChanged)
     Q_PROPERTY(int selectedCount READ selectedCount NOTIFY selectionChanged)
-    // Of the selected episodes, those that can be downloaded.
+    // Of the selected episodes, those that can be downloaded; as text, "ep. 9" or "7 episodios".
     Q_PROPERTY(int selectedMissing READ selectedMissing NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedMissingText READ selectedMissingText NOTIFY selectionChanged)
     // Qt::CheckState of the page: none, some or all of its rows selected.
     Q_PROPERTY(int pageSelection READ pageSelection NOTIFY selectionChanged)
 
@@ -34,6 +35,7 @@ public:
         NumberRole = Qt::UserRole + 1,
         LabelRole,
         TitleRole,
+        DateRole,
         ImageRole,
         WatchStateRole,
         ProgressRole,
@@ -48,6 +50,9 @@ public:
     };
 
     using QAbstractListModel::QAbstractListModel;
+
+    // How many episodes an action takes, as its label names them: "ep. 9", "7 episodios".
+    [[nodiscard]] static QString countText(const QList<double>& numbers);
 
     // A new anime: its list, on the page that holds `shown`, with nothing selected.
     void load(QList<library::EpisodeRecord> episodes, std::optional<double> shown);
@@ -79,6 +84,7 @@ public:
         return static_cast<int>(selected_.size());
     }
     [[nodiscard]] int selectedMissing() const;
+    [[nodiscard]] QString selectedMissingText() const;
     [[nodiscard]] int pageSelection() const;
     // The selected episodes in list order.
     [[nodiscard]] QList<double> selection() const;

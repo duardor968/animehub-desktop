@@ -13,6 +13,7 @@
 #include <QObject>
 #include <QTimer>
 #include <QUrl>
+#include <QVariantList>
 #include <QtQmlIntegration>
 
 #include <functional>
@@ -28,8 +29,8 @@ struct Services {
     AppSettings& settings;
 };
 
-// One anime's page: its details, the user's flags, the main action, the user's progress, related
-// anime and the episode list. Works the same for library and catalog anime; watching or
+// One anime's page: its details, the user's flags, the main action and the figures beside it,
+// the episode list and related anime. Works the same for library and catalog anime; watching or
 // downloading something keeps the anime in the library.
 class AnimeView final : public QObject {
     Q_OBJECT
@@ -48,8 +49,6 @@ class AnimeView final : public QObject {
     // "TV Anime · 2023 · Finalizado · 28 episodios"
     Q_PROPERTY(QString facts READ facts NOTIFY changed)
     Q_PROPERTY(QString genres READ genres NOTIFY changed)
-    // When the next episode airs, in local time: "jueves 22:00"; empty if unknown.
-    Q_PROPERTY(QString nextAiring READ nextAiring NOTIFY changed)
     Q_PROPERTY(QUrl trailerUrl READ trailerUrl NOTIFY changed)
     // A film or any work of one episode: no episode list.
     Q_PROPERTY(bool single READ single NOTIFY changed)
@@ -60,39 +59,36 @@ class AnimeView final : public QObject {
     Q_PROPERTY(bool notify READ notify NOTIFY changed)
     Q_PROPERTY(bool autoDownload READ autoDownload NOTIFY changed)
 
+    // The main button follows the episode to watch next ("Ver ep. 9", "Descargando 45 %").
     Q_PROPERTY(PrimaryAction primaryAction READ primaryAction NOTIFY changed)
     Q_PROPERTY(QString primaryText READ primaryText NOTIFY changed)
-    // Share of the series' current downloads already on disk (Downloading, Paused).
+    // What pressing it does when its text only tells the state: "Pausar la descarga del
+    // episodio 9"; the failure's reason for Failed. Empty when the text says it all.
+    Q_PROPERTY(QString primaryHint READ primaryHint NOTIFY changed)
+    // Share of that episode's file already transferred (Downloading, Paused).
     Q_PROPERTY(double primaryProgress READ primaryProgress NOTIFY changed)
-    // Episodes neither on disk nor on their way; of those, the unwatched ones.
+    // Episodes neither on disk nor on their way; of those, the unwatched ones. As a label
+    // names them: "ep. 9", "7 episodios".
     Q_PROPERTY(int missingCount READ missingCount NOTIFY changed)
+    Q_PROPERTY(QString missingText READ missingText NOTIFY changed)
     Q_PROPERTY(int unwatchedMissingCount READ unwatchedMissingCount NOTIFY changed)
+    Q_PROPERTY(QString unwatchedMissingText READ unwatchedMissingText NOTIFY changed)
     Q_PROPERTY(double firstMissing READ firstMissing NOTIFY changed)
     Q_PROPERTY(double firstNumber READ firstNumber NOTIFY changed)
     Q_PROPERTY(double lastNumber READ lastNumber NOTIFY changed)
     Q_PROPERTY(bool hasDownloads READ hasDownloads NOTIFY changed) // unfinished ones
     Q_PROPERTY(bool watchedOnDisk READ watchedOnDisk NOTIFY changed)
-
-    // "Tu progreso"
-    Q_PROPERTY(bool showProgress READ showProgress NOTIFY changed)
-    Q_PROPERTY(QString watchedText READ watchedText NOTIFY changed) // "12 de 28"
+    Q_PROPERTY(int onDiskCount READ onDiskCount NOTIFY changed)
+    // Something is watched or under way.
+    Q_PROPERTY(bool started READ started NOTIFY changed)
     Q_PROPERTY(double watchedProgress READ watchedProgress NOTIFY changed)
-    Q_PROPERTY(QString diskText READ diskText NOTIFY changed) // "2 de 28 · 700 MB"
     // The series' downloads: some transferring or waiting their turn, or all of them paused.
     Q_PROPERTY(bool downloadRunning READ downloadRunning NOTIFY changed)
     Q_PROPERTY(bool downloadPaused READ downloadPaused NOTIFY changed)
-    Q_PROPERTY(bool downloadWaiting READ downloadWaiting NOTIFY changed)
-    Q_PROPERTY(QString downloadText READ downloadText NOTIFY changed) // "3 de 12"
     Q_PROPERTY(int failedCount READ failedCount NOTIFY changed)
-    // The episode to watch next: number (< 0 when everything is watched), title, image, state.
-    Q_PROPERTY(double nextNumber READ nextNumber NOTIFY changed)
-    Q_PROPERTY(QString nextTitle READ nextTitle NOTIFY changed)
-    Q_PROPERTY(QUrl nextImage READ nextImage NOTIFY changed)
-    Q_PROPERTY(double nextProgress READ nextProgress NOTIFY changed)
-    Q_PROPERTY(QString nextState READ nextState NOTIFY changed)
-    Q_PROPERTY(bool nextHasFile READ nextHasFile NOTIFY changed)
-    Q_PROPERTY(bool nextBusy READ nextBusy NOTIFY changed) // its download is under way
-    Q_PROPERTY(bool nextFailed READ nextFailed NOTIFY changed)
+    // The figures beside the main button, each only when it applies, in the order they give
+    // way to a narrow window: [{caption, value, progress (< 0: no bar), problem}].
+    Q_PROPERTY(QVariantList figures READ figures NOTIFY changed)
 
     Q_PROPERTY(bool refreshing READ refreshing NOTIFY changed)
     Q_PROPERTY(QString problem READ problem NOTIFY changed)
@@ -102,9 +98,20 @@ class AnimeView final : public QObject {
     Q_PROPERTY(CardModel* related READ related CONSTANT)
 
 public:
-    // What the main button does: watch the next episode, download what is missing, or follow
-    // the series' downloads in progress.
-    enum class PrimaryAction { None, Play, Download, Downloading, Paused };
+    // What the main button does with the episode to watch next: watch it, download it, or
+    // follow its download (queued or waiting to retry, transferring, paused, failed). With
+    // everything watched: wait for the next one of an airing series, or watch it again.
+    enum class PrimaryAction {
+        None,
+        Play,
+        Download,
+        Downloading,
+        Paused,
+        Queued,
+        Failed,
+        Upcoming,
+        Rewatch
+    };
     Q_ENUM(PrimaryAction)
 
     AnimeView(Services services, QObject* parent = nullptr);
@@ -126,7 +133,6 @@ public:
     [[nodiscard]] QString score() const;
     [[nodiscard]] QString facts() const;
     [[nodiscard]] QString genres() const;
-    [[nodiscard]] QString nextAiring() const;
     [[nodiscard]] QUrl trailerUrl() const;
     [[nodiscard]] bool single() const;
     [[nodiscard]] bool airing() const;
@@ -139,14 +145,19 @@ public:
         return summary_.primary;
     }
     [[nodiscard]] QString primaryText() const;
-    [[nodiscard]] double primaryProgress() const {
-        return summary_.batchProgress;
-    }
+    [[nodiscard]] QString primaryHint() const;
+    [[nodiscard]] double primaryProgress() const;
     [[nodiscard]] int missingCount() const {
         return static_cast<int>(summary_.missing.size());
     }
+    [[nodiscard]] QString missingText() const {
+        return EpisodeModel::countText(summary_.missing);
+    }
     [[nodiscard]] int unwatchedMissingCount() const {
         return static_cast<int>(summary_.unwatchedMissing.size());
+    }
+    [[nodiscard]] QString unwatchedMissingText() const {
+        return EpisodeModel::countText(summary_.unwatchedMissing);
     }
     [[nodiscard]] double firstMissing() const {
         return summary_.missing.isEmpty() ? firstNumber() : summary_.missing.first();
@@ -159,32 +170,23 @@ public:
     [[nodiscard]] bool watchedOnDisk() const {
         return summary_.watchedOnDisk;
     }
-
-    [[nodiscard]] bool showProgress() const;
-    [[nodiscard]] QString watchedText() const;
+    [[nodiscard]] int onDiskCount() const {
+        return summary_.onDisk;
+    }
+    [[nodiscard]] bool started() const {
+        return summary_.watched > 0 || summary_.watching;
+    }
     [[nodiscard]] double watchedProgress() const;
-    [[nodiscard]] QString diskText() const;
     [[nodiscard]] bool downloadRunning() const {
         return summary_.running;
     }
     [[nodiscard]] bool downloadPaused() const {
         return summary_.paused;
     }
-    [[nodiscard]] bool downloadWaiting() const {
-        return summary_.retryAt.isValid();
-    }
-    [[nodiscard]] QString downloadText() const;
     [[nodiscard]] int failedCount() const {
         return summary_.failed;
     }
-    [[nodiscard]] double nextNumber() const;
-    [[nodiscard]] QString nextTitle() const;
-    [[nodiscard]] QUrl nextImage() const;
-    [[nodiscard]] double nextProgress() const;
-    [[nodiscard]] QString nextState() const;
-    [[nodiscard]] bool nextHasFile() const;
-    [[nodiscard]] bool nextBusy() const;
-    [[nodiscard]] bool nextFailed() const;
+    [[nodiscard]] QVariantList figures() const;
 
     [[nodiscard]] bool refreshing() const;
     [[nodiscard]] QString problem() const {
@@ -200,7 +202,6 @@ public:
     }
 
     Q_INVOKABLE void primary();
-    Q_INVOKABLE void openNext();
     Q_INVOKABLE void play(double number);
     Q_INVOKABLE void download(double number);
     // Each asks first from 25 episodes on (downloadConfirmationNeeded).
@@ -262,7 +263,8 @@ signals:
 private:
     struct Summary {
         PrimaryAction primary = PrimaryAction::None;
-        std::optional<double> target; // the episode the main button acts on
+        std::optional<double> target;       // the episode the main button acts on
+        std::optional<downloads::Task> job; // its unfinished download
         QList<double> missing;
         QList<double> unwatchedMissing;
         int watched = 0;
@@ -298,6 +300,10 @@ private:
     [[nodiscard]] const library::AnimeRecord& source() const;
     [[nodiscard]] QString folderPath() const;
     [[nodiscard]] Summary summarize() const;
+    // Before the first episode, when it premieres.
+    [[nodiscard]] QDateTime premiere() const;
+    // The main button of a series watched up to date: when the next episode airs.
+    [[nodiscard]] QString upcomingText() const;
     void rememberRelated();
     [[nodiscard]] QList<SavedState>
     saveStates(const std::function<bool(const library::EpisodeRecord&)>& chosen) const;

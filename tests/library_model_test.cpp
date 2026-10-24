@@ -172,6 +172,84 @@ private slots:
         QCOMPARE(model.slugAt(0), QStringLiteral("ready"));
         QCOMPARE(model.filterCounts().at(static_cast<int>(LibraryModel::Filter::All)), 1);
     }
+
+    // A franchise's page: its works by what sets them apart, where the user is with each, and
+    // the main button going on with the one under way.
+    void franchiseGoesOnWithTheWorkUnderWay() {
+        auto opened = storage::Database::open(QStringLiteral(":memory:"));
+        QVERIFY(opened);
+        auto db = std::move(*opened);
+        library::LibraryRepository repo(*db);
+        downloads::DownloadRepository queue(*db);
+        QNetworkAccessManager network;
+        QTemporaryDir cache;
+        api::ApiClient api(network, {.baseUrl = QUrl(QStringLiteral("http://127.0.0.1:1/")),
+                                     .cacheDirectory = cache.path()});
+        library::LibraryService service(repo, api);
+        downloads::Aria2 aria(network, QString(), QByteArray("test"));
+        downloads::mega::Api mega(network);
+        downloads::pixeldrain::Api pixeldrain(network);
+        downloads::DownloadManager downloads({api, aria, mega, pixeldrain, queue, repo},
+                                             [] { return downloads::DownloadSettings{}; });
+        const auto add = [&](const QString& slug, const QString& title, int year,
+                             api::AnimeStatus status, int count) {
+            library::AnimeRecord record;
+            record.slug = slug;
+            record.title = title;
+            record.category = QStringLiteral("TV Anime");
+            record.startYear = year;
+            record.status = status;
+            record.episodeCount = count;
+            QVERIFY(repo.saveSnapshot(record));
+            QVERIFY(repo.setInLibrary(slug, true));
+            QList<api::Episode> episodes;
+            for (int number = 1; number <= count; ++number) {
+                api::Episode episode;
+                episode.id = slug + QString::number(number);
+                episode.number = number;
+                episodes.append(episode);
+            }
+            QVERIFY(repo.syncEpisodes(slug, episodes, false));
+        };
+        add(QStringLiteral("first"), QStringLiteral("Series"), 2012, api::AnimeStatus::Finished, 2);
+        add(QStringLiteral("second"), QStringLiteral("Series: Part 2"), 2014,
+            api::AnimeStatus::Airing, 3);
+        QVERIFY(repo.setWatchedThrough(QStringLiteral("first"), 2));
+        QVERIFY(repo.setWatchState(QStringLiteral("second"), 1, library::WatchState::Watched));
+        QVERIFY(repo.setEpisodeFile(QStringLiteral("second"), 2,
+                                    cache.filePath(QStringLiteral("s2.mkv")), 2'000'000'000));
+        auto group = repo.createFranchise(QStringLiteral("Series"));
+        QVERIFY(group);
+        QVERIFY(repo.setFranchiseMember(*group, QStringLiteral("first"), true));
+        QVERIFY(repo.setFranchiseMember(*group, QStringLiteral("second"), true));
+
+        LibraryModel model(service, downloads, api);
+        model.openFranchise(*group);
+        const auto franchise = model.franchise();
+        const auto works = franchise.value(QStringLiteral("works")).toList();
+        QCOMPARE(works.size(), 2);
+        const auto first = works.at(0).toMap();
+        const auto second = works.at(1).toMap();
+        QCOMPARE(first.value(QStringLiteral("shortTitle")).toString(), QStringLiteral("Series"));
+        QCOMPARE(second.value(QStringLiteral("shortTitle")).toString(), QStringLiteral("Part 2"));
+        QCOMPARE(first.value(QStringLiteral("facts")).toString(),
+                 QStringLiteral("TV · 2012 · 2 ep."));
+        QCOMPARE(first.value(QStringLiteral("state")).toString(), QStringLiteral("Visto"));
+        QCOMPARE(second.value(QStringLiteral("state")).toString(),
+                 QStringLiteral("Siguiente: Ep. 2"));
+        QCOMPARE(second.value(QStringLiteral("action")).toString(), QStringLiteral("play"));
+        QCOMPARE(franchise.value(QStringLiteral("facts")).toString(),
+                 QStringLiteral("2012–2014 · 1 episodio en disco · 2,0 GB"));
+        QCOMPARE(franchise.value(QStringLiteral("nextSlug")).toString(), QStringLiteral("second"));
+        QCOMPARE(franchise.value(QStringLiteral("nextText")).toString(),
+                 QStringLiteral("Ver ep. 2"));
+        const auto figures = franchise.value(QStringLiteral("figures")).toList();
+        QCOMPARE(figures.size(), 2);
+        QCOMPARE(figures.at(0).toMap().value(QStringLiteral("value")).toString(),
+                 QStringLiteral("Part 2"));
+        QCOMPARE(figures.at(1).toMap().value(QStringLiteral("value")).toString(),
+                 QStringLiteral("1/2"));
+    }
 };
 
 QTEST_GUILESS_MAIN(LibraryModelTest)

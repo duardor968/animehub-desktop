@@ -44,6 +44,12 @@ target_link_libraries(downloads-view-test PRIVATE Qt6::Qml Qt6::Gui)
 if(WIN32)
   target_link_libraries(downloads-view-test PRIVATE dwmapi)
 endif()
+animehub_add_test(anime-view-test anime_view_test.cpp ../src/app/anime_view.cpp ../src/app/episode_model.cpp ../src/app/card_model.cpp ../src/app/display.cpp ../src/app/schedule.cpp ../src/app/shell.cpp ../src/app/jdownloader_view.cpp ../src/app/app_settings.cpp)
+target_include_directories(anime-view-test PRIVATE ../src)
+target_link_libraries(anime-view-test PRIVATE Qt6::Qml Qt6::Gui)
+if(WIN32)
+  target_link_libraries(anime-view-test PRIVATE dwmapi)
+endif()
 
 # QML components on their own, as Qt Quick Test cases, in the style the app uses.
 find_package(Qt6 6.11 REQUIRED COMPONENTS QuickTest)

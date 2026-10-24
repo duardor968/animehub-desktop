@@ -3,7 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// One episode: what it is, how far it was watched, and what can be done with it.
+// One episode: what it is, when it came out, how far it was watched, and what can be done with
+// it. On disk, its thumbnail plays it.
 ItemDelegate {
     id: row
 
@@ -15,6 +16,7 @@ ItemDelegate {
     required property real number
     required property string label
     required property string title
+    required property string date
     required property url imageUrl
     required property int watchState
     required property real progress
@@ -45,16 +47,13 @@ ItemDelegate {
         view.episodes.toggle(number, extend)
     }
 
-    height: 76
-    leftPadding: 32
-    rightPadding: 24
-    // The hover and focus marks start next to the content, not at the panel's edge; the row
-    // with the keyboard shows as the library list's current one.
-    leftInset: 16
-    rightInset: 8
+    height: 64
+    topPadding: 0
+    bottomPadding: 0
+    // The row with the keyboard shows as the library list's current one.
     highlighted: activeFocus
-    Accessible.name: label + (title ? ", " + title : "") + (status ? ", " + status : "")
-                     + (selected ? ", seleccionado" : "")
+    Accessible.name: label + (title ? ", " + title : "") + (date ? ", " + date : "")
+                     + (status ? ", " + status : "") + (selected ? ", seleccionado" : "")
     onDoubleClicked: if (hasFile) view.play(number)
     // The clicked row takes the keyboard: Space marks it, Enter plays it.
     // A mouse focus: the keyboard's focus frame is for keyboard users.
@@ -73,8 +72,9 @@ ItemDelegate {
         spacing: 16
 
         Item {
-            Layout.preferredWidth: 104
-            Layout.preferredHeight: 58
+            // 16:9, as the episodes' stills.
+            Layout.preferredWidth: 86
+            Layout.preferredHeight: 48
 
             Poster {
                 anchors.fill: parent
@@ -91,12 +91,37 @@ ItemDelegate {
                 radius: 0
             }
 
-            // On the thumbnail's top-right corner, as on the web; shown on hover or while
+            // On disk, a press on the still plays it; otherwise it falls to the row.
+            MouseArea {
+                id: still
+                anchors.fill: parent
+                enabled: row.hasFile
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: row.view.play(row.number)
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                color: Qt.rgba(0, 0, 0, 0.5)
+                opacity: still.containsMouse ? 1 : 0
+                visible: opacity > 0
+                Behavior on opacity { NumberAnimation { duration: 120 } }
+
+                Glyph {
+                    anchors.centerIn: parent
+                    glyph: Theme.icon.play
+                    size: 18
+                    color: "white"
+                }
+            }
+
+            // On the still's top-right corner, as on the web; shown on hover or while
             // choosing.
             SelectionMark {
                 anchors.top: parent.top
                 anchors.right: parent.right
-                anchors.margins: 5
+                anchors.margins: 4
                 checked: row.selected
                 opacity: row.selected || row.selecting || row.hovered ? 1 : 0
                 visible: opacity > 0
@@ -115,7 +140,7 @@ ItemDelegate {
             Layout.fillWidth: true
             Layout.minimumWidth: 120
             Layout.preferredWidth: 120
-            spacing: 4
+            spacing: 3
 
             RowLayout {
                 Layout.fillWidth: true
@@ -129,6 +154,15 @@ ItemDelegate {
                 }
 
                 Label {
+                    Layout.fillWidth: row.title !== ""
+                    visible: row.title !== ""
+                    text: row.title
+                    color: row.watched ? Theme.muted : Theme.ink
+                    font.pixelSize: Theme.body
+                    elide: Text.ElideRight
+                }
+
+                Label {
                     visible: row.fresh
                     text: "Nuevo"
                     color: Theme.accent
@@ -136,16 +170,9 @@ ItemDelegate {
                     font.weight: Font.DemiBold
                 }
 
-                Item { Layout.fillWidth: true }
-            }
-
-            Label {
-                Layout.fillWidth: true
-                visible: text !== ""
-                text: row.title
-                color: Theme.muted
-                elide: Text.ElideRight
-                font.pixelSize: Theme.caption
+                Item {
+                    Layout.fillWidth: row.title === ""
+                }
             }
 
             RowLayout {
@@ -177,7 +204,7 @@ ItemDelegate {
             Layout.fillWidth: true
             Layout.minimumWidth: 60
             Layout.preferredWidth: Layout.maximumWidth
-            Layout.maximumWidth: Math.max(160, Math.min(downloadLabel.implicitWidth, 360))
+            Layout.maximumWidth: Math.max(160, Math.min(downloadLabel.implicitWidth, 320))
             spacing: 4
 
             ProgressLine {
@@ -194,6 +221,20 @@ ItemDelegate {
                 font.pixelSize: Theme.caption
                 elide: Text.ElideRight
             }
+        }
+
+        // When it came out, in one column down the list.
+        Label {
+            visible: row.date !== ""
+            Layout.preferredWidth: 76
+            text: row.date
+            color: Theme.muted
+            font.pixelSize: Theme.caption
+            horizontalAlignment: Text.AlignRight
+        }
+
+        Item {
+            Layout.preferredWidth: 4
         }
 
         ToolButton {

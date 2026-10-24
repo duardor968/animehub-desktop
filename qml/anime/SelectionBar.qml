@@ -84,7 +84,8 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             highlighted: true
             enabled: root.view.episodes.selectedMissing > 0
-            text: "Descargar"
+            // What it queues, which the selection may not all be: "Descargar 5 episodios".
+            text: enabled ? "Descargar " + root.view.episodes.selectedMissingText : "Descargar"
             icon.source: Theme.source(Theme.icon.download)
             onClicked: root.view.downloadSelection()
         }

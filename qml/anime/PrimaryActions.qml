@@ -2,42 +2,84 @@ import QtQuick
 import QtQuick.Controls
 import AnimeHub
 
-// The main action of an anime: watch the next episode, download what is missing, or follow the
-// series' downloads with Pausar/Reanudar. Beside it, what else to download. Fluent has no
-// SplitButton: as in WinUI, the action and its ▾ are two contiguous buttons.
+// The main button, a state of the episode to watch next ("Ver ep. 9", "Descargar ep. 9",
+// "Descargando 45 %"…), and for a series what else to download. Fluent has no SplitButton: as in
+// WinUI, the action and its ▾ are two contiguous buttons.
 Row {
     id: root
 
     required property AnimeView view
-    // The compact bar shows the main action alone.
-    property bool compact: false
 
     signal chooseRange()
     signal chooseEpisodes()
 
     readonly property int action: view.primaryAction
-    readonly property bool transferring: action === AnimeView.Downloading
-                                         || action === AnimeView.Paused
     readonly property string chevron: "e70d"
+    // The one episode missing is the next one: the main button already gets it, nothing is left
+    // to choose.
+    readonly property bool onlyNextMissing: view.missingCount === 1
+                                            && (action === AnimeView.Download || action === AnimeView.Paused
+                                                || action === AnimeView.Failed)
+    // What else there is to download, for a series.
+    readonly property bool offersMore: !view.single && view.missingCount > 0 && !onlyNextMissing
 
     spacing: 8
 
     Row {
-        visible: root.action === AnimeView.Play || root.action === AnimeView.Download
+        visible: root.action !== AnimeView.None
         spacing: 1
 
         Button {
             id: main
+
+            readonly property bool transferring: root.action === AnimeView.Downloading
+                                                 || root.action === AnimeView.Paused
+
             highlighted: true
+            // A series up to date waits for its next episode: the button says when.
+            enabled: root.action !== AnimeView.Upcoming
+            // One width for the usual states: the figures beside it stay put as it changes.
+            implicitWidth: Math.max(176, implicitContentWidth + leftPadding + rightPadding)
             text: root.view.primaryText
-            icon.source: Theme.source(root.action === AnimeView.Play ? Theme.icon.play
-                                                                     : Theme.icon.download)
+            // What a press does; the text says where the episode is.
+            icon.source: Theme.source(({
+                [AnimeView.Play]: Theme.icon.play,
+                [AnimeView.Rewatch]: Theme.icon.play,
+                [AnimeView.Download]: Theme.icon.download,
+                [AnimeView.Queued]: Theme.icon.pause,
+                [AnimeView.Downloading]: Theme.icon.pause,
+                [AnimeView.Paused]: Theme.icon.download,
+                [AnimeView.Failed]: Theme.icon.retry,
+                [AnimeView.Upcoming]: Theme.icon.clock
+            })[root.action] ?? Theme.icon.play)
+            ToolTip.visible: hovered && root.view.primaryHint !== ""
+            ToolTip.text: root.view.primaryHint
+            Accessible.description: root.view.primaryHint
             onClicked: root.view.primary()
+
+            // How much of the file is here, along the button's foot.
+            Rectangle {
+                visible: main.transferring && root.view.primaryProgress > 0
+                x: main.background.x + 6
+                y: main.background.y + main.background.height - 5
+                width: main.background.width - 12
+                height: 2
+                radius: 1
+                color: Qt.rgba(1, 1, 1, 0.3)
+
+                Rectangle {
+                    width: parent.width * root.view.primaryProgress
+                    height: parent.height
+                    radius: parent.radius
+                    color: Theme.accentInk
+                    Behavior on width { NumberAnimation { duration: 250 } }
+                }
+            }
         }
 
         Button {
             id: split
-            visible: !root.compact && root.action === AnimeView.Download && !root.view.single
+            visible: root.action === AnimeView.Download && root.offersMore
             highlighted: true
             height: main.height
             // As narrow as its chevron: Fluent's minimum width is for labelled buttons.
@@ -51,51 +93,11 @@ Row {
         }
     }
 
-    // The series' downloads under way: how far they are and, as in Steam, the square button that
-    // stops or resumes them.
-    Column {
-        visible: root.transferring
-        anchors.verticalCenter: parent.verticalCenter
-        width: root.compact ? 150 : 170
-        spacing: 7
-
-        Label {
-            width: parent.width
-            text: root.view.primaryText
-            color: Theme.ink
-            font.pixelSize: Theme.body
-            font.weight: Font.DemiBold
-            elide: Text.ElideRight
-        }
-
-        ProgressLine {
-            width: parent.width
-            value: root.view.primaryProgress
-            Behavior on value { NumberAnimation { duration: 250 } }
-        }
-    }
-
-    Button {
-        visible: root.transferring
-        anchors.verticalCenter: parent.verticalCenter
-        highlighted: true
-        implicitWidth: implicitContentWidth + leftPadding + rightPadding
-        display: AbstractButton.IconOnly
-        text: root.action === AnimeView.Paused ? "Reanudar" : "Pausar"
-        icon.source: Theme.source(root.action === AnimeView.Paused ? Theme.icon.download
-                                                                   : Theme.icon.pause)
-        Accessible.name: text + " las descargas de " + root.view.title
-        ToolTip.visible: hovered
-        ToolTip.text: text
-        onClicked: root.view.primary()
-    }
-
     // What else to download while the main button does something else; WinUI's DropDownButton
     // puts its chevron after the text, which mirroring the label does.
     Button {
         id: more
-        visible: !root.compact && !root.view.single && root.action !== AnimeView.Download
-                 && root.view.missingCount > 0
+        visible: root.action !== AnimeView.Download && root.offersMore
         anchors.verticalCenter: parent.verticalCenter
         text: "Descargar"
         icon.source: Theme.source(root.chevron)
@@ -110,16 +112,15 @@ Row {
 
         MenuEntry {
             id: missingEntry
-            // The main button already does it.
-            property bool wanted: root.action !== AnimeView.Download
-            enabled: root.view.missingCount > 0
-            text: "Todo lo que falta (" + root.view.missingCount + ")"
+            text: "Lo que falta · " + root.view.missingText
             onTriggered: root.view.downloadMissing()
         }
         MenuEntry {
             id: unwatchedEntry
-            enabled: root.view.unwatchedMissingCount > 0
-            text: "Los no vistos (" + root.view.unwatchedMissingCount + ")"
+            // Only when it is not all that is missing.
+            property bool wanted: root.view.unwatchedMissingCount > 0
+                                  && root.view.unwatchedMissingCount < root.view.missingCount
+            text: "Sin ver · " + root.view.unwatchedMissingText
             onTriggered: root.view.downloadUnwatched()
         }
         MenuEntry {
