@@ -259,13 +259,14 @@ QString LibraryModel::distinctTitle(const QString& title, const QString& franchi
         ++at;
     }
     const auto rest = title.sliced(at);
-    // "…The Animation", "… TV" say nothing of their own: the first work keeps its name.
+    // "…The Animation", "… TV" say nothing of their own, and "II" alone reads as a mistake: those
+    // keep their whole name.
     static const QStringList kGeneric{QStringLiteral("the"), QStringLiteral("animation"),
                                       QStringLiteral("tv"), QStringLiteral("anime")};
     const auto words = rest.toLower().split(u' ', Qt::SkipEmptyParts);
     const bool generic =
         std::ranges::all_of(words, [](const QString& word) { return kGeneric.contains(word); });
-    return rest.isEmpty() || generic ? title : rest;
+    return rest.size() < 4 || generic ? title : rest;
 }
 
 // Titles sort by their first letter or digit: "[Oshi no Ko]" goes with the O.
@@ -381,7 +382,8 @@ void LibraryModel::rebuildShelves() {
                                .title = entry->title,
                                .posterUrl = entry->posterUrl,
                                .caption = pendingCaption(pending),
-                               .progress = progressOf(*entry),
+                               // How far it is seen belongs to "Para ver", not here.
+                               .progress = -1,
                                .episode = pending.first(),
                                .fresh = entry->newEpisodes > 0,
                                .action = QStringLiteral("download")});
@@ -512,7 +514,7 @@ void LibraryModel::updateFeatured() {
                        std::max(entry->episodeCount.value_or(0), entry->knownEpisodes);
                    total > 0) {
             // The next episode is not started: how far the series is.
-            detail += QStringLiteral(" · %1 de %2 vistos").arg(entry->watchedEpisodes).arg(total);
+            detail += QStringLiteral(" · %1/%2 vistos").arg(entry->watchedEpisodes).arg(total);
             progress = progressOf(*entry);
         }
         // It is on disk: the button plays it.

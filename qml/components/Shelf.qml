@@ -45,6 +45,7 @@ Column {
 
     RowLayout {
         width: root.width
+        spacing: 8
 
         Label {
             text: root.title
@@ -61,13 +62,21 @@ Column {
             font.pixelSize: Theme.subtitle
         }
 
+        // A nested layout would fill the row by default and push the hairline away.
         RowLayout {
             id: actionsRow
+            Layout.fillWidth: false
             Layout.leftMargin: 12
             spacing: 8
         }
 
-        Item { Layout.fillWidth: true }
+        // As Steam's shelves: a hairline to the edge, or to the arrows.
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.leftMargin: 8
+            Layout.preferredHeight: 1
+            color: Theme.stroke
+        }
 
         ToolButton {
             visible: list.count > root.columns

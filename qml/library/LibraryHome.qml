@@ -64,7 +64,7 @@ Item {
         Column {
             id: content
             x: Theme.section
-            width: page.width - Theme.section - Theme.pad
+            width: page.width - 2 * Theme.section
             topPadding: 28
             bottomPadding: Theme.section
             spacing: Theme.section

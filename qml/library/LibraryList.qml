@@ -51,12 +51,15 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.leftMargin: 8
-            Layout.rightMargin: 8
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
             spacing: 4
 
             ItemDelegate {
                 Layout.fillWidth: true
+                Layout.preferredHeight: 36
+                leftInset: 0
+                rightInset: 0
                 spacing: 12
                 text: "Inicio"
                 icon.source: Theme.source("e80f")
@@ -195,7 +198,10 @@ Rectangle {
                 if (group && currentItem && currentItem.expanded)
                     root.model.toggleGroup(group)
             }
+            // The anime opened elsewhere (the home, a search, ← →) comes into view.
             onCurrentIndexChanged: {
+                if (currentIndex >= 0 && !activeFocus)
+                    positionViewAtIndex(currentIndex, ListView.Contain)
                 // Arrow keys move the selection like a native list.
                 const slug = root.model.slugAt(currentIndex)
                 if (activeFocus && slug && slug !== root.selectedSlug)
@@ -220,8 +226,13 @@ Rectangle {
 
                 width: ListView.view.width
                 height: 36
-                leftPadding: 12 + depth * 20
-                rightPadding: 12
+                // The selection pill keeps the margins of the fields above.
+                leftInset: 12
+                rightInset: 12
+                topInset: 0
+                bottomInset: 0
+                leftPadding: 20 + depth * 20
+                rightPadding: 20
                 highlighted: isGroup ? groupId === root.selectedGroup : slug === root.selectedSlug
                 onClicked: {
                     list.currentIndex = index
@@ -301,8 +312,9 @@ Rectangle {
                     Label {
                         Layout.fillWidth: true
                         text: row.title
-                        // Ungrouped, the seasons of a franchise sit one above the other and
-                        // differ at their end ("…Part 2"): that end stays.
+                        // Grouped, a franchise's seasons show only what sets them apart and a
+                        // title reads best cut at its end. Ungrouped, the seasons sit one above
+                        // the other and differ at their end ("…Part 2"): that end stays.
                         elide: root.model.grouped ? Text.ElideRight : Text.ElideMiddle
                         font.pixelSize: Theme.body
                         color: row.downloading ? Theme.accent : row.ready ? Theme.ink : Theme.muted

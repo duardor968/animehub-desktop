@@ -14,7 +14,10 @@ Column {
 
     signal activated(string slug)
 
-    readonly property int columnWidth: 220
+    // The days share the row, each at least 200 px; more days than fit go on below.
+    readonly property int perRow: Math.max(1, Math.min(days.length,
+                                                       Math.floor((width + Theme.posterGap) / (200 + Theme.posterGap))))
+    readonly property real columnWidth: (width - (perRow - 1) * Theme.posterGap) / perRow
 
     spacing: 12
     visible: days.length > 0
@@ -37,7 +40,13 @@ Column {
             font.pixelSize: Theme.subtitle
         }
 
-        Item { Layout.fillWidth: true }
+        // As Steam's shelves: a hairline to the edge after the title.
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.leftMargin: 8
+            Layout.preferredHeight: 1
+            color: Theme.stroke
+        }
     }
 
     Flow {
@@ -74,7 +83,7 @@ Column {
                         required property var modelData
 
                         width: column.width
-                        height: 60
+                        height: 68
                         leftPadding: 4
                         rightPadding: 4
                         onClicked: root.activated(modelData.slug)
@@ -103,6 +112,8 @@ Column {
                                     text: entry.modelData.title
                                     color: Theme.ink
                                     font.pixelSize: Theme.body
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 2
                                     elide: Text.ElideRight
                                 }
 
