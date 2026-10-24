@@ -113,7 +113,6 @@ signals:
     void taskRemoved(qint64 id);
     void taskCompleted(qint64 id);
     void taskFailed(qint64 id);
-    void engineFailed(const QString& message);
 
 private:
     struct Live {

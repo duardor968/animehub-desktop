@@ -51,7 +51,6 @@ class CatalogView final : public QObject {
     Q_PROPERTY(bool loading READ loading NOTIFY stateChanged)
     // A new search or filter is on its way, or failed: the results on view are the previous ones.
     Q_PROPERTY(bool refreshing READ refreshing NOTIFY stateChanged)
-    Q_PROPERTY(bool hasMore READ hasMore NOTIFY stateChanged)
     Q_PROPERTY(int total READ total NOTIFY stateChanged)
     // The source stops counting at 1000 matches: `total` is then a lower bound.
     Q_PROPERTY(bool capped READ capped NOTIFY stateChanged)

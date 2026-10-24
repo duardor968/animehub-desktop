@@ -68,7 +68,7 @@ public:
     [[nodiscard]] std::optional<downloads::Task> task(double number) const;
     // Neither on disk nor on its way: no task, or one that stopped (paused, failed).
     [[nodiscard]] bool missing(const library::EpisodeRecord& episode) const;
-    Q_INVOKABLE int rowOf(double number) const;
+    [[nodiscard]] int rowOf(double number) const;
 
     [[nodiscard]] int total() const {
         return static_cast<int>(episodes_.size());

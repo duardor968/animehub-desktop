@@ -98,7 +98,6 @@ DownloadManager::DownloadManager(Services services, std::function<DownloadSettin
                 retryLater(it.key(), TaskIssue::Engine, message);
             }
         }
-        emit engineFailed(message);
         QTimer::singleShot(5s, this, [this] {
             if (!stopping_) {
                 services_.aria2.start();

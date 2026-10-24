@@ -7,7 +7,6 @@ QtObject {
     readonly property color pane: "#16191e"
     readonly property color raised: "#1d2127"
     readonly property color hover: "#232830"
-    readonly property color selected: "#1f2a3a"
     readonly property color stroke: "#2a2f37"
     readonly property color ink: "#e9ebee"
     readonly property color muted: "#9aa1ab"
@@ -18,7 +17,6 @@ QtObject {
     readonly property color warning: "#d8a23a"
     readonly property color danger: "#e5534b"
 
-    readonly property int gap: 8
     readonly property int pad: 16
     readonly property int section: 32
     readonly property int radius: 6
@@ -51,7 +49,6 @@ QtObject {
     // Codes of the glyphs AnimeHub uses.
     readonly property QtObject icon: QtObject {
         readonly property string library: "e8f1"
-        readonly property string search: "e721"
         readonly property string download: "e896"
         readonly property string settings: "e713"
         readonly property string play: "e768"
@@ -72,6 +69,5 @@ QtObject {
         readonly property string video: "e714"
         readonly property string trash: "e74d"
         readonly property string info: "e946"
-        readonly property string filter: "e71c"
     }
 }

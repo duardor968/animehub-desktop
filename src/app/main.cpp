@@ -204,8 +204,7 @@ int main(int argc, char* argv[]) {
                                  QStringLiteral("linked-devices")};
     if (smoke && (!sizeMatch.hasMatch() || !smokePages.contains(parser.value(smoke_page))))
         return 2;
-    const QStringList smokeSettings{QStringLiteral("downloads"),      QStringLiteral("playback"),
-                                    QStringLiteral("general"),        QStringLiteral("jdownloader"),
+    const QStringList smokeSettings{QStringLiteral("downloads"), QStringLiteral("general"),
                                     QStringLiteral("linked-devices"), QStringLiteral("about")};
     if (parser.isSet(smoke_settings) && (!smoke || parser.value(smoke_page) != u"settings" ||
                                          !smokeSettings.contains(parser.value(smoke_settings))))
@@ -348,13 +347,9 @@ int main(int argc, char* argv[]) {
             const auto popupType = dialog->property("popupType");
             if (smokeHidden && (!popupType.isValid() || popupType.toInt() != 0))
                 return 5;
-            // Reproducción joined General, and JDownloader joined Descargas.
-            const auto requested = parser.value(smoke_page) == u"linked-devices"
-                                       ? QStringLiteral("linked-devices")
-                                       : parser.value(smoke_settings);
-            const auto category = requested == u"playback"      ? QStringLiteral("general")
-                                  : requested == u"jdownloader" ? QStringLiteral("downloads")
-                                                                : requested;
+            const auto category = parser.value(smoke_page) == u"linked-devices"
+                                      ? QStringLiteral("linked-devices")
+                                      : parser.value(smoke_settings);
             QVariant opened;
             if (!QMetaObject::invokeMethod(dialog, "openAt", Q_RETURN_ARG(QVariant, opened),
                                            Q_ARG(QVariant, category)) ||

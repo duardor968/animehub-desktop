@@ -411,13 +411,4 @@ Stored<int> DownloadRepository::requeueInterrupted() {
     return result->numRowsAffected();
 }
 
-Stored<int> DownloadRepository::removeFinished() {
-    auto result = database_.run(
-        QStringLiteral("DELETE FROM download WHERE state IN ('completed', 'cancelled', 'failed')"));
-    if (!result) {
-        return std::unexpected(result.error());
-    }
-    return result->numRowsAffected();
-}
-
 } // namespace animehub::downloads

@@ -40,7 +40,6 @@ public:
                                                         api::Audio audio) const;
     // After a restart nothing is transferring: those tasks go back to the queue.
     Stored<int> requeueInterrupted();
-    Stored<int> removeFinished();
 
 private:
     storage::Database& database_;

@@ -329,13 +329,6 @@ void LibraryModel::reload() {
 }
 
 void LibraryModel::rebuildShelves() {
-    QList<const LibraryEntry*> shown;
-    for (const auto& entry : entries_) {
-        if (entry.archived == archived_only_ && passes(entry)) {
-            shown.append(&entry);
-        }
-    }
-
     // What goes on first: new episodes, then the last watched, then what airs.
     const auto sooner = [](const LibraryEntry* a, const LibraryEntry* b) {
         if ((a->newEpisodes > 0) != (b->newEpisodes > 0)) {
@@ -402,17 +395,6 @@ void LibraryModel::rebuildShelves() {
                                .action = QStringLiteral("download")});
     }
     download_shelf_.setCards(std::move(download_cards));
-
-    QList<Card> all_cards;
-    for (const auto* entry : shown) {
-        all_cards.append({.slug = entry->slug,
-                          .title = entry->title,
-                          .posterUrl = entry->posterUrl,
-                          .caption = captionOf(*entry),
-                          .progress = progressOf(*entry),
-                          .fresh = entry->newEpisodes > 0});
-    }
-    all_shelf_.setCards(std::move(all_cards));
     emit countChanged();
 
     // The home's agenda is not the list's: every anime of the library that airs.

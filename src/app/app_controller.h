@@ -54,7 +54,6 @@ class AppController final : public QObject {
     Q_PROPERTY(QString version READ version CONSTANT)
     // The desktop shows tray icons: GNOME without its extension does not.
     Q_PROPERTY(bool tray READ hasTray CONSTANT)
-    Q_PROPERTY(QString problem READ problem NOTIFY problemChanged)
 
 public:
     // Fails (empty `problem()`, false return of `ready()`) when the library cannot be opened.
@@ -123,7 +122,6 @@ signals:
     void closeDecisionNeeded();
     // A notification was clicked: the window shows this anime in the library.
     void animeRequested(const QString& slug);
-    void problemChanged();
     void message(const QString& text, bool problem);
 
 private:

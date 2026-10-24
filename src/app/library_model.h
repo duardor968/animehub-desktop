@@ -53,7 +53,6 @@ class LibraryModel final : public QAbstractListModel {
     // What airs next among the anime of the library, by day: [{day, items}].
     Q_PROPERTY(QVariantList upcomingDays READ upcomingDays NOTIFY upcomingChanged)
     Q_PROPERTY(int upcomingCount READ upcomingCount NOTIFY upcomingChanged)
-    Q_PROPERTY(CardModel* allShelf READ allShelf CONSTANT)
 
 public:
     // Where the user is with an anime, or whether it airs; one at a time.
@@ -157,9 +156,6 @@ public:
     [[nodiscard]] int upcomingCount() const {
         return upcoming_count_;
     }
-    [[nodiscard]] CardModel* allShelf() {
-        return &all_shelf_;
-    }
 
     Q_INVOKABLE int indexOf(const QString& slug) const;
     Q_INVOKABLE QString slugAt(int row) const;
@@ -240,7 +236,6 @@ private:
     int download_count_ = 0;
     QVariantList upcoming_days_;
     int upcoming_count_ = 0;
-    CardModel all_shelf_;
     QList<api::ScheduleEntry> schedule_;
     bool schedule_stale_ = false; // the last answer came from the cache
     QTimer reload_timer_;

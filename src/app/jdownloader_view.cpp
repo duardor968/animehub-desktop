@@ -92,7 +92,7 @@ void JDownloaderView::connectAccount(const QString& email, const QString& passwo
             fail(result.error());
             return;
         }
-        // Only the derived keys are kept, by Windows; the password is forgotten here.
+        // Only the derived keys are kept, by the system's store; the password is forgotten here.
         platform::storeCredential(credential_target_,
                                   {.user = secrets.email, .secret = secrets.serialize()});
         account_ = secrets.email;

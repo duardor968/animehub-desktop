@@ -48,13 +48,13 @@ public:
 
     Q_INVOKABLE void connectAccount(const QString& email, const QString& password);
     Q_INVOKABLE void disconnectAccount();
-    Q_INVOKABLE void refreshDevices();
     Q_INVOKABLE void launch();
 
 signals:
     void changed();
 
 private:
+    void refreshDevices();
     void fail(downloads::myjd::Failure failure);
     [[nodiscard]] static QString describe(downloads::myjd::Failure failure);
 
