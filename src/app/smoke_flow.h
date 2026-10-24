@@ -155,29 +155,41 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
         if (!check(model->indexOf(slug) >= 0, "restored work returns to library"))
             return false;
     } else if (flow == u"settings") {
+        // Ajustes opens on its categories, Down walks them, and at the tested size (1100x720 is
+        // the reference) each page fits without scrolling.
         auto* dialog = named("settingsDialog");
-        if (!dialog || !QMetaObject::invokeMethod(dialog, "open"))
+        auto* categories = qobject_cast<QQuickItem*>(named("settingsCategories"));
+        auto* pages = qobject_cast<QQuickItem*>(named("settingsPages"));
+        if (!dialog || !categories || !pages || !QMetaObject::invokeMethod(dialog, "open"))
             return false;
-        settle();
-        QObject* flick = nullptr;
-        for (auto* object : dialog->findChildren<QObject*>())
-            if (object->property("contentY").isValid() &&
-                object->property("contentHeight").toDouble() >
-                    object->property("height").toDouble()) {
-                flick = object;
-                break;
-            }
-        if (!check(flick != nullptr, "settings overflows at tested size"))
+        // Its opening transition runs at the hidden window's own pace.
+        const auto opened = [dialog, categories] {
+            return dialog->property("opened").toBool() && categories->hasActiveFocus();
+        };
+        for (int wait = 0; wait < 10 && !opened(); ++wait)
+            settle();
+        if (!check(opened(), "categories hold the focus on opening"))
             return false;
-        auto* item = qobject_cast<QQuickItem*>(flick);
-        if (!item)
+        const int count = categories->property("count").toInt();
+        if (!check(count == pages->childItems().size(), "one page per category"))
             return false;
-        item->forceActiveFocus();
-        key(Qt::Key_Down);
-        key(Qt::Key_Down);
-        settle();
-        if (!check(flick->property("contentY").toDouble() > 0, "Down scrolls settings"))
+        key(Qt::Key_Tab);
+        if (!check(pages->isAncestorOf(window->activeFocusItem()), "Tab goes on to the page"))
             return false;
+        categories->forceActiveFocus();
+        for (int index = 0; index < count; ++index) {
+            settle();
+            auto* page = pages->childItems().value(index);
+            if (!check(pages->property("currentIndex").toInt() == index && page->isVisible(),
+                       "the arrow keys open each category"))
+                return false;
+            const double content = page->property("contentHeight").toDouble();
+            const double room = page->property("availableHeight").toDouble();
+            qInfo("Flow settings page %d: %.0f of %.0f px", index, content, room);
+            if (!check(content <= room, "the page fits without scrolling"))
+                return false;
+            key(Qt::Key_Down);
+        }
         QMetaObject::invokeMethod(dialog, "close");
     } else
         return false;

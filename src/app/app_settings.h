@@ -6,6 +6,7 @@
 
 #include <QObject>
 #include <QSettings>
+#include <QUrl>
 #include <QtQmlIntegration>
 
 namespace animehub::app {
@@ -87,6 +88,10 @@ public:
 
     [[nodiscard]] downloads::DownloadSettings downloads() const;
     [[nodiscard]] QList<api::Provider> providers() const;
+
+    // A file shipped next to the executable (the license notices of an installed copy), or an
+    // empty URL when this copy has none.
+    Q_INVOKABLE QUrl bundledFile(const QString& name) const;
 
     // Window geometry and the library list width survive restarts.
     Q_INVOKABLE QVariant value(const QString& key, const QVariant& fallback = {}) const;

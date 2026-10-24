@@ -250,6 +250,11 @@ int AppSettings::remoteProfileRevision(const QByteArray& fingerprint) {
     return revision;
 }
 
+QUrl AppSettings::bundledFile(const QString& name) const {
+    const QFileInfo file(QDir(QCoreApplication::applicationDirPath()).filePath(name));
+    return file.isFile() ? QUrl::fromLocalFile(file.absoluteFilePath()) : QUrl();
+}
+
 QVariant AppSettings::value(const QString& key, const QVariant& fallback) const {
     return settings_.value(QStringLiteral("ui/") + key, fallback);
 }

@@ -109,7 +109,6 @@ qt_add_qml_module(animehub-desktop
     qml/Theme.qml
     qml/CloseDialog.qml
     qml/SettingsDialog.qml
-    qml/RemoteDevicesDialog.qml
     qml/anime/AnimeHeader.qml
     qml/anime/AnimePage.qml
     qml/anime/CompactBar.qml
@@ -150,6 +149,8 @@ qt_add_qml_module(animehub-desktop
     qml/library/LibraryPage.qml
     qml/library/SearchBox.qml
     qml/library/UpcomingAgenda.qml
+    qml/settings/LinkedDevicesPage.qml
+    qml/settings/SettingRow.qml
   RESOURCES
     assets/animehub.png
 )

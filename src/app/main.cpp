@@ -132,6 +132,11 @@ int main(int argc, char* argv[]) {
         QStringLiteral("smoke-page"),
         QStringLiteral("Página: library, catalog, downloads, settings o linked-devices."),
         QStringLiteral("página"), QStringLiteral("library"));
+    const QCommandLineOption smoke_settings(
+        QStringLiteral("smoke-settings-page"),
+        QStringLiteral("Categoría de Ajustes: downloads, playback, general, jdownloader, "
+                       "linked-devices o about."),
+        QStringLiteral("categoría"), QStringLiteral("downloads"));
     const QCommandLineOption smoke_view(
         QStringLiteral("smoke-library-view"),
         QStringLiteral("Lista de la biblioteca para la captura: grouped (por franquicia) o flat."),
@@ -154,9 +159,9 @@ int main(int argc, char* argv[]) {
                                         QStringLiteral("Recorrido Qt: create, archive o settings."),
                                         QStringLiteral("caso"));
     parser.addOption(smoke_flow);
-    parser.addOptions({api_base, smoke_image, smoke_size, smoke_page, profile_transfers,
-                       smoke_hidden_native, smoke_view, smoke_archive, smoke_franchise,
-                       smoke_anime});
+    parser.addOptions({api_base, smoke_image, smoke_size, smoke_page, smoke_settings,
+                       profile_transfers, smoke_hidden_native, smoke_view, smoke_archive,
+                       smoke_franchise, smoke_anime});
     // How Windows starts it at sign-in: in the tray, without the window.
     const QCommandLineOption tray(QStringLiteral("tray"),
                                   QStringLiteral("Empezar en la bandeja, sin abrir la ventana."));
@@ -189,6 +194,12 @@ int main(int argc, char* argv[]) {
                                  QStringLiteral("downloads"), QStringLiteral("settings"),
                                  QStringLiteral("linked-devices")};
     if (smoke && (!sizeMatch.hasMatch() || !smokePages.contains(parser.value(smoke_page))))
+        return 2;
+    const QStringList smokeSettings{QStringLiteral("downloads"),      QStringLiteral("playback"),
+                                    QStringLiteral("general"),        QStringLiteral("jdownloader"),
+                                    QStringLiteral("linked-devices"), QStringLiteral("about")};
+    if (parser.isSet(smoke_settings) && (!smoke || parser.value(smoke_page) != u"settings" ||
+                                         !smokeSettings.contains(parser.value(smoke_settings))))
         return 2;
     const QStringList smokeViews{QStringLiteral("grouped"), QStringLiteral("flat")};
     const bool librarySmokeOptions = parser.isSet(smoke_view) || parser.isSet(smoke_archive) ||
@@ -317,27 +328,25 @@ int main(int argc, char* argv[]) {
                                           Q_ARG(QVariant, parser.value(smoke_anime)));
             }
         }
+        // Ajustes on one of its categories; linked-devices is Ajustes on that category.
         if (parser.value(smoke_page) == u"settings" ||
             parser.value(smoke_page) == u"linked-devices") {
-            const auto openDialog = [window, smokeHidden](const QString& name) {
-                auto* dialog = window->findChild<QObject*>(name);
-                if (!dialog)
-                    return false;
-                // Qt 6.11 Fluent Dialog inherits Popup.Item (enum value 0). Refuse a
-                // separate/native popup rather than altering the product's style for QA.
-                const auto popupType = dialog->property("popupType");
-                if (smokeHidden && (!popupType.isValid() || popupType.toInt() != 0))
-                    return false;
-                return QMetaObject::invokeMethod(dialog, "open");
-            };
-            if (!openDialog(QStringLiteral("settingsDialog")))
+            auto* dialog = window->findChild<QObject*>(QStringLiteral("settingsDialog"));
+            if (!dialog)
                 return 5;
-            if (parser.value(smoke_page) == u"linked-devices") {
-                QTimer::singleShot(100, &app, [openDialog] {
-                    if (!openDialog(QStringLiteral("remoteDevices")))
-                        QCoreApplication::exit(5);
-                });
-            }
+            // Qt 6.11 Fluent Dialog inherits Popup.Item (enum value 0). Refuse a
+            // separate/native popup rather than altering the product's style for QA.
+            const auto popupType = dialog->property("popupType");
+            if (smokeHidden && (!popupType.isValid() || popupType.toInt() != 0))
+                return 5;
+            const auto category = parser.value(smoke_page) == u"linked-devices"
+                                      ? QStringLiteral("linked-devices")
+                                      : parser.value(smoke_settings);
+            QVariant opened;
+            if (!QMetaObject::invokeMethod(dialog, "openAt", Q_RETURN_ARG(QVariant, opened),
+                                           Q_ARG(QVariant, category)) ||
+                !opened.toBool())
+                return 5;
         }
         if (parser.isSet(smoke_flow)) {
             QTimer::singleShot(650, &app, [window, &controller, flow = parser.value(smoke_flow)] {
