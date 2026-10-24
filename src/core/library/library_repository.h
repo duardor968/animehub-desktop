@@ -28,7 +28,8 @@ public:
     [[nodiscard]] Stored<QList<LibraryEntry>> followedEntries() const;
     // Archive is a view of the personal library, independent from follow and watch state.
     Stored<void> setArchived(const QString& slug, bool archived);
-    // Clears personal library data and file mappings; never modifies physical media.
+    // Clears personal library data and file mappings, as if it had never been added; never
+    // modifies physical media.
     Stored<void> removePersonalRecord(const QString& slug);
     Stored<qint64> createFranchise(const QString& title);
     Stored<qint64> createFranchise(const QString& title, const QString& initial_slug);

@@ -504,10 +504,32 @@ private slots:
         QVERIFY(!(*record)->stateAt.isValid());
         QVERIFY((*record)->filePath.isEmpty());
         QVERIFY(repository_->episodeFiles()->isEmpty());
-        QVERIFY(!(*repository_->anime(slug))->notify);
         auto files = database_->run(QStringLiteral("SELECT COUNT(*) FROM media_file"));
         QVERIFY(files && files->next());
         QCOMPARE(files->value(0).toInt(), 0);
+    }
+
+    void removedRecordStartsOverWhenAddedAgain() {
+        const auto slug = frieren().slug;
+        QVERIFY(repository_->setInLibrary(slug, true));
+        QVERIFY(repository_->setFlag(slug, Flag::Favorite, true));
+        QVERIFY(repository_->setFlag(slug, Flag::Notify, false));
+        QVERIFY(repository_->setFlag(slug, Flag::AutoDownload, true));
+        QVERIFY(repository_->setWatchState(slug, 1, WatchState::Watched));
+        QVERIFY(repository_->setArchived(slug, true));
+        QVERIFY(repository_->removePersonalRecord(slug));
+
+        // Added again, it is a new entry: notices on by default, nothing else kept.
+        QVERIFY(repository_->setInLibrary(slug, true));
+        const auto entry = repository_->entry(slug);
+        QVERIFY(entry && *entry);
+        QVERIFY((*entry)->inLibrary);
+        QVERIFY((*entry)->notify);
+        QVERIFY(!(*entry)->favorite);
+        QVERIFY(!(*entry)->autoDownload);
+        QVERIFY(!(*entry)->archived);
+        QCOMPARE((*entry)->watchedEpisodes, 0);
+        QCOMPARE(repository_->followedEntries()->size(), 1);
     }
 
     void importsMultipleCopiesWithoutInventingWatchDates() {
@@ -683,6 +705,7 @@ private slots:
         QVERIFY(repository_->discoverFranchiseRelations(detail)->isEmpty());
         QVERIFY(!(*repository_->anime(relation.anime.slug))->inLibrary);
         QVERIFY(repository_->setInLibrary(relation.anime.slug, true));
+        QVERIFY((*repository_->anime(relation.anime.slug))->notify);
         QCOMPARE(repository_->discoverFranchiseRelations(detail)->size(), 1);
     }
 

@@ -542,8 +542,9 @@ Stored<void> LibraryRepository::removePersonalRecord(const QString& slug) {
               QStringLiteral(
                   "UPDATE episode SET state = 0, position_ms = 0, duration_ms = 0, state_at = "
                   "NULL, is_new = 0, file_path = NULL, file_size = NULL WHERE slug = ?"),
+              // Back to an anime never added: added again, it notifies like any other.
               QStringLiteral(
-                  "UPDATE anime SET in_library = 0, archived = 0, favorite = 0, notify = 0, "
+                  "UPDATE anime SET in_library = 0, archived = 0, favorite = 0, notify = 1, "
                   "auto_download = 0, added_at = NULL, last_activity_at = NULL WHERE slug = ?")}) {
             auto result = database_.run(sql, {slug});
             if (!result)
