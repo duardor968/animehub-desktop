@@ -126,9 +126,12 @@ AppController::AppController(AppPaths paths, QObject* parent)
                 fixed.jdEndpoint = QUrl(submission.profile.connection);
             fixed.jdDeviceId = submission.profile.device;
             // The request was accepted once its anime was saved (rememberAnime): its title
-            // names the files, and the library can record them.
+            // names the files, and the library can record them. Sent from the web, it joins the
+            // library, as "Descargar" on its page does.
             const auto anime = library_repository_->anime(submission.animeSlug);
             if (!anime || !*anime)
+                return false;
+            if (!(*anime)->inLibrary && !library_->add(**anime))
                 return false;
             return downloads_
                 ->enqueueMany(submission.animeSlug, submission.episodes, (*anime)->title,
@@ -225,15 +228,17 @@ void AppController::publishRemoteProfiles() {
     const QString device = jd ? config.jdDeviceId : QString();
     const auto audio =
         config.audio == api::Audio::Dub ? QStringLiteral("dub") : QStringLiteral("sub");
-    const QJsonArray identity{jd, config.directory, connection, device, audio};
+    // As Ajustes names the engines. The label is part of the identity: a new one is a new
+    // revision, which the API takes in place of the old.
+    const auto label = jd ? QStringLiteral("JDownloader") : QStringLiteral("AnimeHub");
+    const QJsonArray identity{jd, config.directory, connection, device, audio, label};
     const auto fingerprint =
         QCryptographicHash::hash(QJsonDocument(identity).toJson(QJsonDocument::Compact),
                                  QCryptographicHash::Sha256)
             .toHex();
     const int revision = settings_->remoteProfileRevision(fingerprint);
     remote_service_->setProfiles(
-        revision, {{QStringLiteral("default"),
-                    jd ? QStringLiteral("JDownloader") : QStringLiteral("Descargas incorporadas"),
+        revision, {{QStringLiteral("default"), label,
                     jd ? QStringLiteral("jdownloader") : QStringLiteral("direct"), config.directory,
                     connection, device, true, audio}});
 }
