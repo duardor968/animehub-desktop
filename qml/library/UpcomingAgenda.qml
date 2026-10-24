@@ -43,7 +43,7 @@ Column {
         // As Steam's shelves: a hairline to the edge after the title.
         Rectangle {
             Layout.fillWidth: true
-            Layout.leftMargin: 8
+            Layout.leftMargin: 4
             Layout.preferredHeight: 1
             color: Theme.stroke
         }
