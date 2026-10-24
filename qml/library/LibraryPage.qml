@@ -176,7 +176,8 @@ Item {
                 failure = page.app.library.error
             }
         }
-        onAboutToShow: { failure = ""; groupTitle.forceActiveFocus() }
+        // The anime's title is a suggestion: typing replaces it.
+        onAboutToShow: { failure = ""; groupTitle.forceActiveFocus(); groupTitle.selectAll() }
         ColumnLayout {
             width: 432
             TextField { id: groupTitle; objectName: "createFranchiseTitle"; Layout.fillWidth: true; placeholderText: "Nombre de la franquicia"; Accessible.name: "Nombre de la franquicia"; onAccepted: createGroup.submit() }
@@ -187,7 +188,7 @@ Item {
                 objectName: "createFranchiseConfirm"
                 text: "Crear franquicia"
                 enabled: groupTitle.text.trim().length > 0
-                highlighted: true
+                highlighted: createGroup.visible // DialogButtonBox clears it while it builds
                 onClicked: createGroup.submit()
             }
             Button { text: "Cancelar"; onClicked: createGroup.reject() }

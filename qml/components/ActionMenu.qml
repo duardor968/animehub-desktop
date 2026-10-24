@@ -20,6 +20,14 @@ Menu {
         popup(anchor, alignRight ? anchor.width - width + rightInset : 0, anchor.height)
     }
 
+    // Opens at the pointer, as a right click's menu does.
+    function showAtPointer() {
+        if (entries.length > 0)
+            rebuild()
+        fit()
+        popup()
+    }
+
     // Only what changes moves: taking an entry out and adding it back while the menu shows
     // leaves the menu's list a stale view of it, and hovering the entry then hides it.
     function rebuild() {

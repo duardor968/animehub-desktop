@@ -121,7 +121,7 @@ Item {
                 Accessible.name: work.modelData.title + ", " + work.modelData.facts + ", "
                                  + work.modelData.state + (work.disk !== "" ? ", " + work.disk : "")
                 Keys.onMenuPressed: workMenu.show(card)
-                TapHandler { acceptedButtons: Qt.RightButton; onTapped: workMenu.show(card) }
+                TapHandler { acceptedButtons: Qt.RightButton; onTapped: workMenu.showAtPointer() }
             }
             // The card's second caption: where the user is with the work.
             Label {
@@ -254,7 +254,7 @@ Item {
             Button {
                 text: "Añadir obra"
                 enabled: choices.currentIndex >= 0
-                highlighted: true
+                highlighted: addDialog.visible // DialogButtonBox clears it while it builds
                 onClicked: {
                     if (root.model.setFranchiseMember(root.franchise.id, choices.currentValue, true))
                         addDialog.close()

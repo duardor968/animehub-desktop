@@ -245,7 +245,7 @@ Rectangle {
 
                 TapHandler {
                     acceptedButtons: Qt.RightButton
-                    onTapped: rowMenu.show(row)
+                    onTapped: rowMenu.showAtPointer()
                 }
                 Keys.onMenuPressed: rowMenu.show(row)
 
