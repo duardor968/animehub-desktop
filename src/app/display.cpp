@@ -101,7 +101,7 @@ QString issue(downloads::TaskIssue issue) {
     case TaskIssue::None:
         return {};
     case TaskIssue::NoSource:
-        return QStringLiteral("Ni MEGA ni Pixeldrain tienen este episodio.");
+        return QStringLiteral("Sin servidores disponibles.");
     case TaskIssue::SourceRemoved:
         return QStringLiteral("El servidor ya no tiene este archivo.");
     case TaskIssue::Quota:

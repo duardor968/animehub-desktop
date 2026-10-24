@@ -81,10 +81,10 @@ QString taskDetail(const Task& task) {
                    ? QStringLiteral("Sin conexión con JDownloader · último estado: ") +
                          phaseName(task)
                    : task.issueDetail;
-    // The usual reasons speak of MEGA, Pixeldrain and aria2. JDownloader takes other servers,
-    // and its own failures carry their reason; the network and the API keep theirs.
+    // No source reads the same on both engines; JDownloader's own failures carry their reason,
+    // and the network and the API keep theirs.
     if (task.state == TaskState::Failed && task.issue == TaskIssue::NoSource)
-        return QStringLiteral("Ningún servidor tiene este episodio.");
+        return display::issue(task.issue);
     if (task.state == TaskState::Failed && task.issue != TaskIssue::Network &&
         !task.issueDetail.isEmpty())
         return task.issueDetail;

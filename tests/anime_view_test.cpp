@@ -173,7 +173,7 @@ private slots:
                                 << int(TaskState::Failed) << int(Action::Failed)
                                 << QStringLiteral("Reintentar ep. 2")
                                 << QStringLiteral("Reintentar la descarga del episodio 2")
-                                << QStringLiteral("Ni MEGA ni Pixeldrain tienen este episodio.");
+                                << QStringLiteral("Sin servidores disponibles.");
         QTest::newRow("all seen") << finished << QList<double>{1, 2, 3} << QList<double>{1} << -1
                                   << int(Action::Rewatch) << QStringLiteral("Ver de nuevo")
                                   << QString() << QString();
