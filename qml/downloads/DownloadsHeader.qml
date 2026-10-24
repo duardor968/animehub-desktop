@@ -4,42 +4,49 @@ import QtQuick.Layouts
 import AnimeHub
 
 // The top of the Downloads page, as in Steam: the series on view over its art, with its
-// episode, progress, failures and actions; on the right, the speed of the last minutes. The
-// series is not repeated in the line below: it unfolds into its episodes from here.
+// episode, progress, failures and actions; on the right, the speed of the last minutes, whose
+// graph keeps its place at rest, and in the corner what acts on every download. The series is
+// not repeated in the line below: it unfolds into its episodes from here.
 Rectangle {
     id: root
 
     required property DownloadsView downloads
     // The series on view is unfolded into its episodes, under the header.
     property bool expanded
-    // Room left at the top for the page's own buttons.
-    property int topRoom: 64
 
     signal toggled(string slug)
     signal menuRequested(var row, Item anchor)
+    signal folderRequested()
 
     readonly property int mode: downloads.headerMode
     readonly property bool idle: mode === DownloadsView.Idle
     readonly property bool wide: width >= 1280
+    // Room at the top for the corner's buttons.
+    readonly property int topRoom: pageActions.y + pageActions.height + 16
 
-    // Without a download on view there is no art: the band shrinks to the figures.
-    implicitHeight: idle ? 136 : Math.max(200, topRoom + subject.implicitHeight + 28)
+    // Without a download on view there is no art: the band keeps the speed and its graph.
+    implicitHeight: Math.max(topRoom + speed.implicitHeight + 28,
+                             idle ? 0 : Math.max(200, topRoom + subject.implicitHeight + 28))
     Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
     color: Theme.pane
     clip: true
 
-    // A figure of the session: its value over its name.
+    // A figure of the session: its value over its name, right-aligned in a third of the block,
+    // so the last one ends where the rows below do and none moves as its value changes.
     component Figure: ColumnLayout {
         property alias value: valueLabel.text
         property alias label: nameLabel.text
-        Layout.alignment: Qt.AlignBottom
-        Layout.minimumWidth: 72
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
         spacing: 2
         Accessible.role: Accessible.StaticText
         Accessible.name: label + ": " + value
 
+        // Filling, so the column can take its third: a layout grows no wider than its children.
         Label {
             id: valueLabel
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignRight
             color: Theme.ink
             font.pixelSize: Theme.body
             font.weight: Font.DemiBold
@@ -47,6 +54,8 @@ Rectangle {
         }
         Label {
             id: nameLabel
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignRight
             color: Theme.muted
             font.pixelSize: Theme.caption
             Accessible.ignored: true
@@ -165,23 +174,6 @@ Rectangle {
             visible: !root.idle
             spacing: 16
 
-            Button {
-                id: toggle
-                visible: root.downloads.canPauseAll || root.downloads.canResumeAll
-                highlighted: true
-                display: AbstractButton.IconOnly
-                // The icon and Fluent's own side padding; narrower squeezes the icon.
-                implicitWidth: 40
-                // As Steam's, and as the bottom bar's and the tray's: every download.
-                text: root.downloads.canPauseAll ? "Pausar las descargas" : "Reanudar las descargas"
-                icon.source: Theme.source(root.downloads.canPauseAll ? Theme.icon.pause
-                                                                     : Theme.icon.download)
-                ToolTip.visible: hovered
-                ToolTip.text: text
-                onClicked: root.downloads.canPauseAll ? root.downloads.pauseAll()
-                                                      : root.downloads.resumeAll()
-            }
-
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 8
@@ -238,25 +230,71 @@ Rectangle {
         }
     }
 
+    // What acts on every download, as Steam's and as the bottom bar's and the tray's.
     RowLayout {
+        id: pageActions
+        anchors.right: parent.right
+        anchors.rightMargin: 32
+        anchors.top: parent.top
+        anchors.topMargin: 16
+        spacing: 4
+
+        Button {
+            visible: root.downloads.canPauseAll || root.downloads.canResumeAll
+            text: root.downloads.canPauseAll ? "Pausar todo" : "Reanudar todo"
+            icon.source: Theme.source(root.downloads.canPauseAll ? Theme.icon.pause
+                                                                 : Theme.icon.download)
+            onClicked: root.downloads.canPauseAll ? root.downloads.pauseAll()
+                                                  : root.downloads.resumeAll()
+        }
+
+        ToolButton {
+            id: pageMore
+            icon.source: Theme.source(Theme.icon.more)
+            display: AbstractButton.IconOnly
+            text: "Más opciones de Descargas"
+            ToolTip.visible: hovered
+            ToolTip.text: "Más opciones"
+            onClicked: pageMenu.show(pageMore, true)
+        }
+    }
+
+    ActionMenu {
+        id: pageMenu
+
+        MenuEntry {
+            text: "Abrir la carpeta de descargas"
+            glyph: Theme.icon.folder
+            onTriggered: root.folderRequested()
+        }
+    }
+
+    // The speed as one block: its graph over the session's figures, in equal columns.
+    ColumnLayout {
         id: speed
         anchors.right: parent.right
         anchors.rightMargin: 32
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 28
-        spacing: 28
+        width: root.wide ? 312 : 252
+        spacing: 10
 
         // Narrow windows keep the series' line whole: the figures stay, the graph goes.
         SpeedGraph {
             visible: root.width >= 1000
-            Layout.preferredWidth: root.wide ? 260 : 160
-            Layout.preferredHeight: 88
+            Layout.fillWidth: true
+            Layout.preferredHeight: 72
             samples: root.downloads.speedSamples
         }
 
-        Figure { value: root.downloads.speedText; label: "Actual" }
-        Figure { value: root.downloads.peakText; label: "Máximo" }
-        Figure { value: root.downloads.totalText; label: "Total" }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 0
+
+            Figure { value: root.downloads.speedText; label: "Actual" }
+            Figure { value: root.downloads.peakText; label: "Máximo" }
+            Figure { value: root.downloads.totalText; label: "Total" }
+        }
     }
 
     Rectangle {

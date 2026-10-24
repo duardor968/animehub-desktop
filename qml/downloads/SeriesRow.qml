@@ -3,15 +3,16 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// A series on the Downloads page: its art, how far its episodes are and its actions. It
-// unfolds into its episodes; in "A continuación" it can be dragged to another place in line.
+// A series on the Downloads page: its poster, how far its episodes are and its actions. The
+// whole row unfolds it into its episodes, its chevron on the right as in WinUI's Expander; in
+// "A continuación" it can be dragged to another place in line.
 Item {
     id: root
 
     required property int index
     required property string slug
     required property string title
-    required property url art
+    required property url poster
     required property string summary
     required property real progress
     required property int failed
@@ -36,10 +37,12 @@ Item {
     // How far it steps aside while another row is dragged over it.
     property real displacement
     readonly property int actionsWidth: 84
+    // The chevron's column, past the actions; episode lines keep it free to line up.
+    readonly property int chevronRoom: 24
     // Narrow windows: actions keep their icon and say their name in a tooltip.
     readonly property bool compact: barWidth < 160
-    // Where episodes start: under the title, past the art.
-    readonly property int indent: 32 + 128 + 16
+    // Where episodes start: under the title, past the poster.
+    readonly property int indent: 32 + 50 + 16
 
     signal toggled()
     signal menuRequested(Item anchor)
@@ -119,7 +122,7 @@ Item {
         }
 
         background: Rectangle {
-            x: 8
+            x: 16
             width: parent.width - 32
             radius: Theme.radius
             color: root.dragging ? Theme.raised : header.hovered ? Theme.hover : "transparent"
@@ -130,22 +133,11 @@ Item {
         contentItem: RowLayout {
             spacing: 0
 
-            Glyph {
-                Layout.leftMargin: 12
-                Layout.preferredWidth: 16
-                glyph: "e76c"
-                size: 14
-                color: Theme.muted
-                rotation: root.expanded ? 90 : 0
-                Behavior on rotation { NumberAnimation { duration: 150 } }
-            }
-
             Poster {
-                Layout.leftMargin: 4
-                Layout.preferredWidth: 128
-                Layout.preferredHeight: 72
-                source: root.art
-                radius: 4
+                Layout.leftMargin: 32
+                Layout.preferredWidth: 50
+                Layout.preferredHeight: 71
+                source: root.poster
             }
 
             ColumnLayout {
@@ -282,7 +274,6 @@ Item {
                 Layout.preferredWidth: root.actionsWidth
                 Layout.minimumWidth: root.actionsWidth
                 Layout.leftMargin: 16
-                Layout.rightMargin: 32
                 layoutDirection: Qt.RightToLeft
                 spacing: 4
 
@@ -314,6 +305,15 @@ Item {
                     }
                 }
             }
+
+            Glyph {
+                Layout.preferredWidth: root.chevronRoom - 8
+                Layout.leftMargin: 8
+                Layout.rightMargin: 32
+                glyph: root.expanded ? "e70e" : "e70d"
+                size: 12
+                color: Theme.muted
+            }
         }
     }
 
@@ -342,6 +342,7 @@ Item {
                     indent: root.indent
                     barWidth: root.barWidth
                     actionsWidth: root.actionsWidth
+                    trailing: root.chevronRoom
                     onCancelRequested: (taskId, label, partial) =>
                         root.episodeCancelRequested(taskId, label, partial)
                 }

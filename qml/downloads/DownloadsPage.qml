@@ -4,15 +4,67 @@ import QtQuick.Layouts
 import AnimeHub
 
 // Downloads, by series as in Steam: the series on view and the speed at the top, then the
-// other series in line and the completed ones.
+// other series in line and the completed ones, each section folded as it was left. With nothing
+// in line, what the library has to download is one click away.
 Item {
     id: page
 
     required property AppController app
     readonly property DownloadsView downloads: app.downloads
+    readonly property LibraryModel library: app.library
+    readonly property bool empty: downloads.current.count === 0 && downloads.queue.count === 0
+                                  && downloads.completed.count === 0
 
     signal browseCatalog()
     signal openAnime(string slug)
+
+    // INI settings come back as text.
+    property bool queueFolded: String(app.settings.value("downloads/queueFolded", false)) === "true"
+    property bool completedFolded: String(app.settings.value("downloads/completedFolded", false)) === "true"
+    onQueueFoldedChanged: app.settings.setValue("downloads/queueFolded", queueFolded)
+    onCompletedFoldedChanged: app.settings.setValue("downloads/completedFolded", completedFolded)
+
+    // A section's body: it folds into its heading and opens out of it. Only the opening is
+    // animated, so its rows unfold and move at their own pace; folded, nothing in it takes focus.
+    component Fold: Item {
+        property bool open
+        property real shown: open ? 1 : 0
+        default property alias content: body.data
+
+        Layout.fillWidth: true
+        implicitHeight: Math.round(body.implicitHeight * shown)
+        visible: shown > 0
+        opacity: shown
+        clip: true
+        Behavior on shown { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+        ColumnLayout {
+            id: body
+            width: parent.width
+            spacing: 0
+        }
+    }
+
+    // As the library's "Descargar N episodios": large batches are confirmed first.
+    function downloadPending() {
+        const episodes = library.pendingCount
+        const series = library.downloadCount
+        const start = () => {
+            const failure = library.downloadPending()
+            if (failure)
+                app.message(failure, true)
+            else
+                app.message(episodes === 1 ? "1 episodio en cola" : episodes + " episodios en cola", false)
+        }
+        if (episodes < 25) {
+            start()
+            return
+        }
+        confirm.ask("¿Descargar " + episodes + " episodios?",
+                    "De " + series + (series === 1 ? " anime" : " animes") + ", en "
+                    + app.settings.downloadDirectory + ".",
+                    "Descargar", "Cancelar", start)
+    }
 
     // Unfolded series, by slug; kept while a series moves between sections.
     property var expanded: ({})
@@ -103,22 +155,10 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         downloads: page.downloads
-        topRoom: toolbar.y + toolbar.height + 16
         expanded: page.expanded[page.downloads.headerSlug] === true
         onToggled: slug => page.toggle(slug)
         onMenuRequested: (row, anchor) => queueMenu.showFor(row, anchor)
-    }
-
-    // In the header's corner; the window's gear, right above, opens the download settings.
-    Button {
-        id: toolbar
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.rightMargin: 32
-        anchors.topMargin: 16
-        text: "Abrir la carpeta de descargas"
-        icon.source: Theme.source(Theme.icon.folder)
-        onClicked: page.app.openDownloadFolder()
+        onFolderRequested: page.app.openDownloadFolder()
     }
 
     Flickable {
@@ -185,6 +225,7 @@ Item {
                                 indent: 32
                                 barWidth: page.barWidth
                                 actionsWidth: 84
+                                trailing: 24
                                 onCancelRequested: (taskId, label, partial) =>
                                     page.askCancelEpisode(taskId, label, unfolded.title, partial)
                             }
@@ -194,8 +235,6 @@ Item {
             }
 
             SectionHeading {
-                // With the series on view alone in line, there is nothing after it.
-                visible: page.downloads.queue.count > 0 || page.downloads.current.count === 0
                 Layout.fillWidth: true
                 Layout.topMargin: 16
                 Layout.leftMargin: 32
@@ -203,96 +242,132 @@ Item {
                 Layout.bottomMargin: 8
                 text: "A continuación"
                 count: page.downloads.queue.count
+                folded: page.queueFolded
+                onClicked: page.queueFolded = !page.queueFolded
             }
 
-            ColumnLayout {
-                visible: page.downloads.queue.count === 0 && page.downloads.current.count === 0
-                Layout.leftMargin: 32
-                Layout.topMargin: 8
-                spacing: 16
+            Fold {
+                open: !page.queueFolded
 
-                Label {
-                    text: "No hay descargas en cola"
-                    color: Theme.muted
-                    font.pixelSize: Theme.body
+                // Nothing after the series on view, but episodes the library is missing: where
+                // someone who only downloads starts, as the library's own "Descargar N episodios".
+                RowLayout {
+                    visible: page.downloads.queue.count === 0 && page.library.pendingCount > 0
+                    Layout.leftMargin: 32
+                    Layout.bottomMargin: 8
+                    spacing: 16
+
+                    Label {
+                        text: page.library.pendingCount === 1 ? "1 episodio por descargar"
+                                                              : page.library.pendingCount + " episodios por descargar"
+                        color: Theme.ink
+                        font.pixelSize: Theme.body
+                    }
+
+                    Button {
+                        text: "Descargar"
+                        highlighted: true
+                        icon.source: Theme.source(Theme.icon.download)
+                        onClicked: page.downloadPending()
+                    }
                 }
 
-                Button {
-                    text: "Explorar el catálogo"
-                    highlighted: true
-                    onClicked: page.browseCatalog()
+                RowLayout {
+                    visible: page.empty && page.library.pendingCount === 0
+                    Layout.leftMargin: 32
+                    Layout.bottomMargin: 8
+                    spacing: 16
+
+                    Label {
+                        text: "No hay descargas en cola"
+                        color: Theme.muted
+                        font.pixelSize: Theme.body
+                    }
+
+                    Button {
+                        text: "Explorar el catálogo"
+                        highlighted: true
+                        onClicked: page.browseCatalog()
+                    }
                 }
-            }
 
-            ListView {
-                id: queueList
-                Layout.fillWidth: true
-                Layout.preferredHeight: contentHeight
-                interactive: false
-                model: page.downloads.queue
-                Accessible.name: "A continuación"
+                ListView {
+                    id: queueList
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: contentHeight
+                    interactive: false
+                    model: page.downloads.queue
+                    Accessible.name: "A continuación"
 
-                move: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
-                moveDisplaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
-                displaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
-                add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 } }
-                remove: Transition { NumberAnimation { property: "opacity"; to: 0; duration: 150 } }
+                    move: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                    moveDisplaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                    displaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                    add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 } }
+                    remove: Transition { NumberAnimation { property: "opacity"; to: 0; duration: 150 } }
 
-                delegate: SeriesRow {
-                    id: row
-                    downloads: page.downloads
-                    queued: true
-                    expanded: page.expanded[slug] === true
-                    barWidth: page.barWidth
-                    displacement: page.displacement(index)
-                    onToggled: page.toggle(slug)
-                    onMenuRequested: anchor => queueMenu.showFor(row, anchor)
-                    onEpisodeCancelRequested: (taskId, label, partial) =>
-                        page.askCancelEpisode(taskId, label, title, partial)
-                    onMoveRequested: step => page.downloads.moveSeries(index, index + step)
-                    onDragOffsetChanged: if (dragging) page.trackDrag(row)
-                    onDragFinished: page.dropSeries(index)
+                    delegate: SeriesRow {
+                        id: row
+                        downloads: page.downloads
+                        queued: true
+                        expanded: page.expanded[slug] === true
+                        barWidth: page.barWidth
+                        displacement: page.displacement(index)
+                        onToggled: page.toggle(slug)
+                        onMenuRequested: anchor => queueMenu.showFor(row, anchor)
+                        onEpisodeCancelRequested: (taskId, label, partial) =>
+                            page.askCancelEpisode(taskId, label, title, partial)
+                        onMoveRequested: step => page.downloads.moveSeries(index, index + step)
+                        onDragOffsetChanged: if (dragging) page.trackDrag(row)
+                        onDragFinished: page.dropSeries(index)
+                    }
                 }
             }
 
             SectionHeading {
-                visible: page.downloads.completed.count > 0
                 Layout.fillWidth: true
-                Layout.topMargin: 32
+                Layout.topMargin: 24
                 Layout.leftMargin: 32
                 Layout.rightMargin: 32
                 Layout.bottomMargin: 8
                 text: "Completadas"
                 count: page.downloads.completed.count
+                folded: page.completedFolded
+                onClicked: page.completedFolded = !page.completedFolded
 
+                // The files stay; only the list empties.
                 Button {
+                    visible: page.downloads.completed.count > 0
                     flat: true
-                    text: "Quitar de la lista"
+                    text: "Quitar todas"
                     onClicked: page.downloads.clearCompleted()
                 }
             }
 
-            ListView {
-                id: completedList
-                Layout.fillWidth: true
-                Layout.preferredHeight: contentHeight
+            Fold {
+                open: !page.completedFolded
                 Layout.bottomMargin: 24
-                interactive: false
-                model: page.downloads.completed
-                Accessible.name: "Completadas"
 
-                displaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
-                add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 } }
-                remove: Transition { NumberAnimation { property: "opacity"; to: 0; duration: 150 } }
+                ListView {
+                    id: completedList
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: contentHeight
+                    interactive: false
+                    model: page.downloads.completed
+                    Accessible.name: "Completadas"
 
-                delegate: SeriesRow {
-                    id: done
-                    downloads: page.downloads
-                    queued: false
-                    expanded: page.expanded[slug] === true
-                    barWidth: page.barWidth
-                    onToggled: page.toggle(slug)
-                    onMenuRequested: anchor => completedMenu.showFor(done, anchor)
+                    displaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                    add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 } }
+                    remove: Transition { NumberAnimation { property: "opacity"; to: 0; duration: 150 } }
+
+                    delegate: SeriesRow {
+                        id: done
+                        downloads: page.downloads
+                        queued: false
+                        expanded: page.expanded[slug] === true
+                        barWidth: page.barWidth
+                        onToggled: page.toggle(slug)
+                        onMenuRequested: anchor => completedMenu.showFor(done, anchor)
+                    }
                 }
             }
         }
@@ -380,6 +455,8 @@ Item {
                                         completedMenu.diskText)
         }
     }
+
+    ConfirmDialog { id: confirm }
 
     ModalDialog {
         id: cancelDialog

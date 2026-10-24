@@ -190,8 +190,8 @@ QVariant DownloadSeriesModel::data(const QModelIndex& index, int role) const {
     case TitleRole:
     case Qt::DisplayRole:
         return row.title;
-    case ArtRole:
-        return row.art;
+    case PosterRole:
+        return row.poster;
     case SummaryRole:
         return row.summary;
     case ProgressRole:
@@ -230,7 +230,7 @@ QVariant DownloadSeriesModel::data(const QModelIndex& index, int role) const {
 QHash<int, QByteArray> DownloadSeriesModel::roleNames() const {
     return {{SlugRole, "slug"},
             {TitleRole, "title"},
-            {ArtRole, "art"},
+            {PosterRole, "poster"},
             {SummaryRole, "summary"},
             {ProgressRole, "progress"},
             {FailedRole, "failed"},

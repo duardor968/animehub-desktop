@@ -32,8 +32,9 @@ struct DownloadEpisodeRow {
 struct DownloadSeriesRow {
     QString slug;
     QString title;
-    QUrl art;        // backdrop, else poster
-    QString summary; // "3 de 12 · 1,1 GB de 4,2 GB"
+    QUrl poster;
+    // In line, "3 de 12 · 1,1 GB de 4,2 GB"; completed, "3 episodios · 286 MB · hoy 13:04".
+    QString summary;
     double progress = 0;
     int failed = 0;
     QString failedText; // "1 con error"
@@ -100,7 +101,7 @@ public:
     enum Role {
         SlugRole = Qt::UserRole + 1,
         TitleRole,
-        ArtRole,
+        PosterRole,
         SummaryRole,
         ProgressRole,
         FailedRole,

@@ -38,12 +38,15 @@ class DownloadsView final : public QObject {
     Q_PROPERTY(double headerProgress READ headerProgress NOTIFY summaryChanged)
     Q_PROPERTY(QUrl headerArt READ headerArt NOTIFY summaryChanged)
 
-    // The bar at the bottom of the window: shown while something is unfinished.
+    // The bar at the bottom of the window: shown while something is unfinished. As Steam's, it
+    // counts the episode on view among the line: "Descargando 3 de 10 · Frieren ep. 6".
     Q_PROPERTY(bool barVisible READ barVisible NOTIFY summaryChanged)
     Q_PROPERTY(Mode barMode READ barMode NOTIFY summaryChanged)
     Q_PROPERTY(QString barText READ barText NOTIFY summaryChanged)
     Q_PROPERTY(QString barProblem READ barProblem NOTIFY summaryChanged)
     Q_PROPERTY(double barProgress READ barProgress NOTIFY summaryChanged)
+    Q_PROPERTY(QString barPercent READ barPercent NOTIFY summaryChanged) // "45 %"; empty when none
+    Q_PROPERTY(QUrl barPoster READ barPoster NOTIFY summaryChanged)
 
     // Total speed of the last minutes (bytes per second, oldest first) and the session's figures.
     Q_PROPERTY(QList<qreal> speedSamples READ speedSamples NOTIFY speedChanged)
@@ -121,6 +124,12 @@ public:
     [[nodiscard]] double barProgress() const {
         return bar_.progress;
     }
+    [[nodiscard]] QString barPercent() const {
+        return bar_.percent;
+    }
+    [[nodiscard]] QUrl barPoster() const {
+        return bar_.poster;
+    }
 
     [[nodiscard]] QList<qreal> speedSamples() const {
         return samples_;
@@ -169,7 +178,8 @@ signals:
 private:
     // What the page needs from the library about a series, read once per change.
     struct SeriesInfo {
-        QUrl art;
+        QUrl art; // backdrop, else poster: the top of the page
+        QUrl poster;
         std::optional<double> resumeNumber;
         QHash<double, library::EpisodeRecord> episodes;
     };
@@ -189,6 +199,8 @@ private:
         QString text;
         QString problem;
         double progress = 0;
+        QString percent;
+        QUrl poster;
 
         bool operator==(const Bar&) const = default;
     };

@@ -1,5 +1,6 @@
 #include "app/downloads_view.h"
 #include <QDir>
+#include <QLocale>
 #include <QNetworkAccessManager>
 #include <QTemporaryDir>
 #include <QTest>
@@ -181,6 +182,58 @@ private slots:
 
         view.resumeAll();
         QCOMPARE(state(paused->id), downloads::TaskState::Queued);
+    }
+
+    // A finished series says how many episodes it brought, their size and when, and its row
+    // shows the poster, not the backdrop the top of the page uses.
+    void completedSeriesSaysWhenItFinished() {
+        Fixture f;
+        f.anime.posterUrl = QUrl(QStringLiteral("https://img.test/poster.webp"));
+        f.anime.backdropUrl = QUrl(QStringLiteral("https://img.test/backdrop.webp"));
+        QVERIFY(f.open());
+        const auto finished = QDateTime::currentDateTime();
+        for (const auto& [number, bytes] : {std::pair{1.0, 100'000'000LL}, {2.0, 186'000'000LL}}) {
+            auto task = f.add(number, downloads::TaskState::Completed);
+            QVERIFY(task);
+            task->bytesDone = task->bytesTotal = bytes;
+            task->finishedAt = finished.addSecs(number == 1.0 ? -60 : 0);
+            QVERIFY(f.queue->save(*task));
+        }
+        f.manager->start(false);
+        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        QCOMPARE(view.completed()->rows().size(), 1);
+        const auto& series = view.completed()->rows().first();
+        QCOMPARE(series.summary, QStringLiteral("2 episodios · 286 MB · hoy ") +
+                                     QLocale(QLocale::Spanish, QLocale::Spain)
+                                         .toString(finished.time(), QStringLiteral("HH:mm")));
+        QCOMPARE(series.poster, f.anime.posterUrl);
+        QVERIFY(!view.barVisible());
+    }
+
+    // The bar counts the episode on view among the whole line, finished ones of series still
+    // in line included, as Steam's: "Descargando 2 de 3 · A ep. 2".
+    void barCountsTheLineAsSteam() {
+        Fixture f;
+        f.anime.posterUrl = QUrl(QStringLiteral("https://img.test/poster.webp"));
+        QVERIFY(f.open());
+        auto done = f.add(1, downloads::TaskState::Completed);
+        QVERIFY(done);
+        done->finishedAt = QDateTime::currentDateTime();
+        QVERIFY(f.queue->save(*done));
+        auto running = f.add(2, downloads::TaskState::Downloading);
+        QVERIFY(running);
+        running->bytesDone = 45;
+        running->bytesTotal = 100;
+        QVERIFY(f.queue->save(*running));
+        QVERIFY(f.add(3, downloads::TaskState::Failed));
+        f.manager->start(false); // the state stays as stored: nothing transfers
+        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        QVERIFY(view.barVisible());
+        QCOMPARE(view.barMode(), app::DownloadsView::Mode::Active);
+        QCOMPARE(view.barText(), QStringLiteral("Descargando 2 de 3 · A ep. 2"));
+        QCOMPARE(view.barPercent(), QStringLiteral("45 %"));
+        QCOMPARE(view.barProblem(), QStringLiteral("1 con error"));
+        QCOMPARE(view.barPoster(), f.anime.posterUrl);
     }
 
     // Only what is still paused counts: one paused all together and then cancelled does not

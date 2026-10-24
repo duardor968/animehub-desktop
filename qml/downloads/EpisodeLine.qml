@@ -26,6 +26,8 @@ Item {
     property int indent
     property int barWidth
     property int actionsWidth
+    // Room left after the actions: the series rows' chevron column.
+    property int trailing
 
     signal cancelRequested(var taskId, string label, string partial)
 
@@ -42,7 +44,7 @@ Item {
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: root.indent
-        anchors.rightMargin: 32
+        anchors.rightMargin: 32 + root.trailing
         spacing: 0
 
         Poster {
