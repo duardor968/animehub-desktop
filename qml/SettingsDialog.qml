@@ -30,6 +30,8 @@ ModalDialog {
                                              ? "No disponible en un perfil de prueba" : ""
 
     readonly property int controlWidth: 300
+    // Linux has no bundled mpv (the system's is used) and its desktops name things otherwise.
+    readonly property bool windows: Qt.platform.os === "windows"
     readonly property var categories: [
         { key: "downloads", name: "Descargas" },
         { key: "general", name: "General" },
@@ -400,11 +402,16 @@ ModalDialog {
                 SettingsPage {
                     SettingRow {
                         label: "Reproductor"
-                        info: "El reproductor incluido guarda el minuto en el que te quedas. Con la "
-                              + "aplicación de Windows, abrir un episodio lo marca como visto."
+                        info: dialog.windows
+                              ? "El reproductor incluido guarda el minuto en el que te quedas. Con la "
+                                + "aplicación de Windows, abrir un episodio lo marca como visto."
+                              : "mpv guarda el minuto en el que te quedas. Con la aplicación "
+                                + "predeterminada, abrir un episodio lo marca como visto."
 
                         Choice {
-                            model: ["Incluido (mpv)", "Aplicación predeterminada de Windows"]
+                            model: dialog.windows
+                                   ? ["Incluido (mpv)", "Aplicación predeterminada de Windows"]
+                                   : ["mpv", "Aplicación predeterminada"]
                             currentIndex: dialog.settings.systemPlayer ? 1 : 0
                             onActivated: index => dialog.settings.systemPlayer = index === 1
                             Accessible.name: "Reproductor"
@@ -422,17 +429,20 @@ ModalDialog {
                     }
 
                     SettingRow {
-                        label: "Al iniciar Windows"
+                        label: dialog.windows ? "Al iniciar Windows" : "Al iniciar sesión"
 
                         unavailable: dialog.isolatedReason
                         Toggle {
-                            text: "Abrir AnimeHub en la bandeja"
+                            // A desktop without a tray (GNOME without its extension) shows the window.
+                            text: dialog.app.tray ? "Abrir AnimeHub en la bandeja" : "Abrir AnimeHub"
                             checked: dialog.settings.startWithWindows
                             onToggled: dialog.settings.startWithWindows = checked
                         }
                     }
 
+                    // Without a tray, closing the window quits.
                     SettingRow {
+                        visible: dialog.app.tray
                         label: "Al cerrar la ventana"
 
                         Choice {
@@ -531,13 +541,15 @@ ModalDialog {
     FolderDialog {
         id: folderDialog
         title: "Carpeta de descargas"
-        currentFolder: "file:///" + dialog.settings.downloadDirectory
+        // A Windows path starts with its drive, a Linux one with its "/".
+        currentFolder: (dialog.windows ? "file:///" : "file://") + dialog.settings.downloadDirectory
         onAccepted: dialog.settings.downloadDirectory = dialog.app.localPath(selectedFolder)
     }
     FileDialog {
         id: jdFile
         title: "Elegir JDownloader"
-        nameFilters: ["Aplicaciones (*.exe)"]
+        // On Linux JDownloader2 is a script without an extension.
+        nameFilters: dialog.windows ? ["Aplicaciones (*.exe)"] : []
         onAccepted: dialog.settings.jdExecutable = dialog.app.localPath(selectedFile)
     }
 }

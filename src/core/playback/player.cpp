@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QStandardPaths>
 #include <QUrl>
 #include <QUuid>
 
@@ -73,8 +74,13 @@ std::expected<void, QString> Player::play(const PlayRequest& request) {
         return playWithMpv(request, settings);
     }
     if (!open_with_system_ || !open_with_system_(request.filePath)) {
+#ifdef Q_OS_WIN
         return std::unexpected(
             QStringLiteral("Windows no tiene una aplicación asociada a este tipo de archivo."));
+#else
+        return std::unexpected(
+            QStringLiteral("El sistema no tiene una aplicación asociada a este tipo de archivo."));
+#endif
     }
     // Without a way to follow the system player, opening the episode counts as watching it.
     if (auto stored =
@@ -89,7 +95,13 @@ std::expected<void, QString> Player::play(const PlayRequest& request) {
 std::expected<void, QString> Player::playWithMpv(const PlayRequest& request,
                                                  const PlayerSettings& settings) {
     if (!QFileInfo(settings.mpvExecutable).isExecutable()) {
+#ifdef Q_OS_WIN
         return std::unexpected(QStringLiteral("No se encuentra el reproductor incluido (mpv)."));
+#else
+        // Linux uses the system's mpv: the project publishes no Linux build to ship.
+        return std::unexpected(QStringLiteral("Para reproducir con mpv, instala el paquete mpv o "
+                                              "elige la aplicación predeterminada en Ajustes."));
+#endif
     }
     if (session_) {
         // One followed playback at a time: the previous one closes with its progress saved.
@@ -103,10 +115,18 @@ std::expected<void, QString> Player::playWithMpv(const PlayRequest& request,
     QDir().mkpath(settings.configDirectory);
     auto session = std::make_unique<Session>();
     session->request = request;
+    const auto name = QStringLiteral("animehub-mpv-") + QUuid::createUuid().toString(QUuid::Id128);
+#ifdef Q_OS_WIN
+    session->pipeName = name;
+    const auto server = QStringLiteral("\\\\.\\pipe\\") + name;
+#else
+    // A Unix socket in the user's private runtime folder; QLocalSocket takes its full path.
     session->pipeName =
-        QStringLiteral("animehub-mpv-") + QUuid::createUuid().toString(QUuid::Id128);
+        QDir(QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation)).filePath(name);
+    const auto server = session->pipeName;
+#endif
     QStringList arguments = {
-        QStringLiteral("--input-ipc-server=\\\\.\\pipe\\") + session->pipeName,
+        QStringLiteral("--input-ipc-server=") + server,
         QStringLiteral("--force-window=immediate"),
         QStringLiteral("--keep-open=no"),
         QStringLiteral("--config-dir=") + QDir::toNativeSeparators(settings.configDirectory),

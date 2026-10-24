@@ -15,8 +15,34 @@
 #include <QLocalSocket>
 #include <QMenu>
 
+#ifdef Q_OS_LINUX
+#include "notifications_linux.h"
+
+#include <QStandardPaths>
+#endif
+
 namespace animehub::app {
 namespace {
+
+// The engines: shipped next to the executable on Windows; on Linux, the system's, as neither
+// aria2 nor mpv publishes Linux builds.
+QString aria2Executable(const QString& engines) {
+#ifdef Q_OS_WIN
+    return QDir(engines).filePath(QStringLiteral("aria2/aria2c.exe"));
+#else
+    Q_UNUSED(engines);
+    return QStringLiteral("aria2c"); // QProcess looks it up on PATH at every start
+#endif
+}
+
+QString mpvExecutable(const QString& engines) {
+#ifdef Q_OS_WIN
+    return QDir(engines).filePath(QStringLiteral("mpv/mpv.exe"));
+#else
+    Q_UNUSED(engines);
+    return QStandardPaths::findExecutable(QStringLiteral("mpv"));
+#endif
+}
 
 QString instanceName(const QString& data_directory) {
     const auto key = QDir::cleanPath(QDir(data_directory).absolutePath()).toLower().toUtf8();
@@ -85,9 +111,8 @@ AppController::AppController(AppPaths paths, QObject* parent)
             return !paths_.isolated && platform::restoreFromTrash(source, destination);
         });
 
-    aria2_ = std::make_unique<downloads::Aria2>(
-        network_, QDir(paths_.engines).filePath(QStringLiteral("aria2/aria2c.exe")),
-        api_options.userAgent);
+    aria2_ = std::make_unique<downloads::Aria2>(network_, aria2Executable(paths_.engines),
+                                                api_options.userAgent);
     mega_ = std::make_unique<downloads::mega::Api>(network_);
     pixeldrain_ = std::make_unique<downloads::pixeldrain::Api>(network_);
     myjd_ = std::make_unique<downloads::myjd::Client>(network_);
@@ -145,7 +170,7 @@ AppController::AppController(AppPaths paths, QObject* parent)
             return playback::PlayerSettings{
                 .kind = settings_->systemPlayer() ? playback::PlayerKind::System
                                                   : playback::PlayerKind::Bundled,
-                .mpvExecutable = QDir(paths_.engines).filePath(QStringLiteral("mpv/mpv.exe")),
+                .mpvExecutable = mpvExecutable(paths_.engines),
                 .configDirectory = QDir(paths_.data).filePath(QStringLiteral("mpv"))};
         },
         [](const QString& path) { return shell::open(path); });
@@ -189,6 +214,19 @@ AppController::AppController(AppPaths paths, QObject* parent)
                    QStringLiteral(". ") + display::issue(task->issue),
                task->slug);
     });
+#ifdef Q_OS_LINUX
+    // Without the system's aria2, MEGA and Pixeldrain downloads wait in the queue until it is
+    // installed.
+    connect(downloads_.get(), &downloads::DownloadManager::taskAdded, this, [this](qint64 id) {
+        const auto task = downloads_->task(id);
+        if (task && task->engine == downloads::DownloadEngine::Native &&
+            QStandardPaths::findExecutable(QStringLiteral("aria2c")).isEmpty()) {
+            emit message(
+                QStringLiteral("Instala el paquete aria2 para descargar de MEGA y Pixeldrain."),
+                true);
+        }
+    });
+#endif
 }
 
 AppController::~AppController() {
@@ -212,6 +250,15 @@ void AppController::start() {
     if (!paths_.smoke) {
         remote_service_->start();
         setupTray();
+#ifdef Q_OS_LINUX
+        notifications_ = std::make_unique<Notifications>(appIcon().pixmap(128).toImage());
+        connect(notifications_.get(), &Notifications::activated, this, [this](const QString& slug) {
+            emit showRequested();
+            if (!slug.isEmpty()) {
+                emit animeRequested(slug);
+            }
+        });
+#endif
     }
 }
 
@@ -319,11 +366,17 @@ void AppController::setupTray() {
 }
 
 void AppController::notify(const QString& title, const QString& text, const QString& slug) {
+#ifdef Q_OS_LINUX
+    if (notifications_ && settings_->notifications()) {
+        notifications_->show(title, text, slug);
+    }
+#else
     if (!tray_ || !settings_->notifications()) {
         return;
     }
     notified_slug_ = slug;
     tray_->showMessage(title, text, appIcon(), 8000);
+#endif
 }
 
 void AppController::notifyNewEpisodes(const QString& slug, const QList<double>& numbers) {

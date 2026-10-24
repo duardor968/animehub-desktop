@@ -16,7 +16,11 @@ QImage GlyphProvider::requestImage(const QString& id, QSize* size, const QSize& 
     if (ok && code > 0 && code <= 0x10FFFF) {
         QPainter painter(&image);
         painter.setRenderHint(QPainter::TextAntialiasing);
+#ifdef Q_OS_WIN
         QFont font(QStringLiteral("Segoe Fluent Icons"));
+#else
+        QFont font(QStringLiteral("Symbols")); // Uno Fluent Icons, loaded by main()
+#endif
         font.setPixelSize(side);
         painter.setFont(font);
         painter.setPen(Qt::white); // controls tint it with their icon colour

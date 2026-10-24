@@ -63,8 +63,14 @@ void JDownloaderView::start() {
 
 void JDownloaderView::launch() {
     const QFileInfo executable(settings_.jdExecutable());
-    if (!executable.isAbsolute() || !executable.isFile() ||
-        executable.suffix().compare(QStringLiteral("exe"), Qt::CaseInsensitive) != 0 ||
+    // Windows starts a program by its .exe; on Linux JDownloader2 is a script marked executable.
+#ifdef Q_OS_WIN
+    const bool runnable =
+        executable.suffix().compare(QStringLiteral("exe"), Qt::CaseInsensitive) == 0;
+#else
+    const bool runnable = executable.isExecutable();
+#endif
+    if (!executable.isAbsolute() || !executable.isFile() || !runnable ||
         !QProcess::startDetached(executable.absoluteFilePath(), {})) {
         problem_ = QStringLiteral("Selecciona el ejecutable de JDownloader en Ajustes.");
     } else {

@@ -12,6 +12,13 @@
 
 #include <dwmapi.h>
 #endif
+#ifdef Q_OS_LINUX
+#include <QCoreApplication>
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusPendingCallWatcher>
+#include <QStringList>
+#endif
 
 namespace animehub::app::shell {
 
@@ -27,6 +34,26 @@ void reveal(const QString& path) {
     explorer.setNativeArguments(
         QStringLiteral("/select,\"%1\"").arg(QDir::toNativeSeparators(path)));
     if (explorer.startDetached()) {
+        return;
+    }
+#endif
+#ifdef Q_OS_LINUX
+    // The file managers' own interface (Nautilus, Dolphin, Nemo, Thunar...) selects the file;
+    // without one, the folder opens.
+    if (auto bus = QDBusConnection::sessionBus(); bus.isConnected()) {
+        const auto service = QStringLiteral("org.freedesktop.FileManager1");
+        auto show =
+            QDBusMessage::createMethodCall(service, QStringLiteral("/org/freedesktop/FileManager1"),
+                                           service, QStringLiteral("ShowItems"));
+        show << QStringList{QUrl::fromLocalFile(path).toString()} << QString();
+        auto* call = new QDBusPendingCallWatcher(bus.asyncCall(show), QCoreApplication::instance());
+        QObject::connect(call, &QDBusPendingCallWatcher::finished, call,
+                         [path](QDBusPendingCallWatcher* watcher) {
+                             if (watcher->isError()) {
+                                 open(QFileInfo(path).absolutePath());
+                             }
+                             watcher->deleteLater();
+                         });
         return;
     }
 #endif
@@ -47,6 +74,7 @@ void tintTitleBar(QWindow* window, const QColor& background, const QColor& text)
     DwmSetWindowAttribute(hwnd, kCaptionColor, &caption, sizeof(caption));
     DwmSetWindowAttribute(hwnd, kTextColor, &title, sizeof(title));
 #else
+    // Elsewhere the title bar is the desktop's own.
     Q_UNUSED(window);
     Q_UNUSED(background);
     Q_UNUSED(text);

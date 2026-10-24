@@ -38,7 +38,10 @@ QtObject {
     readonly property int subtitle: 18
     readonly property int title: 28
 
-    readonly property string iconFont: "Segoe Fluent Icons"
+    // Segoe Fluent Icons is Windows' own; elsewhere Uno Fluent Icons (family "Symbols") draws the
+    // same codes.
+    readonly property string iconFont: Qt.platform.os === "windows" ? "Segoe Fluent Icons"
+                                                                    : "Symbols"
 
     // A Segoe Fluent Icons glyph (the system icon font of Windows 11) as text, or as an image
     // for a control's `icon.source`.

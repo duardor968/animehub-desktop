@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QIcon>
 #include <QMessageBox>
 #include <QNetworkDiskCache>
@@ -99,16 +100,24 @@ int main(int argc, char* argv[]) {
             break;
         }
     }
+#ifdef Q_OS_WIN
     if (qEnvironmentVariable("QT_QPA_PLATFORM") == u"offscreen" &&
         qEnvironmentVariableIsEmpty("QT_QPA_FONTDIR"))
         qputenv("QT_QPA_FONTDIR",
                 QDir(qEnvironmentVariable("WINDIR")).filePath(QStringLiteral("Fonts")).toUtf8());
+#endif
     QApplication::setApplicationName(QStringLiteral("AnimeHub"));
     QApplication::setApplicationVersion(animehub::app::AppController::version());
     QApplication::setOrganizationName(QString());
     QApplication app(argc, argv);
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/qt/qml/AnimeHub/assets/animehub.png")));
     QApplication::setQuitOnLastWindowClosed(false); // closing can mean "keep running in the tray"
+#ifdef Q_OS_LINUX
+    // The desktop finds AnimeHub's name and icon in the desktop entry of this name.
+    QGuiApplication::setDesktopFileName(QStringLiteral(ANIMEHUB_APP_ID));
+    // Theme.iconFont: Segoe Fluent Icons is only on Windows.
+    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/uno-fluentui-assets.ttf"));
+#endif
 
     QCommandLineParser parser;
     parser.addHelpOption();

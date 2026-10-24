@@ -14,6 +14,7 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QSqlError>
+#include <QStandardPaths>
 #include <QTextStream>
 #include <QUuid>
 
@@ -99,8 +100,15 @@ int main(int argc, char** argv) {
         require(!destination.isEmpty() && QDir::isAbsolutePath(destination) &&
                     !manifestPath.isEmpty(),
                 QStringLiteral("--data-dir must be absolute; --manifest is required"));
+#ifdef Q_OS_WIN
         const auto originalProfile =
             qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/AnimeHub");
+#else
+        // AnimeHub's AppLocalDataLocation without an organization: ~/.local/share/AnimeHub.
+        const auto originalProfile =
+            QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
+            QStringLiteral("/AnimeHub");
+#endif
         const auto canonicalDestination = QFileInfo(destination).canonicalFilePath();
         const auto canonicalOriginal = QFileInfo(originalProfile).canonicalFilePath();
         require(normalized(destination) != normalized(originalProfile) &&

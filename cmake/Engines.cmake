@@ -2,8 +2,7 @@
 # Every archive is pinned by URL and SHA-256; a mismatch fails the configure step. Archives are
 # cached in ANIMEHUB_ENGINE_CACHE so presets and fresh configures reuse them offline.
 
-set(ANIMEHUB_ENGINE_CACHE "${PROJECT_SOURCE_DIR}/out/engine-cache" CACHE PATH
-  "Where pinned engine archives are cached")
+include("${CMAKE_CURRENT_LIST_DIR}/Pinned.cmake")
 
 set(ANIMEHUB_ARIA2_VERSION "1.37.0")
 set(ANIMEHUB_ARIA2_ARCHIVE "aria2-1.37.0-win-64bit-build1.zip")
@@ -20,31 +19,6 @@ set(ANIMEHUB_MPV_LICENSES
   "LICENSE.GPL|edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
   "Copyright|bfe9ee4cceabcb8ecbfadf208d04156f73d801e6a57369a5606bb8341e204a23"
 )
-
-function(animehub_fetch_pinned file_name url sha256 out_path)
-  set(path "${ANIMEHUB_ENGINE_CACHE}/${file_name}")
-  if(EXISTS "${path}")
-    file(SHA256 "${path}" actual)
-    if(NOT actual STREQUAL sha256)
-      message(STATUS "Discarding ${file_name}: its SHA-256 does not match the pin")
-      file(REMOVE "${path}")
-    endif()
-  endif()
-  if(NOT EXISTS "${path}")
-    message(STATUS "Downloading ${url}")
-    file(DOWNLOAD "${url}" "${path}.partial"
-      EXPECTED_HASH SHA256=${sha256}
-      TLS_VERIFY ON
-      STATUS status)
-    list(GET status 0 code)
-    if(NOT code EQUAL 0)
-      file(REMOVE "${path}.partial")
-      message(FATAL_ERROR "Could not download ${url}: ${status}")
-    endif()
-    file(RENAME "${path}.partial" "${path}")
-  endif()
-  set(${out_path} "${path}" PARENT_SCOPE)
-endfunction()
 
 function(animehub_stage_engines destination)
   set(stamp_value "${ANIMEHUB_ARIA2_SHA256};${ANIMEHUB_MPV_SHA256};${ANIMEHUB_MPV_LICENSES};strip-debug")

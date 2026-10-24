@@ -14,6 +14,10 @@ option(ANIMEHUB_ENABLE_CLANG_TIDY "Run clang-tidy while compiling" OFF)
 option(ANIMEHUB_BUNDLE_ENGINES "Download and verify aria2 and mpv next to the executable" ON)
 
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Network Sql Qml Quick QuickControls2 Widgets)
+if(LINUX)
+  # Desktop notifications and "show in folder" go over the session bus.
+  find_package(Qt6 6.11 REQUIRED COMPONENTS DBus)
+endif()
 
 # MSVC exposes the evolving C++26 mode as /std:c++latest. CMake 4.4 does not
 # map CXX26 to that flag yet, so keep the requested standard exact and provide
@@ -43,7 +47,10 @@ function(animehub_configure_target target)
       /W4 /permissive- /Zc:__cplusplus /utf-8 /external:anglebrackets /external:W0
       /wd4702) # unreachable code: reported inside Qt's templates
   else()
-    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    # GCC also reports the members a designated initializer leaves to their defaults, which is
+    # how this code builds its value types; MSVC and Clang do not.
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic
+      $<$<CXX_COMPILER_ID:GNU>:-Wno-missing-field-initializers>)
   endif()
   target_compile_definitions(${target} PRIVATE
     QT_NO_CAST_FROM_ASCII
@@ -157,6 +164,12 @@ qt_add_qml_module(animehub-desktop
 target_include_directories(animehub-desktop PRIVATE src/app)
 if(WIN32)
   target_link_libraries(animehub-desktop PRIVATE dwmapi)
+elseif(LINUX)
+  target_sources(animehub-desktop PRIVATE src/app/notifications_linux.cpp
+                                          src/app/notifications_linux.h)
+  include(cmake/IconFont.cmake)
+  animehub_add_icon_font(animehub-desktop)
+  target_link_libraries(animehub-desktop PRIVATE Qt6::DBus)
 endif()
 target_link_libraries(animehub-desktop
   PRIVATE
@@ -168,7 +181,12 @@ target_link_libraries(animehub-desktop
     Qt6::Widgets
 )
 animehub_configure_target(animehub-desktop)
-set_target_properties(animehub-desktop PROPERTIES OUTPUT_NAME "AnimeHub")
+if(WIN32)
+  set_target_properties(animehub-desktop PROPERTIES OUTPUT_NAME "AnimeHub")
+else()
+  # Lowercase, as Linux programs are; "AnimeHub" is also the QML module's build folder.
+  set_target_properties(animehub-desktop PROPERTIES OUTPUT_NAME "animehub")
+endif()
 
 if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
   include(cmake/Deploy.cmake)

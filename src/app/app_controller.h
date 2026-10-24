@@ -22,6 +22,10 @@ class QMenu;
 
 namespace animehub::app {
 
+#ifdef Q_OS_LINUX
+class Notifications;
+#endif
+
 struct AppPaths {
     QString data;      // library, settings, caches
     QString engines;   // aria2 and mpv shipped next to the executable
@@ -48,6 +52,8 @@ class AppController final : public QObject {
     Q_PROPERTY(AnimeView* libraryAnime READ libraryAnime CONSTANT)
     Q_PROPERTY(AnimeView* catalogAnime READ catalogAnime CONSTANT)
     Q_PROPERTY(QString version READ version CONSTANT)
+    // The desktop shows tray icons: GNOME without its extension does not.
+    Q_PROPERTY(bool tray READ hasTray CONSTANT)
     Q_PROPERTY(QString problem READ problem NOTIFY problemChanged)
 
 public:
@@ -60,6 +66,9 @@ public:
     }
     [[nodiscard]] QString problem() const {
         return problem_;
+    }
+    [[nodiscard]] bool hasTray() const {
+        return QSystemTrayIcon::isSystemTrayAvailable();
     }
     [[nodiscard]] QNetworkAccessManager& network() {
         return network_;
@@ -148,6 +157,9 @@ private:
     std::unique_ptr<AnimeView> catalog_anime_;
     std::unique_ptr<QSystemTrayIcon> tray_;
     std::unique_ptr<QMenu> tray_menu_;
+#ifdef Q_OS_LINUX
+    std::unique_ptr<Notifications> notifications_; // shown with or without a tray
+#endif
     QLocalServer instance_server_;
     QString notified_slug_;
     QString problem_;
