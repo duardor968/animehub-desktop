@@ -53,6 +53,11 @@ void request(QNetworkAccessManager& network, myjd::Client* cloud, const Task& ta
     auto* reply = network.get(request);
     QObject::connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
     QObject::connect(reply, &QNetworkReply::finished, context, [reply, done = std::move(done)] {
+        // Nothing listens: JDownloader is closed or its local API is off, so nothing reached it.
+        if (reply->error() == QNetworkReply::ConnectionRefusedError) {
+            done(std::unexpected(myjd::Failure::DeviceOffline));
+            return;
+        }
         if (reply->error() != QNetworkReply::NoError ||
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200) {
             done(std::unexpected(myjd::Failure::Network));

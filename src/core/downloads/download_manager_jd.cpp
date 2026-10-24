@@ -73,6 +73,13 @@ void DownloadManager::jdRequest(qint64 id, const QString& path, const QJsonArray
                 return;
             }
             if (!result) {
+                const auto failure = result.error();
+                if (tasks_[id].engineJobId <= 0 && (failure == myjd::Failure::DeviceOffline ||
+                                                    failure == myjd::Failure::WrongCredentials ||
+                                                    failure == myjd::Failure::EmailNotConfirmed)) {
+                    unreachedJd(id, failure);
+                    return;
+                }
                 // Never clear submission/job/IDs on disconnect: reconnect reconciles the same job.
                 retryLater(
                     id, TaskIssue::Engine,
@@ -81,6 +88,36 @@ void DownloadManager::jdRequest(qint64 id, const QString& path, const QJsonArray
             }
             done(result);
         });
+}
+
+void DownloadManager::releaseJd(qint64 id) {
+    auto& task = tasks_[id];
+    task.engineSubmission.clear();
+    task.engineJobId = 0;
+    task.engineLinkIds.clear();
+    task.enginePhase.clear();
+}
+
+void DownloadManager::unreachedJd(qint64 id, myjd::Failure failure) {
+    auto& task = tasks_[id];
+    const bool cancelled = task.enginePhase == u"cancel_requested";
+    releaseJd(id);
+    if (cancelled) {
+        task.state = TaskState::Cancelled;
+        task.bytesPerSecond = 0;
+        task.finishedAt = QDateTime::currentDateTimeUtc();
+        store(task);
+        live_.remove(id);
+        pump();
+        return;
+    }
+    fail(id, TaskIssue::Engine,
+         task.engine == DownloadEngine::JDownloaderLocal
+             ? u"JDownloader no responde en este PC. Activa su API local o usa MyJDownloader."_s
+         : failure == myjd::Failure::DeviceOffline
+             ? u"JDownloader no está conectado a MyJDownloader en ese equipo. Ábrelo allí o "
+               u"elige otro equipo en Ajustes."_s
+             : u"Conecta tu cuenta de MyJDownloader en Ajustes."_s);
 }
 
 void DownloadManager::submitJd(qint64 id, const api::ResolvedLink& link) {
@@ -275,17 +312,13 @@ void DownloadManager::collectJd(qint64 id) {
                                     // history. Nor is there anything left in JDownloader to
                                     // wait for: the task lets the job go, so a retry hands the
                                     // episode over again.
-                                    auto& task = tasks_[id];
                                     const auto detail =
-                                        task.engineLinkIds.isEmpty()
+                                        tasks_[id].engineLinkIds.isEmpty()
                                             ? u"JDownloader no encontró ningún archivo en el "
                                               u"enlace."_s
                                             : u"JDownloader ya no tiene los archivos de este "
                                               u"episodio."_s;
-                                    task.engineSubmission.clear();
-                                    task.engineJobId = 0;
-                                    task.engineLinkIds.clear();
-                                    task.enginePhase.clear();
+                                    releaseJd(id);
                                     fail(id, TaskIssue::SourceRemoved, detail);
                                     return;
                                 }

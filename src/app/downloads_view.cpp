@@ -74,9 +74,13 @@ QString taskDetail(const Task& task) {
     if (task.state == TaskState::Failed && task.unconfirmed())
         return QStringLiteral(
             "Envío sin confirmar · revisa el trabajo en JDownloader antes de volver a enviarlo");
+    // What JDownloader never got says why, and what to do.
     if ((task.state == TaskState::Waiting || task.state == TaskState::Failed) &&
         task.issue == TaskIssue::Engine)
-        return QStringLiteral("Sin conexión con JDownloader · último estado: ") + phaseName(task);
+        return task.handedOver() || task.issueDetail.isEmpty()
+                   ? QStringLiteral("Sin conexión con JDownloader · último estado: ") +
+                         phaseName(task)
+                   : task.issueDetail;
     // The usual reasons speak of MEGA, Pixeldrain and aria2. JDownloader takes other servers,
     // and its own failures carry their reason; the network and the API keep theirs.
     if (task.state == TaskState::Failed && task.issue == TaskIssue::NoSource)

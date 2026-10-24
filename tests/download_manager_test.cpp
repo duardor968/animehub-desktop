@@ -10,6 +10,7 @@
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QSignalSpy>
+#include <QTcpServer>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -106,6 +107,7 @@ public:
     bool extracting = false;
     bool extracted = false;
     QString destination;
+    QString links;
     int submissions = 0;
     int removed = 0;
     int submitDelay = 0;
@@ -116,6 +118,7 @@ public:
             const auto object =
                 QJsonDocument::fromJson(QUrl::fromPercentEncoding(r.query).toUtf8()).object();
             destination = object.value(u"destinationFolder").toString();
+            links = object.value(u"links").toString();
             scoped = scoped && object.value(u"assignJobID").toBool() &&
                      !object.value(u"autostart").toBool();
             return HttpTestServer::Response{.body = "{\"data\":{\"id\":77}}",
@@ -191,6 +194,9 @@ class DownloadManagerTest final : public QObject {
     int mega_calls_ = 0;
     int max_concurrent_ = 2;
     DownloadEngine engine_ = DownloadEngine::Native;
+    DownloadEngine other_servers_ = DownloadEngine::Native;
+    QUrl jd_endpoint_;
+    QString jd_device_;
 
     void serveMega(int bytes_per_tick = 0, int status = 200) {
         server_->route("POST", "/cs", [this](const HttpTestServer::Request&) {
@@ -216,6 +222,32 @@ class DownloadManagerTest final : public QObject {
                        [body](const HttpTestServer::Request&) {
                            return HttpTestServer::Response{.body = body};
                        });
+    }
+
+    // The servers the last request for a source asked for.
+    QStringList askedProviders() const {
+        QStringList providers;
+        for (const auto& request : server_->requests()) {
+            if (request.path.endsWith("/downloads/resolve")) {
+                providers.clear();
+                for (const auto& provider :
+                     QJsonDocument::fromJson(request.body).object().value(u"providers").toArray()) {
+                    providers.append(provider.toString());
+                }
+            }
+        }
+        return providers;
+    }
+
+    // A loopback port nothing listens on.
+    static QUrl closedPort() {
+        QTcpServer probe;
+        if (!probe.listen(QHostAddress::LocalHost)) {
+            return {};
+        }
+        const auto port = probe.serverPort();
+        probe.close();
+        return QUrl(QStringLiteral("http://127.0.0.1:%1").arg(port));
     }
 
     // Episodes in the order the manager asked the API for their sources.
@@ -293,7 +325,9 @@ class DownloadManagerTest final : public QObject {
                 return DownloadSettings{.directory = downloads_,
                                         .maxConcurrent = max_concurrent_,
                                         .engine = engine_,
-                                        .jdEndpoint = server_->url()};
+                                        .otherServers = other_servers_,
+                                        .jdEndpoint = jd_endpoint_,
+                                        .jdDeviceId = jd_device_};
             });
         manager_->start(transfers);
     }
@@ -352,6 +386,9 @@ private slots:
         mega_calls_ = 0;
         max_concurrent_ = 2;
         engine_ = DownloadEngine::Native;
+        other_servers_ = DownloadEngine::Native;
+        jd_endpoint_ = server_->url();
+        jd_device_.clear();
         makeManager();
     }
 
@@ -699,6 +736,104 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
         QCOMPARE(server_->count("/linkgrabberv2/addLinks"), 1);
         QCOMPARE(server_->count("/api/v1/anime/sousou-no-frieren/downloads/resolve"), 1);
+    }
+
+    void episodeOnlyOnOtherServersGoesOnWithJDownloaderIntoTheLibrary() {
+        other_servers_ = DownloadEngine::JDownloaderLocal;
+        FakeJd jd;
+        jd.install(*server_);
+        const auto mp4upload = QStringLiteral("https://www.mp4upload.com/abc123");
+        resolveTo(resolution({{"MP4UPLOAD", mp4upload},
+                              {"ONE_FICHIER", QStringLiteral("https://1fichier.com/?x")}}));
+        const auto created = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(created);
+        const auto id = *created;
+        QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
+        // The same task, from one request that asks MEGA and Pixeldrain first.
+        QCOMPARE(manager_->tasks().size(), 1);
+        QCOMPARE(server_->count("/api/v1/anime/sousou-no-frieren/downloads/resolve"), 1);
+        QCOMPARE(askedProviders(),
+                 (QStringList{QStringLiteral("MEGA"), QStringLiteral("PIXELDRAIN"),
+                              QStringLiteral("MP4UPLOAD"), QStringLiteral("ONE_FICHIER")}));
+        QCOMPARE(jd.links, mp4upload);
+        const auto handed = *taskOf(id);
+        QCOMPARE(handed.engine, DownloadEngine::JDownloaderLocal);
+        QCOMPARE(handed.engineEndpoint, server_->url().toString());
+        QCOMPARE(handed.provider, api::Provider::Mp4Upload);
+        QCOMPARE(handed.state, TaskState::Downloading);
+        QVERIFY(handed.engineDestination.startsWith(QDir(downloads_).filePath(kFrieren) +
+                                                    QStringLiteral("/.jd-")));
+        QCOMPARE(QDir::fromNativeSeparators(jd.destination), handed.engineDestination);
+        // JDownloader's progress, as for any of its tasks.
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->bytesTotal, 8, kTimeout);
+        QFile media(QDir(handed.engineDestination).filePath(QStringLiteral("abc123.mp4")));
+        QVERIFY(media.open(QIODevice::WriteOnly));
+        QCOMPARE(media.write("12345678"), 8);
+        media.close();
+        jd.finished = true;
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->state, TaskState::Completed, kTimeout);
+        const auto path = util::downloadBasePath(downloads_, kFrieren, titleOf(kFrieren), 1) +
+                          QStringLiteral(".mp4");
+        QCOMPARE(taskOf(id)->targetPath, path);
+        const auto episode = library_->episode(kFrieren, 1);
+        QVERIFY(episode && *episode);
+        QCOMPARE((*episode)->filePath, path);
+        QVERIFY(!QFileInfo::exists(handed.engineDestination));
+        QCOMPARE(jd.submissions, 1);
+        QVERIFY(jd.scoped);
+    }
+
+    void withoutJDownloaderAnEpisodeOnlyOnOtherServersFails() {
+        FakeJd jd;
+        jd.install(*server_);
+        resolveTo(resolution({{"MP4UPLOAD", QStringLiteral("https://www.mp4upload.com/abc123")}}));
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::NoSource);
+        QCOMPARE(taskOf(*id)->engine, DownloadEngine::Native);
+        QCOMPARE(askedProviders(),
+                 (QStringList{QStringLiteral("MEGA"), QStringLiteral("PIXELDRAIN")}));
+        QCOMPARE(jd.submissions, 0);
+    }
+
+    void otherServersStopWithTheReasonWhenJDownloaderDoesNotAnswer() {
+        other_servers_ = DownloadEngine::JDownloaderLocal;
+        jd_endpoint_ = closedPort();
+        QVERIFY(jd_endpoint_.isValid());
+        QVERIFY(jd_endpoint_.port() != 3128); // never the JDownloader of this computer
+        resolveTo(resolution({{"MP4UPLOAD", QStringLiteral("https://www.mp4upload.com/abc123")}}));
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::Engine);
+        QCOMPARE(
+            taskOf(*id)->issueDetail,
+            QStringLiteral(
+                "JDownloader no responde en este PC. Activa su API local o usa MyJDownloader."));
+        QVERIFY(!taskOf(*id)->handedOver()); // nothing to reconcile in JDownloader
+
+        // With its API on, a retry hands the episode over.
+        FakeJd jd;
+        jd.install(*server_);
+        jd_endpoint_ = server_->url();
+        manager_->retry(*id);
+        QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
+        QCOMPARE(jd.submissions, 1);
+        QCOMPARE(taskOf(*id)->engineEndpoint, server_->url().toString());
+    }
+
+    void otherServersThroughMyJDownloaderStopWithoutTheAccount() {
+        other_servers_ = DownloadEngine::JDownloaderCloud;
+        jd_device_ = QStringLiteral("dev1");
+        resolveTo(resolution({{"MP4UPLOAD", QStringLiteral("https://www.mp4upload.com/abc123")}}));
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(taskOf(*id)->engine, DownloadEngine::JDownloaderCloud);
+        QCOMPARE(taskOf(*id)->issueDetail,
+                 QStringLiteral("Conecta tu cuenta de MyJDownloader en Ajustes."));
+        QVERIFY(!taskOf(*id)->handedOver());
     }
 
     void downloadsAndVerifiesAMegaEpisode() {

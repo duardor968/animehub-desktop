@@ -39,6 +39,9 @@ class AppSettings final : public QObject {
 public:
     enum class CloseAction { Ask, Tray, Quit };
     Q_ENUM(CloseAction)
+    // While AnimeHub downloads, who takes the episodes only MP4Upload and 1Fichier have: nobody,
+    // the JDownloader of this computer (local API) or one reached through MyJDownloader. The
+    // values the earlier Click'n'Load and MyJDownloader sending saved keep their meaning.
     enum class JDownloader { Off, Local, Remote };
     Q_ENUM(JDownloader)
 

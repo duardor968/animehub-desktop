@@ -145,6 +145,27 @@ private slots:
         QVERIFY(!series.summary.contains(QStringLiteral("Incorporad")));
     }
 
+    // A hand-over that never reached JDownloader says why, and the episode can go again.
+    void handOverThatNeverReachedJDownloaderSaysWhy() {
+        Fixture f;
+        QVERIFY(f.open());
+        auto jd =
+            f.add(1, downloads::TaskState::Failed, downloads::DownloadEngine::JDownloaderLocal);
+        QVERIFY(jd);
+        jd->issue = downloads::TaskIssue::Engine;
+        jd->issueDetail = QStringLiteral(
+            "JDownloader no responde en este PC. Activa su API local o usa MyJDownloader.");
+        QVERIFY(f.queue->save(*jd));
+        f.manager->start(false);
+        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        const auto& episode = view.current()->rows().first().episodes.first();
+        QCOMPARE(episode.detail, jd->issueDetail);
+        QVERIFY(episode.canRetry);
+        QCOMPARE(episode.engineLine,
+                 QStringLiteral("JDownloader · ") +
+                     QDir::toNativeSeparators(f.root.filePath(QStringLiteral("Anime/a"))));
+    }
+
     void nativeSeriesSaysNothingOfItsEngine() {
         Fixture f;
         QVERIFY(f.open());

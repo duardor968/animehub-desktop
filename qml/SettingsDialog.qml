@@ -14,12 +14,13 @@ ModalDialog {
     readonly property AppSettings settings: app.settings
     readonly property JDownloaderView jd: app.jdownloader
 
-    // JDownloader takes part when it downloads, or, while AnimeHub does, when episodes send it
-    // the links of the servers AnimeHub does not download.
+    // JDownloader takes part when it downloads, or, while AnimeHub does, when it downloads the
+    // servers AnimeHub does not.
     readonly property bool jdEngine: settings.preferredJDownloader
     readonly property bool jdUsed: jdEngine || settings.jdownloader !== AppSettings.Off
     readonly property bool jdAccount: jdEngine ? settings.cloudJDownloader
                                                : settings.jdownloader === AppSettings.Remote
+    readonly property bool jdLocal: jdUsed && !jdAccount
 
     // Shipped next to AnimeHub.exe by the installer and the portable zip, not by a build.
     readonly property url licenseFile: settings.bundledFile("LICENSE.txt")
@@ -217,12 +218,12 @@ ModalDialog {
                     SettingRow {
                         visible: !dialog.jdEngine
                         label: "Servidores que AnimeHub no descarga (MP4Upload, 1Fichier)"
-                        info: "Añade «Enviar a JDownloader» a cada episodio, con los enlaces de todos los "
-                              + "servidores, también MP4Upload y 1Fichier."
+                        info: "Si un episodio no está en MEGA ni en Pixeldrain, JDownloader lo descarga "
+                              + "en la carpeta de AnimeHub y su progreso se ve igual en Descargas."
 
                         Choice {
-                            model: ["No enviar", "Enviar a JDownloader en este PC",
-                                    "Enviar por MyJDownloader"]
+                            model: ["No descargar", "Con JDownloader en este PC",
+                                    "Con JDownloader por MyJDownloader"]
                             currentIndex: dialog.settings.jdownloader
                             onActivated: index => dialog.settings.jdownloader = index
                             Accessible.name: "Servidores que AnimeHub no descarga"
@@ -243,7 +244,7 @@ ModalDialog {
                     }
 
                     SettingRow {
-                        visible: dialog.jdEngine && !dialog.settings.cloudJDownloader
+                        visible: dialog.jdLocal
                         label: "API local"
 
                         Field {

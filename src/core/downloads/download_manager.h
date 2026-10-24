@@ -20,10 +20,14 @@ namespace animehub::downloads {
 
 struct DownloadSettings {
     QString directory;
+    // MEGA and Pixeldrain, in the user's order; JDownloader also gets MP4Upload and 1Fichier.
     QList<api::Provider> providers{api::Provider::Mega, api::Provider::Pixeldrain};
     api::Audio audio = api::Audio::Sub;
     int maxConcurrent = 2;
     DownloadEngine engine = DownloadEngine::Native;
+    // While AnimeHub downloads, who takes an episode that neither MEGA nor Pixeldrain has, from
+    // the servers AnimeHub does not download: nobody (Native) or JDownloader.
+    DownloadEngine otherServers = DownloadEngine::Native;
     QUrl jdEndpoint{QStringLiteral("http://127.0.0.1:3128")};
     QString jdDeviceId;
 };
@@ -37,7 +41,8 @@ struct Enqueued {
 
 // Runs the download queue: resolves a source through the API, transfers it with aria2, decrypts
 // and verifies MEGA files, and records finished episodes in the library. State survives restarts;
-// transient failures wait and retry by themselves, the rest stop for the user.
+// transient failures wait and retry by themselves, the rest stop for the user. An episode that
+// neither MEGA nor Pixeldrain has goes, as the same task, to the JDownloader the settings name.
 //
 // The queue keeps each series together: series go in the order they arrived, or the one set by
 // prioritize() and reorder(), and each series goes by episode number. Queueing never stops a
@@ -130,7 +135,15 @@ private:
                        std::optional<mega::FileLink> mega_link);
     void poll();
     void pollJdTasks();
+    // Points a task JDownloader does not have yet at the JDownloader the settings name; false
+    // when they name none.
+    bool connectJd(qint64 id, const DownloadSettings& settings);
     void submitJd(qint64 id, const api::ResolvedLink& link);
+    // JDownloader does not have the episode: the task lets the hand-over go, so a retry sends it
+    // again.
+    void releaseJd(qint64 id);
+    // The hand-over never reached JDownloader: the task stops with the reason and what to do.
+    void unreachedJd(qint64 id, myjd::Failure failure);
     void pollJd(qint64 id);
     void collectJd(qint64 id);
     void jdRequest(qint64 id, const QString& path, const QJsonArray& params,

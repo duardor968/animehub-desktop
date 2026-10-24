@@ -189,21 +189,22 @@ QList<api::Provider> AppSettings::providers() const {
             providers.append(*provider);
         }
     }
-    if (preferredJDownloader()) {
-        providers.append(api::Provider::Mp4Upload);
-        providers.append(api::Provider::OneFichier);
-    }
     return providers;
 }
 
 downloads::DownloadSettings AppSettings::downloads() const {
+    using downloads::DownloadEngine;
+    const auto other = jdownloader();
     return {.directory = downloadDirectory(),
             .providers = providers(),
             .audio = dubbed() ? api::Audio::Dub : api::Audio::Sub,
             .maxConcurrent = maxConcurrent(),
-            .engine = !preferredJDownloader() ? downloads::DownloadEngine::Native
-                      : cloudJDownloader()    ? downloads::DownloadEngine::JDownloaderCloud
-                                              : downloads::DownloadEngine::JDownloaderLocal,
+            .engine = !preferredJDownloader() ? DownloadEngine::Native
+                      : cloudJDownloader()    ? DownloadEngine::JDownloaderCloud
+                                              : DownloadEngine::JDownloaderLocal,
+            .otherServers = other == JDownloader::Local    ? DownloadEngine::JDownloaderLocal
+                            : other == JDownloader::Remote ? DownloadEngine::JDownloaderCloud
+                                                           : DownloadEngine::Native,
             .jdEndpoint = QUrl(jdEndpoint()),
             .jdDeviceId = jdownloaderDevice()};
 }

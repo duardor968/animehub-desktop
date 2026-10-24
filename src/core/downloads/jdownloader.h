@@ -8,6 +8,7 @@
 namespace animehub::downloads::jd {
 // Both transports expose the same documented, positional device API. Local mode
 // never changes JD configuration and refuses non-loopback hosts and redirects.
+// DeviceOffline and the account failures mean the request never reached JDownloader.
 [[nodiscard]] bool isLocalEndpoint(const QUrl& endpoint);
 void request(QNetworkAccessManager& network, myjd::Client* cloud, const Task& task,
              const QString& path, const QJsonArray& params, QObject* context,

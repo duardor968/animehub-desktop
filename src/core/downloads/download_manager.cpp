@@ -10,6 +10,7 @@
 #include <QPointer>
 #include <QStorageInfo>
 #include <QThreadPool>
+#include <QUuid>
 
 #include <algorithm>
 #include <tuple>
@@ -57,6 +58,20 @@ bool finished(TaskState state) {
 // Waiting its turn, running, paused, due to retry or failed: what still belongs to the queue.
 bool inLine(const Task& task) {
     return task.state != TaskState::Completed && task.state != TaskState::Cancelled;
+}
+
+// A target path that already names its video, once a native source was found.
+bool hasVideoExtension(const QString& path) {
+    static const QStringList kExtensions{
+        QStringLiteral("mp4"), QStringLiteral("mkv"), QStringLiteral("avi"), QStringLiteral("webm"),
+        QStringLiteral("mov"), QStringLiteral("m4v"), QStringLiteral("ts")};
+    return kExtensions.contains(QFileInfo(path).suffix().toLower());
+}
+
+// The JDownloader the settings name for what AnimeHub does not download: the engine's, or while
+// AnimeHub downloads, the one chosen for the other servers.
+DownloadEngine jdRoute(const DownloadSettings& settings) {
+    return settings.engine != DownloadEngine::Native ? settings.engine : settings.otherServers;
 }
 
 } // namespace
@@ -442,14 +457,21 @@ void DownloadManager::resolve(qint64 id) {
         return;
     }
     const auto settings = settings_();
+    // What JDownloader does not have yet goes to the one the settings name now.
+    if (task.engine != DownloadEngine::Native)
+        connectJd(id, settings);
     QList<api::Provider> providers;
     for (const auto provider : settings.providers) {
-        if (task.engine != DownloadEngine::Native || isNative(provider)) {
+        if (isNative(provider) && !providers.contains(provider)) {
             providers.append(provider);
         }
     }
     if (providers.isEmpty()) {
         providers = {api::Provider::Mega, api::Provider::Pixeldrain};
+    }
+    // MEGA and Pixeldrain first, as AnimeHub downloads them; the rest only JDownloader can.
+    if (task.engine != DownloadEngine::Native || jdRoute(settings) != DownloadEngine::Native) {
+        providers += {api::Provider::Mp4Upload, api::Provider::OneFichier};
     }
     const auto generation = live.generation;
     services_.api.resolve(
@@ -499,6 +521,16 @@ void DownloadManager::tryCandidate(qint64 id, quint64 generation,
         return;
     }
     const auto link = candidates[index];
+    // Neither MEGA nor Pixeldrain had it: the same task goes on with JDownloader.
+    if (tasks_[id].engine == DownloadEngine::Native && !isNative(link.provider)) {
+        if (!connectJd(id, settings_())) {
+            fail(id, last_issue);
+            return;
+        }
+        submitJd(id, link);
+        pump(); // its native slot is free
+        return;
+    }
     if (tasks_[id].engine != DownloadEngine::Native) {
         submitJd(id, link);
         return;
@@ -585,11 +617,7 @@ void DownloadManager::startTransfer(qint64 id, api::Provider provider, const QSt
         deletePartials(task.targetPath);
         task.bytesDone = 0;
     }
-    if (QFileInfo(task.targetPath).suffix().isEmpty() ||
-        !QStringList{QStringLiteral("mp4"), QStringLiteral("mkv"), QStringLiteral("avi"),
-                     QStringLiteral("webm"), QStringLiteral("mov"), QStringLiteral("m4v"),
-                     QStringLiteral("ts")}
-             .contains(QFileInfo(task.targetPath).suffix().toLower())) {
+    if (!hasVideoExtension(task.targetPath)) {
         task.targetPath += util::videoExtension(provider_name);
     }
     if (!util::isInside(task.targetPath, directory)) {
@@ -645,6 +673,33 @@ void DownloadManager::startTransfer(qint64 id, api::Provider provider, const QSt
                             setState(id, TaskState::Downloading);
                             pump();
                         });
+}
+
+bool DownloadManager::connectJd(qint64 id, const DownloadSettings& settings) {
+    const auto route = jdRoute(settings);
+    if (route == DownloadEngine::Native) {
+        return false;
+    }
+    auto& task = tasks_[id];
+    if (task.engine == DownloadEngine::Native) {
+        // A JDownloader task from now on: its bytes go to a folder of its own beside the
+        // episode, and what an earlier MEGA or Pixeldrain attempt left belongs to another file.
+        if (hasVideoExtension(task.targetPath)) {
+            deletePartials(task.targetPath);
+            task.targetPath.chop(QFileInfo(task.targetPath).suffix().size() + 1);
+        }
+        task.sourceId.clear();
+        task.bytesDone = 0;
+        task.bytesTotal = 0;
+        task.engineDestination = QFileInfo(task.targetPath).absolutePath() +
+                                 QStringLiteral("/.jd-") +
+                                 QUuid::createUuid().toString(QUuid::Id128);
+    }
+    task.engine = route;
+    task.engineEndpoint =
+        route == DownloadEngine::JDownloaderLocal ? settings.jdEndpoint.toString() : QString();
+    task.engineDevice = settings.jdDeviceId;
+    return true;
 }
 
 void DownloadManager::pollJdTasks() {
