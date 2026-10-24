@@ -238,17 +238,37 @@ private slots:
         QCOMPARE(second.value(QStringLiteral("state")).toString(),
                  QStringLiteral("Siguiente: Ep. 2"));
         QCOMPARE(second.value(QStringLiteral("action")).toString(), QStringLiteral("play"));
-        QCOMPARE(franchise.value(QStringLiteral("facts")).toString(),
-                 QStringLiteral("2012–2014 · 1 episodio en disco · 2,0 GB"));
+        QCOMPARE(franchise.value(QStringLiteral("facts")).toString(), QStringLiteral("2012–2014"));
         QCOMPARE(franchise.value(QStringLiteral("nextSlug")).toString(), QStringLiteral("second"));
         QCOMPARE(franchise.value(QStringLiteral("nextText")).toString(),
                  QStringLiteral("Ver ep. 2"));
+        QCOMPARE(franchise.value(QStringLiteral("nextAction")).toString(), QStringLiteral("play"));
         const auto figures = franchise.value(QStringLiteral("figures")).toList();
-        QCOMPARE(figures.size(), 2);
+        QCOMPARE(figures.size(), 3);
         QCOMPARE(figures.at(0).toMap().value(QStringLiteral("value")).toString(),
                  QStringLiteral("Part 2"));
         QCOMPARE(figures.at(1).toMap().value(QStringLiteral("value")).toString(),
                  QStringLiteral("1/2"));
+        QCOMPARE(figures.at(2).toMap().value(QStringLiteral("caption")).toString(),
+                 QStringLiteral("En disco"));
+        QCOMPARE(figures.at(2).toMap().value(QStringLiteral("value")).toString(),
+                 QStringLiteral("1/5 · 2,0 GB"));
+
+        // Its next episode not on disk: the button brings it.
+        QVERIFY(repo.setWatchState(QStringLiteral("second"), 2, library::WatchState::Watched));
+        LibraryModel later(service, downloads, api);
+        later.openFranchise(*group);
+        QCOMPARE(later.franchise().value(QStringLiteral("nextText")).toString(),
+                 QStringLiteral("Descargar ep. 3"));
+        QCOMPARE(later.franchise().value(QStringLiteral("nextAction")).toString(),
+                 QStringLiteral("download"));
+
+        // All seen that has aired: nothing to go on with.
+        QVERIFY(repo.setWatchState(QStringLiteral("second"), 3, library::WatchState::Watched));
+        LibraryModel done(service, downloads, api);
+        done.openFranchise(*group);
+        QVERIFY(done.franchise().value(QStringLiteral("nextSlug")).toString().isEmpty());
+        QVERIFY(done.franchise().value(QStringLiteral("nextText")).toString().isEmpty());
     }
 };
 

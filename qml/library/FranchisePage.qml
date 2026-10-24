@@ -174,14 +174,24 @@ Item {
         y: Math.max(0, slotY)
         pinned: slotY < 0
         visible: works.headerItem !== null
+        title: root.franchise.title || ""
+        posterUrl: root.franchise.posterUrl || ""
         figures: root.franchise.figures || []
+        // Goes on with the work under way ("Ver ep. 6", "Descargar ep. 6"), named beside it; with
+        // everything seen, there is none.
         Button {
+            readonly property string step: root.franchise.nextAction || ""
             visible: (root.franchise.nextSlug || "") !== ""
-            highlighted: true
-            // As wide as an anime's main button.
-            implicitWidth: Math.max(176, implicitContentWidth + leftPadding + rightPadding)
+            // Its download on its way: nothing to press until it is on disk.
+            enabled: step !== "busy"
+            // Fluent keeps a disabled accent button blue: only a button that can be pressed is.
+            highlighted: enabled
+            // As wide as an anime's main button, in every state.
+            implicitWidth: Math.max(200, implicitContentWidth + leftPadding + rightPadding)
             text: root.franchise.nextText || ""
-            icon.source: Theme.source(Theme.icon.play)
+            icon.source: Theme.source(step === "play" ? Theme.icon.play
+                                      : step === "retry" ? Theme.icon.retry
+                                      : Theme.icon.download)
             onClicked: root.continueWith(root.franchise.nextSlug)
         }
         trailing: [

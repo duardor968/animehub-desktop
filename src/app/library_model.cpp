@@ -794,8 +794,7 @@ QVariantMap LibraryModel::workMap(const LibraryEntry& entry) const {
     // "TV · 2012 · 26 ep.": what the work is, short enough for a card.
     QStringList facts;
     if (!entry.category.isEmpty()) {
-        facts.append(entry.category == QStringLiteral("TV Anime") ? QStringLiteral("TV")
-                                                                  : entry.category);
+        facts.append(display::category(entry.category));
     }
     if (entry.startYear) {
         facts.append(QString::number(*entry.startYear));
@@ -858,12 +857,12 @@ void LibraryModel::rebuildFranchise() {
         QUrl backdrop;
         QUrl poster;
         int files = 0;
+        int episodes = 0;
         qint64 bytes = 0;
         int started_works = 0;
         int seen_works = 0;
         std::optional<int> first_year;
         std::optional<int> last_year;
-        const LibraryEntry* next = nullptr;
         QList<const LibraryEntry*> members;
         for (const auto& entry : entries_) {
             if (it->members.contains(entry.slug) && entry.archived == archived_only_)
@@ -885,6 +884,7 @@ void LibraryModel::rebuildFranchise() {
             if (poster.isEmpty())
                 poster = entry.posterUrl;
             files += entry.downloadedEpisodes;
+            episodes += entry.knownEpisodes;
             bytes += entry.downloadedBytes;
             slugs.append(entry.slug);
             started_works += started(entry) ? 1 : 0;
@@ -893,43 +893,86 @@ void LibraryModel::rebuildFranchise() {
                 first_year = std::min(first_year.value_or(*entry.startYear), *entry.startYear);
                 last_year = std::max(last_year.value_or(*entry.startYear), *entry.startYear);
             }
-            // The main button goes on with the first work under way whose next episode is on disk.
-            if (!next && ready(entry))
-                next = &entry;
         }
-        // "2012–2026 · 195 episodios en disco · 44,1 GB": how many works heads the grid.
-        QStringList facts;
+        // The work the main button goes on with: the first one under way; else the first one
+        // not seen after the last one seen, else before it. All seen, none.
+        const auto pending = [](const LibraryEntry* entry) {
+            return entry->resumeNumber && !entry->finished();
+        };
+        const auto under_way = std::ranges::find_if(
+            members, [&](const LibraryEntry* entry) { return pending(entry) && started(*entry); });
+        const auto last_seen =
+            std::ranges::find_if(members | std::views::reverse,
+                                 [](const LibraryEntry* entry) { return entry->finished(); });
+        const auto after = std::find_if(last_seen.base(), members.end(), pending);
+        const auto first = std::ranges::find_if(members, pending);
+        const LibraryEntry* next = under_way != members.end() ? *under_way
+                                   : after != members.end()   ? *after
+                                   : first != members.end()   ? *first
+                                                              : nullptr;
+        // The years head the page; the rest goes beside the main button.
+        QString facts;
         if (first_year) {
-            facts.append(*first_year == *last_year
-                             ? QString::number(*first_year)
-                             : QStringLiteral("%1–%2").arg(*first_year).arg(*last_year));
+            facts = *first_year == *last_year
+                        ? QString::number(*first_year)
+                        : QStringLiteral("%1–%2").arg(*first_year).arg(*last_year);
         }
-        if (files > 0) {
-            facts.append(files == 1 ? QStringLiteral("1 episodio en disco")
-                                    : QStringLiteral("%1 episodios en disco").arg(files));
-            facts.append(display::bytes(bytes));
-        }
-        // Beside the main button: which work it plays and how many are seen.
+        const auto figure = [](const QString& caption, const QString& value,
+                               double progress = -1.0) {
+            return QVariantMap{{QStringLiteral("caption"), caption},
+                               {QStringLiteral("value"), value},
+                               {QStringLiteral("progress"), progress},
+                               {QStringLiteral("problem"), false}};
+        };
+        // Beside the main button: which work it goes on with, how many are seen, what is on
+        // disk. The button says what a press does with that work's next episode, as an anime's
+        // does: watch it, or bring it to disk.
         QVariantList figures;
         QString next_text;
+        QString next_action;
         if (next) {
-            const auto title = distinctTitle(next->title, it->title);
-            figures.append(QVariantMap{{QStringLiteral("caption"), QStringLiteral("Entrega")},
-                                       {QStringLiteral("value"), title},
-                                       {QStringLiteral("progress"), -1.0},
-                                       {QStringLiteral("problem"), false}});
-            const auto number = display::episodeNumber(*next->resumeNumber);
-            next_text = next->resumePositionMs > 0 ? QStringLiteral("Continuar ep. ") + number
-                                                   : QStringLiteral("Ver ep. ") + number;
+            figures.append(
+                figure(QStringLiteral("Entrega"), distinctTitle(next->title, it->title)));
+            // A film is not counted in episodes, as its card does not.
+            const bool single = next->episodeCount.value_or(0) == 1 ||
+                                (!next->episodeCount && next->knownEpisodes == 1 &&
+                                 next->status == api::AnimeStatus::Finished);
+            const auto number = *next->resumeNumber;
+            const auto episode =
+                single ? QString() : QStringLiteral(" ep. ") + display::episodeNumber(number);
+            const auto download = single ? QStringLiteral(" la descarga") : episode;
+            if (next->resumeOnDisk) {
+                next_action = QStringLiteral("play");
+                next_text = (next->resumePositionMs > 0 ? QStringLiteral("Continuar")
+                                                        : QStringLiteral("Ver")) +
+                            episode;
+            } else if (const auto task = downloads_.activeTaskFor(next->slug, number)) {
+                if (task->state == downloads::TaskState::Paused) {
+                    next_action = QStringLiteral("resume");
+                    next_text = QStringLiteral("Reanudar") + download;
+                } else if (task->state == downloads::TaskState::Failed) {
+                    next_action = QStringLiteral("retry");
+                    next_text = QStringLiteral("Reintentar") + download;
+                } else {
+                    next_action = QStringLiteral("busy"); // on its way: nothing to press
+                    next_text = QStringLiteral("Descargando") + episode;
+                }
+            } else {
+                next_action = QStringLiteral("download");
+                next_text = QStringLiteral("Descargar") + episode;
+            }
         }
         if (started_works > 0) {
-            figures.append(QVariantMap{
-                {QStringLiteral("caption"), QStringLiteral("Vistas")},
-                {QStringLiteral("value"),
-                 QStringLiteral("%1/%2").arg(seen_works).arg(members.size())},
-                {QStringLiteral("progress"),
-                 members.isEmpty() ? -1.0 : static_cast<double>(seen_works) / members.size()},
-                {QStringLiteral("problem"), false}});
+            figures.append(figure(
+                QStringLiteral("Vistas"),
+                QStringLiteral("%1/%2").arg(seen_works).arg(members.size()),
+                members.isEmpty() ? -1.0 : static_cast<double>(seen_works) / members.size()));
+        }
+        // Counted as an anime's are: "195/196 · 44,0 GB".
+        if (files > 0) {
+            figures.append(figure(QStringLiteral("En disco"),
+                                  QStringLiteral("%1/%2 · ").arg(files).arg(episodes) +
+                                      display::bytes(bytes)));
         }
         value = {{QStringLiteral("id"), it->id},
                  {QStringLiteral("title"), it->title},
@@ -938,10 +981,12 @@ void LibraryModel::rebuildFranchise() {
                  {QStringLiteral("backdropUrl"), backdrop},
                  {QStringLiteral("posterUrl"), poster},
                  {QStringLiteral("files"), files},
-                 {QStringLiteral("facts"), facts.join(QStringLiteral(" · "))},
+                 {QStringLiteral("facts"), facts},
                  {QStringLiteral("figures"), figures},
                  {QStringLiteral("nextSlug"), next ? next->slug : QString()},
-                 {QStringLiteral("nextText"), next_text}};
+                 {QStringLiteral("nextText"), next_text},
+                 // play, download, resume, retry; busy while its download runs or waits.
+                 {QStringLiteral("nextAction"), next_action}};
     }
     if (value != franchise_) {
         franchise_ = std::move(value);
