@@ -137,6 +137,7 @@ Column {
                 progress: model.progress
                 fresh: model.fresh
                 quickAction: model.action ?? ""
+                owned: model.owned ?? false
                 onClicked: root.activated(model.slug, model.episode)
                 onAct: root.acted(model.slug, model.episode, model.action)
             }
