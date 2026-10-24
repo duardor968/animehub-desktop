@@ -353,7 +353,8 @@ ModalDialog {
 
                     SettingRow {
                         label: "Carpeta"
-                        value: dialog.settings.downloadDirectory.replace(/\//g, "\\")
+                        value: dialog.windows ? dialog.settings.downloadDirectory.replace(/\//g, "\\")
+                                              : dialog.settings.downloadDirectory
                         unavailable: dialog.isolatedReason
 
                         Button {
