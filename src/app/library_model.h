@@ -245,6 +245,7 @@ private:
     bool schedule_stale_ = false; // the last answer came from the cache
     QTimer reload_timer_;
     QTimer rebuild_timer_; // a download came or went: what is missing changed
+    QTimer franchise_timer_;
     QTimer schedule_timer_;
     QTimer clock_timer_;
 };

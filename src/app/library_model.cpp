@@ -41,6 +41,19 @@ LibraryModel::LibraryModel(library::LibraryService& library, downloads::Download
     }
     connect(&downloads_, &downloads::DownloadManager::loaded, &rebuild_timer_,
             qOverload<>(&QTimer::start));
+    // The open franchise's button follows its download (paused, failed, done), wherever it is
+    // changed from.
+    franchise_timer_.setSingleShot(true);
+    franchise_timer_.setInterval(300);
+    connect(&franchise_timer_, &QTimer::timeout, this, &LibraryModel::rebuildFranchise);
+    connect(&downloads_, &downloads::DownloadManager::taskChanged, this, [this](qint64 id) {
+        const auto task = downloads_.task(id);
+        const auto it =
+            std::ranges::find(franchises_, selected_franchise_, &library::FranchiseRecord::id);
+        if (task && it != franchises_.end() && it->members.contains(task->slug)) {
+            franchise_timer_.start();
+        }
+    });
 
     schedule_timer_.setInterval(std::chrono::minutes(30));
     connect(&schedule_timer_, &QTimer::timeout, this, &LibraryModel::fetchSchedule);
