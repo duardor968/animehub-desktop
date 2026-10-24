@@ -3,9 +3,9 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// The top of an anime's or a franchise's page, as Steam's hero: the backdrop near 3:1 fading into
-// the canvas, and on its foot the poster with the title and one line of facts. Without a
-// backdrop, the poster alone: no empty band.
+// The top of an anime's or a franchise's page, as Steam's hero: a band of the backdrop fading
+// into the canvas, and on its foot the poster with the title and one line of facts. Low, so the
+// page's content starts on the first screen. Without a backdrop, the poster alone: no empty band.
 Item {
     id: root
 
@@ -14,19 +14,24 @@ Item {
     property string subtitle
     // "9,1 (48 mil)", put before the facts with a star.
     property string score
-    // "TV Anime · 2023 · Finalizado · 28 episodios"
+    // "TV · 2023 · Finalizado · 28 episodios"
     property string facts
+    // "Acción, Comedia", closing the line of facts.
+    property string genres
     property url posterUrl
     property url backdropUrl
+    // The art spans the page; the poster and titles keep to the page's column.
+    property real contentWidth: width - 2 * Theme.section
 
     // Space is kept while the backdrop loads, so the page does not jump when it arrives.
     readonly property bool hasBackdrop: backdropUrl.toString() !== "" && backdrop.status !== Image.Error
     // One step down when the title would need a third line or leave a word alone on its second.
     readonly property int smallerTitle: 24
     // The titles' column: what the poster leaves, not the label's own width, which its size moves.
-    readonly property real titleWidth: width - 2 * Theme.section - Theme.posterWidth - block.spacing
+    readonly property real titleWidth: contentWidth - Theme.posterWidth - block.spacing
 
-    implicitHeight: hasBackdrop ? Math.min(480, Math.max(Math.round(width / 3), block.implicitHeight + 72))
+    // About 4:1 (300 px on a 1300 px page), never above 340 nor below the poster and its margins.
+    implicitHeight: hasBackdrop ? Math.min(340, Math.max(Math.round(width / 4.3), block.implicitHeight + 44))
                                 : block.implicitHeight + 28 + 24
 
     // The title's lines as Text would break them at `metrics`' size.
@@ -112,7 +117,7 @@ Item {
     RowLayout {
         id: block
         x: Theme.section
-        width: root.width - 2 * Theme.section
+        width: root.contentWidth
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 24
         spacing: 24
@@ -154,25 +159,28 @@ Item {
                 elide: Text.ElideRight
             }
 
-            // "★ 9,1 (48 mil) · TV Anime · 2023 · Finalizado · 28 episodios": one text, so a
-            // narrow column wraps it between words instead of cutting it.
+            // "★ 9,1 (48 mil) · TV · 2023 · Finalizado · 28 episodios · Acción, Comedia": one
+            // text, so a narrow column wraps it between words instead of cutting it.
             Label {
                 readonly property string star: "<span style=\"font-family:'" + Theme.iconFont
                                                 + "'; font-size:13px\">" + Theme.glyph(Theme.icon.starFilled)
                                                 + "</span>"
                 readonly property string scored: root.score === "" ? ""
                     : "<span style=\"color:" + Theme.ink + "; font-weight:600\">" + star + "&nbsp;"
-                      + root.score + "</span>" + (root.facts !== "" ? " · " : "")
+                      + root.score + "</span>"
+                readonly property string described: [root.facts, root.genres].filter(part => part !== "")
+                                                                             .join(" · ")
 
                 Layout.fillWidth: true
                 Layout.topMargin: 2
-                visible: root.score !== "" || root.facts !== ""
+                visible: text !== ""
                 textFormat: Text.RichText
-                text: scored + root.facts.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                text: [scored, described.replace(/&/g, "&amp;").replace(/</g, "&lt;")]
+                      .filter(part => part !== "").join(" · ")
                 color: Theme.muted
                 font.pixelSize: Theme.body
                 wrapMode: Text.Wrap
-                Accessible.name: (root.score !== "" ? "Puntuación " + root.score + ". " : "") + root.facts
+                Accessible.name: (root.score !== "" ? "Puntuación " + root.score + ". " : "") + described
             }
         }
     }

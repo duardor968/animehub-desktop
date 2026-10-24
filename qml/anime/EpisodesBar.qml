@@ -44,7 +44,8 @@ RowLayout {
         id: selectPage
         visible: root.selecting && root.episodes.total > 2
         Layout.leftMargin: 16
-        text: "Seleccionar esta página"
+        // A page is only worth naming when there are several.
+        text: root.episodes.pageCount > 1 ? "Seleccionar esta página" : "Seleccionar todo"
         tristate: true
         checkState: root.episodes.pageSelection
         // A click selects the whole page unless all of it already is.

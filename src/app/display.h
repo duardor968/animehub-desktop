@@ -17,6 +17,8 @@ namespace animehub::app::display {
 [[nodiscard]] QString clock(qint64 ms);          // "8:12", "1:02:03"
 [[nodiscard]] QString remaining(qint64 seconds); // "4 min"
 [[nodiscard]] QString status(api::AnimeStatus status);
+// What the work is, as cards name it: "TV" for "TV Anime", since everything here is anime.
+[[nodiscard]] QString category(const QString& name);
 [[nodiscard]] QString provider(api::Provider provider);
 [[nodiscard]] QString issue(downloads::TaskIssue issue);
 // Where a download is, worded the same in every view: "En pausa · 143 MB de 348 MB".

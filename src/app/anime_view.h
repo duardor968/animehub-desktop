@@ -46,7 +46,7 @@ class AnimeView final : public QObject {
     Q_PROPERTY(QUrl backdropUrl READ backdropUrl NOTIFY changed)
     // "9,1 (48 mil)": score and votes; empty without a score.
     Q_PROPERTY(QString score READ score NOTIFY changed)
-    // "TV Anime · 2023 · Finalizado · 28 episodios"
+    // "TV · 2023 · Finalizado · 28 episodios"
     Q_PROPERTY(QString facts READ facts NOTIFY changed)
     Q_PROPERTY(QString genres READ genres NOTIFY changed)
     Q_PROPERTY(QUrl trailerUrl READ trailerUrl NOTIFY changed)
@@ -59,11 +59,15 @@ class AnimeView final : public QObject {
     Q_PROPERTY(bool notify READ notify NOTIFY changed)
     Q_PROPERTY(bool autoDownload READ autoDownload NOTIFY changed)
 
-    // The main button follows the episode to watch next ("Ver ep. 9", "Descargando 45 %").
+    // The main button follows the episode to watch next and says what a press does with it
+    // ("Ver ep. 9", "Pausar · 45 %", "Reanudar ep. 9"); where its download is goes in the
+    // figures. Disabled while there is nothing to do but wait (the next airing, a file being
+    // checked).
     Q_PROPERTY(PrimaryAction primaryAction READ primaryAction NOTIFY changed)
     Q_PROPERTY(QString primaryText READ primaryText NOTIFY changed)
-    // What pressing it does when its text only tells the state: "Pausar la descarga del
-    // episodio 9"; the failure's reason for Failed. Empty when the text says it all.
+    Q_PROPERTY(bool primaryEnabled READ primaryEnabled NOTIFY changed)
+    // What a press does to the download, in full: "Pausar la descarga del episodio 9". Empty
+    // when the text says it all.
     Q_PROPERTY(QString primaryHint READ primaryHint NOTIFY changed)
     // Share of that episode's file already transferred (Downloading, Paused).
     Q_PROPERTY(double primaryProgress READ primaryProgress NOTIFY changed)
@@ -145,6 +149,7 @@ public:
         return summary_.primary;
     }
     [[nodiscard]] QString primaryText() const;
+    [[nodiscard]] bool primaryEnabled() const;
     [[nodiscard]] QString primaryHint() const;
     [[nodiscard]] double primaryProgress() const;
     [[nodiscard]] int missingCount() const {
@@ -265,6 +270,7 @@ private:
         PrimaryAction primary = PrimaryAction::None;
         std::optional<double> target;       // the episode the main button acts on
         std::optional<downloads::Task> job; // its unfinished download
+        int place = 0;                      // queued: its place among those waiting for a slot
         QList<double> missing;
         QList<double> unwatchedMissing;
         int watched = 0;

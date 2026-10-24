@@ -86,6 +86,11 @@ QString status(api::AnimeStatus status) {
     return {};
 }
 
+QString category(const QString& name) {
+    const auto suffix = QStringLiteral(" Anime");
+    return name.endsWith(suffix) ? name.chopped(suffix.size()) : name;
+}
+
 QString provider(api::Provider provider) {
     return api::providerLabel(provider);
 }

@@ -17,7 +17,8 @@ Item {
     // "Elegir episodios": every row shows its check box until the selection is used or emptied.
     property bool choosing: false
     readonly property bool selecting: choosing || view.episodes.selectedCount > 0
-    // Rows and their heading stop at a width where their buttons stay near their text.
+    // One column from the left margin for everything under the header's art, so all of it ends
+    // at one right edge; it stops at a width where the rows' buttons stay near their text.
     readonly property real contentWidth: Math.min(list.width - 2 * Theme.section, 1100)
 
     function clearSelection() {
@@ -35,7 +36,8 @@ Item {
         const header = list.headerItem
         if (!header)
             return
-        const bottom = list.originY + list.contentHeight - list.height
+        // The room kept under the last row counts: with it, no row stays under the selection bar.
+        const bottom = list.originY + list.contentHeight + list.bottomMargin - list.height
         const top = header.y + header.episodesY - actionBar.height - 12
         const target = Math.max(list.originY, Math.min(top, bottom))
         page.scrolled = true
@@ -136,10 +138,12 @@ Item {
 
             AnimeHeader {
                 width: parent.width
+                contentWidth: page.contentWidth
                 title: page.view.title
                 subtitle: page.view.alternativeTitle
                 score: page.view.score
                 facts: page.view.facts
+                genres: page.view.genres
                 posterUrl: page.view.posterUrl
                 backdropUrl: page.view.backdropUrl
             }
@@ -182,25 +186,14 @@ Item {
                 }
 
                 Label {
-                    Layout.fillWidth: true
-                    Layout.maximumWidth: synopsis.Layout.maximumWidth
-                    visible: text !== ""
-                    text: page.view.genres
-                    color: Theme.muted
-                    font.pixelSize: Theme.caption
-                    wrapMode: Text.Wrap
-                }
-
-                Label {
                     id: synopsis
                     property bool expanded: false
-                    // Collapsed, the first paragraph: it usually ends a sentence, so no "….".
+                    // Collapsed, two lines of the first paragraph: the episodes stay on the first
+                    // screen.
                     readonly property var paragraphs: page.view.synopsis.split(/\n\s*\n/)
                     // Each anime opens collapsed.
                     onParagraphsChanged: expanded = false
                     Layout.fillWidth: true
-                    // About 75 characters a line: the measure prose reads best at.
-                    Layout.maximumWidth: 720
                     visible: text !== ""
                     text: expanded ? page.view.synopsis : paragraphs[0]
                     color: Theme.ink
@@ -208,7 +201,7 @@ Item {
                     font.pixelSize: Theme.body
                     lineHeight: 1.3
                     wrapMode: Text.Wrap
-                    maximumLineCount: expanded ? 1000 : 4
+                    maximumLineCount: expanded ? 1000 : 2
                     elide: Text.ElideRight
                 }
 
@@ -285,7 +278,7 @@ Item {
             Shelf {
                 id: related
                 x: Theme.section
-                width: parent.width - 2 * Theme.section
+                width: page.contentWidth
                 title: "Relacionados"
                 // Not `page.view`: inside a Shelf, `page` is its own paging function.
                 model: footerColumn.view.related
@@ -313,10 +306,15 @@ Item {
         y: Math.max(0, slotY)
         pinned: slotY < 0
         visible: list.headerItem !== null
+        contentWidth: page.contentWidth
+        title: page.view.title
+        posterUrl: page.view.posterUrl
         figures: page.view.figures
 
         PrimaryActions {
+            id: primaryActions
             view: page.view
+            selecting: page.selecting
             onChooseRange: rangeDialog.open()
             onChooseEpisodes: page.chooseEpisodes()
         }
@@ -379,7 +377,8 @@ Item {
         property bool folderExists: false
 
         entries: [autoEntry, airingSeparator, watchedEntry, unwatchedEntry, positionEntry,
-                  downloadsSeparator, pauseEntry, resumeEntry, retryEntry, cancelEntry, sendEntry,
+                  downloadsSeparator, missingEntry, unwatchedMissingEntry, rangeEntry, chooseEntry,
+                  pauseEntry, resumeEntry, retryEntry, cancelEntry, sendEntry,
                   filesSeparator, trashWatchedEntry, trashFilmEntry, folderEntry, trailerEntry,
                   librarySeparator, removeEntry]
 
@@ -425,6 +424,35 @@ Item {
             id: downloadsSeparator
             property bool separator: true
         }
+        // What else to download, while the main button does something other than downloading
+        // (then its ▾ offers these).
+        MenuEntry {
+            id: missingEntry
+            property bool wanted: primaryActions.offersMore && !primaryActions.offersSplit
+            text: "Descargar lo que falta · " + page.view.missingText
+            glyph: Theme.icon.download
+            onTriggered: page.view.downloadMissing()
+        }
+        MenuEntry {
+            id: unwatchedMissingEntry
+            // Only when it is not all that is missing.
+            property bool wanted: missingEntry.wanted && page.view.unwatchedMissingCount > 0
+                                  && page.view.unwatchedMissingCount < page.view.missingCount
+            text: "Descargar los no vistos · " + page.view.unwatchedMissingText
+            onTriggered: page.view.downloadUnwatched()
+        }
+        MenuEntry {
+            id: rangeEntry
+            property bool wanted: missingEntry.wanted
+            text: "Descargar un tramo…"
+            onTriggered: rangeDialog.open()
+        }
+        MenuEntry {
+            id: chooseEntry
+            property bool wanted: missingEntry.wanted && !page.selecting
+            text: "Elegir episodios"
+            onTriggered: page.chooseEpisodes()
+        }
         // The series' downloads; the main button handles only the next episode's.
         MenuEntry {
             id: pauseEntry
@@ -442,7 +470,9 @@ Item {
         }
         MenuEntry {
             id: retryEntry
-            property bool wanted: !page.view.single && page.view.failedCount > 0
+            // Beyond the next episode's, which the main button retries.
+            property bool wanted: !page.view.single && page.view.failedCount
+                                  > (page.view.primaryAction === AnimeView.Failed ? 1 : 0)
             text: "Reintentar las fallidas"
             glyph: Theme.icon.retry
             onTriggered: page.view.retryFailed()

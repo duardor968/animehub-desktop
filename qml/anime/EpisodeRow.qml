@@ -31,7 +31,8 @@ ItemDelegate {
 
     readonly property bool watched: watchState === 2
     readonly property bool transferring: downloadState !== "" && downloadState !== "failed"
-    // "Visto · En disco", "8:12 de 24:00 · En disco"
+    // "Visto · En disco", "8:12 de 24:00 · En disco", "Sin descargar"; while it downloads, the
+    // download's column says where it is.
     readonly property string status: {
         const parts = []
         if (watched)
@@ -40,6 +41,8 @@ ItemDelegate {
             parts.push(progressText)
         if (hasFile)
             parts.push("En disco")
+        else if (downloadState === "")
+            parts.push("Sin descargar")
         return parts.join(" · ")
     }
 
@@ -175,10 +178,10 @@ ItemDelegate {
                 }
             }
 
+            // Kept when empty: every title sits at one height.
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 6
-                visible: row.status !== ""
 
                 Glyph {
                     visible: row.watched

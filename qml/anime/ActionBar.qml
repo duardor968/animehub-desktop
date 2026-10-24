@@ -5,7 +5,7 @@ import AnimeHub
 
 // The band under a page's header, as Steam's under a game: the main action on the left, the
 // figures beside it and the page's own buttons on the right. The page scrolls it with the header
-// until it reaches the top, where it stays.
+// until it reaches the top, where it stays, led there by the poster and title it stands for.
 Rectangle {
     id: root
 
@@ -14,6 +14,11 @@ Rectangle {
     property var figures: []
     // Stuck to the top: a hairline parts it from what scrolls under it.
     property bool pinned: false
+    // What the page is about, shown once the header that says it has scrolled away.
+    property string title
+    property url posterUrl
+    // The band spans the page; its content keeps to the page's column from the left margin.
+    property real contentWidth: width - 2 * Theme.section
     // The main action and what goes with it.
     default property alias actions: leading.data
     // The page's own buttons.
@@ -73,10 +78,46 @@ Rectangle {
     }
 
     RowLayout {
-        anchors.fill: parent
-        anchors.leftMargin: Theme.section
-        anchors.rightMargin: Theme.section - 8
+        x: Theme.section
+        width: root.contentWidth
+        height: parent.height
         spacing: 0
+
+        // Pinned, what the bar acts on; it opens from the left edge, easing the button aside.
+        Item {
+            id: identity
+
+            property real shown: root.pinned ? 1 : 0
+            Behavior on shown { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+            Layout.preferredWidth: (identityRow.implicitWidth + 24) * shown
+            Layout.fillHeight: true
+            visible: shown > 0
+            opacity: shown
+            clip: true
+
+            RowLayout {
+                id: identityRow
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 12
+
+                Poster {
+                    Layout.preferredWidth: 30
+                    Layout.preferredHeight: 42
+                    source: root.posterUrl
+                }
+
+                Label {
+                    visible: text !== ""
+                    Layout.maximumWidth: 200
+                    text: root.title
+                    color: Theme.ink
+                    font.pixelSize: Theme.body
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                }
+            }
+        }
 
         // Layouts fill by default: these two keep their content's width, the figures take the rest.
         RowLayout {

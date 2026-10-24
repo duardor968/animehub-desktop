@@ -108,7 +108,7 @@ QString day(const QDate& date, const QDate& today, bool dated) {
     return text;
 }
 
-// "vie 13:34" for a figure; "jue 30 oct, 13:34" where the date stands alone.
+// "vie 13:34" within the week, "jue 6 nov, 13:34" past it; always dated with `dated`.
 QString when(const QDateTime& at, bool dated) {
     const auto local = at.toLocalTime();
     const auto name = day(local.date(), QDate::currentDate(), dated);
@@ -196,7 +196,14 @@ AnimeView::AnimeView(Services services, QObject* parent)
             });
     const auto on_task = [this](qint64 id) {
         const auto task = services_.downloads.task(id);
-        if (!task || task->slug != slug_) {
+        if (!task) {
+            return;
+        }
+        if (task->slug != slug_) {
+            // Another series moving in the queue moves the next episode's place in it.
+            if (summary_.place > 0) {
+                update();
+            }
             return;
         }
         const auto known = std::ranges::find(tasks_, id, &downloads::Task::id);
@@ -457,7 +464,21 @@ AnimeView::Summary AnimeView::summarize() const {
         summary.primary = PrimaryAction::Download;
     } else {
         switch (summary.job->state) {
-        case TaskState::Queued:
+        case TaskState::Queued: {
+            // Its place among the tasks waiting for a slot, in the order they will start.
+            int place = 0;
+            for (const auto& task : services_.downloads.tasks()) {
+                if (task.state == TaskState::Queued) {
+                    ++place;
+                    if (task.id == summary.job->id) {
+                        summary.place = place;
+                        break;
+                    }
+                }
+            }
+            summary.primary = PrimaryAction::Queued;
+            break;
+        }
         case TaskState::Waiting:
             summary.primary = PrimaryAction::Queued;
             break;
@@ -533,7 +554,7 @@ QString AnimeView::facts() const {
     const auto& anime = source();
     QStringList parts;
     if (!anime.category.isEmpty()) {
-        parts.append(anime.category);
+        parts.append(display::category(anime.category));
     }
     if (anime.startYear) {
         parts.append(QString::number(*anime.startYear));
@@ -613,41 +634,41 @@ double AnimeView::lastNumber() const {
     return episodes_.episodes().isEmpty() ? 0 : episodes_.episodes().last().number;
 }
 
+// A verb and what it acts on: "Descargar ep. 9", or for a film "Reanudar la descarga".
 QString AnimeView::primaryText() const {
-    const auto number = summary_.target ? display::episodeNumber(*summary_.target) : QString();
+    const auto object = [this](const QString& film) {
+        return single() ? film : QStringLiteral(" ep. ") + display::episodeNumber(*summary_.target);
+    };
+    const auto download = QStringLiteral(" la descarga");
     switch (summary_.primary) {
     case PrimaryAction::Play: {
         const auto episode = episodes_.episode(*summary_.target);
         const bool resume =
             episode && episode->state == WatchState::Watching && episode->positionMs > 0;
-        if (single()) {
-            return resume ? QStringLiteral("Continuar") : QStringLiteral("Ver");
-        }
-        return (resume ? QStringLiteral("Continuar ep. ") : QStringLiteral("Ver ep. ")) + number;
+        return (resume ? QStringLiteral("Continuar") : QStringLiteral("Ver")) + object({});
     }
     case PrimaryAction::Rewatch:
         return QStringLiteral("Ver de nuevo");
     case PrimaryAction::Download:
-        if (single()) {
-            return source().category.startsWith(QStringLiteral("Pel"), Qt::CaseInsensitive)
-                       ? QStringLiteral("Descargar película")
-                       : QStringLiteral("Descargar");
-        }
-        return QStringLiteral("Descargar ep. ") + number;
+        return QStringLiteral("Descargar") +
+               object(source().category.startsWith(QStringLiteral("Pel"), Qt::CaseInsensitive)
+                          ? QStringLiteral(" película")
+                          : QString());
     case PrimaryAction::Queued:
-        return summary_.job->state == TaskState::Waiting ? display::retry(summary_.job->retryAt)
-                                                         : QStringLiteral("En cola");
+        return QStringLiteral("Pausar") + object(download);
     case PrimaryAction::Downloading:
-        if (summary_.job->state == TaskState::Resolving) {
-            return QStringLiteral("Descargando…");
+        switch (summary_.job->state) {
+        case TaskState::Resolving: // no size yet
+            return QStringLiteral("Pausar") + object(download);
+        case TaskState::Verifying: // too late to pause
+            return QStringLiteral("Comprobando · ") + percent(primaryProgress());
+        default:
+            return QStringLiteral("Pausar · ") + percent(primaryProgress());
         }
-        return (summary_.job->state == TaskState::Verifying ? QStringLiteral("Comprobando ")
-                                                            : QStringLiteral("Descargando ")) +
-               percent(primaryProgress());
     case PrimaryAction::Paused:
-        return QStringLiteral("En pausa · Reanudar");
+        return QStringLiteral("Reanudar") + object(download);
     case PrimaryAction::Failed:
-        return QStringLiteral("Error · Reintentar");
+        return QStringLiteral("Reintentar") + object(download);
     case PrimaryAction::Upcoming:
         return upcomingText();
     case PrimaryAction::None:
@@ -656,8 +677,20 @@ QString AnimeView::primaryText() const {
     return {};
 }
 
+bool AnimeView::primaryEnabled() const {
+    switch (summary_.primary) {
+    case PrimaryAction::None:
+    case PrimaryAction::Upcoming:
+        return false;
+    case PrimaryAction::Downloading:
+        return summary_.job->state != TaskState::Verifying;
+    default:
+        return true;
+    }
+}
+
 QString AnimeView::primaryHint() const {
-    if (!summary_.target) {
+    if (!summary_.target || !primaryEnabled()) {
         return {};
     }
     const auto download = single() ? QStringLiteral("la descarga")
@@ -666,15 +699,11 @@ QString AnimeView::primaryHint() const {
     switch (summary_.primary) {
     case PrimaryAction::Queued:
     case PrimaryAction::Downloading:
-        // A file being checked can no longer be paused.
-        return summary_.job->state == TaskState::Verifying ? QString()
-                                                           : QStringLiteral("Pausar ") + download;
+        return QStringLiteral("Pausar ") + download;
     case PrimaryAction::Paused:
         return QStringLiteral("Reanudar ") + download;
-    case PrimaryAction::Failed: {
-        const auto reason = display::issue(summary_.job->issue);
-        return reason.isEmpty() ? QStringLiteral("Reintentar ") + download : reason;
-    }
+    case PrimaryAction::Failed:
+        return QStringLiteral("Reintentar ") + download;
     default:
         return {};
     }
@@ -702,7 +731,8 @@ QString AnimeView::upcomingText() const {
     if (QDateTime::currentDateTimeUtc() >= next_airing_->at) {
         return QStringLiteral("Próximo: ahora");
     }
-    return QStringLiteral("Próximo: ") + when(next_airing_->at, true);
+    // As the bar's "Emisión" says it, and within the button's width.
+    return QStringLiteral("Próximo: ") + when(next_airing_->at, false);
 }
 
 double AnimeView::watchedProgress() const {
@@ -722,11 +752,39 @@ double AnimeView::watchedProgress() const {
     return static_cast<double>(summary_.watched) / static_cast<double>(list.size());
 }
 
-// "Vistos 12/13 · En disco 12 · 2,3 GB · Emisión vie 13:34 · Ep. 5"; what the main button
-// already says stays out.
+// "Descarga En cola (2.º) · Vistos 12/13 · En disco 12/13 · 2,3 GB · Emisión vie 13:34 · Ep. 5";
+// what the main button already says stays out.
 QVariantList AnimeView::figures() const {
     QVariantList figures;
     const auto& list = episodes_.episodes();
+    // Where the next episode's download is, beside the button that acts on it.
+    if (const auto& job = summary_.job) {
+        QString state;
+        switch (job->state) {
+        case TaskState::Queued:
+            state = summary_.place > 0 ? QStringLiteral("En cola (%1.º)").arg(summary_.place)
+                                       : QStringLiteral("En cola");
+            break;
+        case TaskState::Waiting:
+            state = display::retry(job->retryAt);
+            break;
+        case TaskState::Resolving:
+            state = display::download(*job);
+            break;
+        case TaskState::Paused: // counted as the button counts it while it runs
+            state = QStringLiteral("En pausa · ") + percent(primaryProgress());
+            break;
+        case TaskState::Failed: // why, as the row says it
+            state = display::issue(job->issue);
+            break;
+        default: // transferring or checking: the button counts it
+            break;
+        }
+        if (!state.isEmpty()) {
+            figures.append(
+                figure(QStringLiteral("Descarga"), state, -1, job->state == TaskState::Failed));
+        }
+    }
     if (single()) {
         if (!list.isEmpty() && list.first().state == WatchState::Watching &&
             list.first().positionMs > 0) {
@@ -745,9 +803,11 @@ QVariantList AnimeView::figures() const {
     }
     if (summary_.onDisk > 0) {
         const auto size = display::bytes(summary_.diskBytes);
-        figures.append(
-            figure(QStringLiteral("En disco"),
-                   single() ? size : QStringLiteral("%1 · ").arg(summary_.onDisk) + size));
+        // Counted as "Vistos" is: "12/13 · 2,3 GB".
+        figures.append(figure(
+            QStringLiteral("En disco"),
+            single() ? size
+                     : QStringLiteral("%1/%2 · ").arg(summary_.onDisk).arg(list.size()) + size));
     }
     // The series' other downloads: the main button follows the next episode's.
     const auto& job = summary_.job;

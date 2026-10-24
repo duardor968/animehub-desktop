@@ -82,7 +82,8 @@ Rectangle {
         Button {
             id: download
             anchors.verticalCenter: parent.verticalCenter
-            highlighted: true
+            // Fluent keeps a disabled accent button blue: only a button that can be pressed is.
+            highlighted: enabled
             enabled: root.view.episodes.selectedMissing > 0
             // What it queues, which the selection may not all be: "Descargar 5 episodios".
             text: enabled ? "Descargar " + root.view.episodes.selectedMissingText : "Descargar"
