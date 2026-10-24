@@ -12,6 +12,8 @@ AbstractButton {
     property string caption
     property real progress: -1
     property bool fresh: false
+    // In the library: a check on the poster's corner, as Steam marks what one owns.
+    property bool owned: false
     // "play", "download" or nothing: the button over the poster.
     property string quickAction
 
@@ -22,7 +24,7 @@ AbstractButton {
     implicitHeight: poster.height + titleLabel.height + captionLabel.height + 14
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
-    Accessible.name: caption ? text + ", " + caption : text
+    Accessible.name: (caption ? text + ", " + caption : text) + (owned ? ", en la biblioteca" : "")
 
     background: null
     ToolTip.visible: hovered && titleLabel.truncated
@@ -54,6 +56,29 @@ AbstractButton {
                 background: Rectangle {
                     radius: 3
                     color: Theme.accent
+                }
+            }
+
+            // An opaque plate, so it reads over any picture; not the accent, which marks a choice.
+            Rectangle {
+                visible: root.owned
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: 6
+                width: 20
+                height: 20
+                radius: 3
+                color: Theme.pane
+                ToolTip.visible: ownedHover.hovered
+                ToolTip.text: "En la biblioteca"
+
+                HoverHandler { id: ownedHover }
+
+                Glyph {
+                    anchors.centerIn: parent
+                    glyph: Theme.icon.check
+                    size: 14
+                    color: Theme.success
                 }
             }
 
