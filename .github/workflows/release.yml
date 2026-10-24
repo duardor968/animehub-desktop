@@ -1,8 +1,8 @@
 name: Release
 
-# A tag vX.Y.Z (annotated; its message is the release notes) builds the Release on GitHub,
-# checks the package and its installer, and publishes them. Run by hand, it checks without
-# publishing.
+# A tag vX.Y.Z (annotated; its message is the release notes) builds the Windows and Linux
+# packages on GitHub, checks them, and publishes them with one SHA256SUMS.txt. Run by hand, it
+# checks without publishing.
 on:
   push:
     tags: ["v*"]
@@ -69,17 +69,80 @@ jobs:
           $deadline = (Get-Date).AddSeconds(30)
           while ((Test-Path (Join-Path $dir "AnimeHub.exe")) -and (Get-Date) -lt $deadline) { Start-Sleep 1 }
           if (Test-Path (Join-Path $dir "AnimeHub.exe")) { throw "The uninstaller left AnimeHub.exe behind." }
-      - name: Publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            out/package/AnimeHub-*-win64.zip
+            out/package/AnimeHub-*-setup.exe
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the compiler, the libraries and the packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-14 ninja-build pkg-config patchelf \
+            dpkg-dev file libgl-dev libegl-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xkb1 libssl-dev libsecret-1-dev fonts-dejavu-core xvfb x11-utils
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: 4.4.1
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.0
+          arch: linux_gcc_64
+          modules: qtimageformats
+          cache: true
+          use-official: true
+          email: ${{ secrets.QT_EMAIL }}
+          pw: ${{ secrets.QT_PW }}
+      - name: Check the version
         if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
+        run: |
+          version="$(sed -nE 's/^[[:space:]]+VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' CMakeLists.txt | head -1)"
+          if [[ "v$version" != "$GITHUB_REF_NAME" ]]; then
+            echo "The tag $GITHUB_REF_NAME does not match the project version $version." >&2
+            exit 1
+          fi
+      - name: Build
+        run: |
+          CXX=g++-14 QT_ROOT="$QT_ROOT_DIR" cmake --fresh --preset linux-release
+          cmake --build --preset linux-release
+      - name: Package
+        # Runners have no FUSE: linuxdeploy and the AppImage's smoke check extract themselves.
+        run: APPIMAGE_EXTRACT_AND_RUN=1 QT_ROOT="$QT_ROOT_DIR" ./scripts/package-linux.sh --smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            out/package/AnimeHub-*-x86_64.AppImage
+            out/package/animehub_*_amd64.deb
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, linux]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # checkout leaves the tag pointing at the commit, without its message: fetch the tag itself.
-          git fetch --force --no-tags --depth=1 origin "+${env:GITHUB_REF}:${env:GITHUB_REF}"
-          if ((git cat-file -t $env:GITHUB_REF) -ne "tag") { throw "$env:GITHUB_REF_NAME is not an annotated tag." }
-          $version = $env:GITHUB_REF_NAME.TrimStart("v")
-          gh release create $env:GITHUB_REF_NAME --verify-tag --notes-from-tag --title "AnimeHub $version" `
-            (Get-Item out/package/AnimeHub-*-win64.zip).FullName `
-            (Get-Item out/package/AnimeHub-*-setup.exe).FullName `
-            (Get-Item out/package/SHA256SUMS.txt).FullName
+          git fetch --force --no-tags --depth=1 origin "+$GITHUB_REF:$GITHUB_REF"
+          if [[ "$(git cat-file -t "$GITHUB_REF")" != tag ]]; then
+            echo "$GITHUB_REF_NAME is not an annotated tag." >&2
+            exit 1
+          fi
+          (cd dist && sha256sum -- * > SHA256SUMS.txt)
+          gh release create "$GITHUB_REF_NAME" --verify-tag --notes-from-tag \
+            --title "AnimeHub ${GITHUB_REF_NAME#v}" dist/*
