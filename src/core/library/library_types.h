@@ -51,6 +51,10 @@ struct LibraryEntry : AnimeRecord {
     std::optional<double> resumeNumber;
     qint64 resumePositionMs = 0;
     qint64 resumeDurationMs = 0;
+    // From the resume episode on, the unwatched episodes: how many are on disk, and which not.
+    bool resumeOnDisk = false;
+    int unwatchedOnDisk = 0;
+    QList<double> missingEpisodes;
 
     [[nodiscard]] bool finished() const;
 };

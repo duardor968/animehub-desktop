@@ -8,6 +8,8 @@ ApplicationWindow {
 
     required property AppController app
     property bool smokeHidden: false
+    // PROTOTYPE: which library layout is on view; never committed.
+    property string variant: app.prototype === "B" ? "B" : "A"
 
     function showPage(index) {
         tabs.currentIndex = index
@@ -75,6 +77,9 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        // It opens on the page it was left on.
+        const page = Number(app.settings.value("window/page", 0))
+        tabs.currentIndex = page >= 0 && page <= 2 ? page : 0
         tintTitleBar()
         // Started in the tray, it stays hidden until asked for.
         if (visible)
@@ -123,6 +128,7 @@ ApplicationWindow {
                 id: tabs
                 Layout.alignment: Qt.AlignBottom
                 background: null
+                onCurrentIndexChanged: window.app.settings.setValue("window/page", currentIndex)
                 // The tab of the page on view takes that page back to its start, as in Steam.
                 PageTab {
                     text: "Biblioteca"
@@ -136,6 +142,32 @@ ApplicationWindow {
             }
 
             Item { Layout.fillWidth: true }
+
+            // PROTOTYPE: switches the library layout, keeping everything else; never committed.
+            RowLayout {
+                visible: window.app.prototype !== ""
+                spacing: 6
+
+                Label {
+                    text: "Ejemplo"
+                    color: Theme.muted
+                    font.pixelSize: Theme.caption
+                }
+
+                Repeater {
+                    model: [{ key: "A", text: "A · Inicio por tareas" },
+                            { key: "B", text: "B · Vistas en la lista" }]
+                    delegate: Button {
+                        required property var modelData
+                        text: modelData.text
+                        highlighted: window.variant === modelData.key
+                        onClicked: {
+                            window.variant = modelData.key
+                            window.showPage(0)
+                        }
+                    }
+                }
+            }
 
             ToolButton {
                 icon.source: Theme.source(Theme.icon.settings)
@@ -164,6 +196,7 @@ ApplicationWindow {
             id: libraryPage
             objectName: "libraryPage"
             app: window.app
+            variant: window.variant
             onActionFailed: text => toast.show(text, true)
             onBrowseCatalog: window.showPage(1)
             onSearchCatalog: text => window.searchCatalog(text)

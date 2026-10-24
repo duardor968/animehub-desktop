@@ -2,6 +2,7 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QFileInfo>
 #include <QSqlError>
 #include <QUuid>
 
@@ -155,6 +156,10 @@ CREATE TABLE personal_exclusion (
     R"sql(
 CREATE INDEX episode_file_file_id ON episode_file(file_id);
 )sql",
+    // Related works are no longer proposed for review.
+    R"sql(
+DROP TABLE franchise_candidate;
+)sql",
 };
 
 QString errorText(const QSqlError& error) {
@@ -192,6 +197,18 @@ Stored<std::unique_ptr<Database>> Database::open(const QString& path) {
          {"PRAGMA foreign_keys = ON", "PRAGMA journal_mode = WAL", "PRAGMA synchronous = NORMAL"}) {
         if (auto result = database->run(QString::fromLatin1(pragma)); !result) {
             return std::unexpected(result.error());
+        }
+    }
+    // A library about to change schema is copied first, once per version: an update must never
+    // leave it unrecoverable. Its own migrations are transactional; this covers the rest.
+    const int version = database->schemaVersion();
+    if (version > 0 && version < static_cast<int>(kMigrations.size()) &&
+        path != QStringLiteral(":memory:")) {
+        const auto copy = QStringLiteral("%1.schema-%2.bak").arg(path).arg(version);
+        if (!QFileInfo::exists(copy)) {
+            if (auto saved = database->run(QStringLiteral("VACUUM INTO ?"), {copy}); !saved) {
+                return std::unexpected(saved.error());
+            }
         }
     }
     if (auto migrated = database->migrate(); !migrated) {

@@ -3,33 +3,72 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// The library seen as posters: the anime watched last in large, what goes on, what has news,
-// what airs next, and everything the list filter lets through.
+// The library seen as posters: the next episode to watch in large, what else is ready to watch
+// and what to download, what airs next, and everything the list filter lets through.
 Item {
     id: root
 
     required property AppController app
+    // PROTOTYPE: "A" shows what to watch and to download here; "B" leaves it to the filter.
+    property string variant: "A"
     // Why the filter leaves nothing.
     property string emptyText
 
     readonly property LibraryModel library: app.library
-    readonly property bool hasFeatured: library.viewMode === LibraryModel.AllAnime && !!library.featured.slug
-    readonly property string gridTitle: library.archivedOnly ? "Archivo" : ["Toda la biblioteca", "Viendo", "Sin empezar", "Vistos",
-                                         "Favoritos", "Descargados"][library.filter]
+    // The whole library, not a part of it: the home leads with what to do next.
+    readonly property bool whole: !library.archivedOnly && (library.filter === LibraryModel.All
+                                                            || library.filter === LibraryModel.AllAnime
+                                                            || library.filter === LibraryModel.Franchises)
+    readonly property bool tasks: whole && variant === "A"
+    readonly property bool hasFeatured: whole && !!library.featured.slug
+    readonly property string gridTitle: library.archivedOnly ? "Archivo" : ({
+        [LibraryModel.Franchises]: "Franquicias",
+        [LibraryModel.ToWatch]: "Para ver",
+        [LibraryModel.ToDownload]: "Para descargar",
+        [LibraryModel.Airing]: "En emisión",
+        [LibraryModel.Watching]: "Viendo",
+        [LibraryModel.NotStarted]: "Sin empezar",
+        [LibraryModel.Watched]: "Vistos",
+        [LibraryModel.Favorites]: "Favoritos",
+        [LibraryModel.OnDisk]: "En disco"
+    })[library.filter] ?? "Toda la biblioteca"
 
     signal activated(string slug)
     signal franchiseActivated(var id)
     signal browseCatalog()
 
+    // Large batches are confirmed first, as on the web; smaller ones go straight to the queue.
+    function downloadAll() {
+        const episodes = library.pendingCount
+        const series = library.downloadCount
+        const start = () => {
+            const failure = library.downloadPending()
+            if (failure)
+                app.message(failure, true)
+            else
+                app.message(episodes === 1 ? "1 episodio en cola" : episodes + " episodios en cola", false)
+        }
+        if (episodes < 25) {
+            start()
+            return
+        }
+        confirm.ask("¿Descargar " + episodes + " episodios?",
+                    "De " + series + (series === 1 ? " anime" : " animes") + ", en "
+                    + app.settings.downloadDirectory + ".",
+                    "Descargar", "Cancelar", start)
+    }
+
     // The backdrop of the featured anime reaches the pane's edges, beyond the grid's margins.
     clip: true
+
+    ConfirmDialog { id: confirm }
 
     GridView {
         id: grid
         anchors.fill: parent
         anchors.leftMargin: Theme.section
         anchors.rightMargin: Theme.pad
-        visible: count > 0
+        visible: count > 0 || root.tasks && (root.library.readyCount + root.library.downloadCount) > 0
         clip: false
         model: root.library.overview
         boundsBehavior: Flickable.StopAtBounds
@@ -68,34 +107,66 @@ Item {
 
             Shelf {
                 width: parent.width
-                visible: root.library.viewMode === LibraryModel.AllAnime && !root.library.archivedOnly && root.library.continueShelf.count > 0
-                title: "Continuar viendo"
-                model: root.library.continueShelf
+                visible: root.tasks && root.library.readyShelf.count > 0
+                title: "Para ver"
+                model: root.library.readyShelf
                 onActivated: slug => root.activated(slug)
             }
 
             Shelf {
                 width: parent.width
-                visible: root.library.viewMode === LibraryModel.AllAnime && !root.library.archivedOnly && root.library.freshShelf.count > 0
-                title: "Episodios nuevos"
-                model: root.library.freshShelf
+                visible: root.tasks && root.library.downloadShelf.count > 0
+                title: "Para descargar"
+                count: root.library.downloadCount
+                model: root.library.downloadShelf
                 onActivated: slug => root.activated(slug)
+
+                Button {
+                    text: root.library.pendingCount === 1 ? "Descargar 1 episodio"
+                                                          : "Descargar " + root.library.pendingCount + " episodios"
+                    icon.source: Theme.source(Theme.icon.download)
+                    onClicked: root.downloadAll()
+                }
             }
 
             Shelf {
                 width: parent.width
-                visible: root.library.viewMode === LibraryModel.AllAnime && !root.library.archivedOnly && root.library.upcomingShelf.count > 0
+                visible: root.whole && root.library.upcomingShelf.count > 0
                 title: "Próximos episodios"
                 model: root.library.upcomingShelf
                 onActivated: slug => root.activated(slug)
             }
 
-            Label {
-                text: root.gridTitle
-                color: Theme.ink
-                font.pixelSize: Theme.subtitle
-                font.weight: Font.DemiBold
-                Accessible.role: Accessible.Heading
+            RowLayout {
+                width: parent.width
+                spacing: 12
+
+                Label {
+                    text: root.gridTitle
+                    color: Theme.ink
+                    font.pixelSize: Theme.subtitle
+                    font.weight: Font.DemiBold
+                    Accessible.role: Accessible.Heading
+                }
+
+                Label {
+                    visible: !root.whole
+                    text: "(" + grid.count + ")"
+                    color: Theme.muted
+                    font.pixelSize: Theme.subtitle
+                }
+
+                Button {
+                    Layout.leftMargin: 12
+                    visible: root.library.filter === LibraryModel.ToDownload && !root.library.archivedOnly
+                             && root.library.pendingCount > 0
+                    text: root.library.pendingCount === 1 ? "Descargar 1 episodio"
+                                                          : "Descargar " + root.library.pendingCount + " episodios"
+                    icon.source: Theme.source(Theme.icon.download)
+                    onClicked: root.downloadAll()
+                }
+
+                Item { Layout.fillWidth: true }
             }
         }
 
@@ -120,7 +191,7 @@ Item {
     ColumnLayout {
         anchors.centerIn: parent
         width: Math.min(parent.width - 2 * Theme.section, 420)
-        visible: grid.count === 0
+        visible: !grid.visible
         spacing: Theme.pad
 
         Label {
@@ -129,7 +200,7 @@ Item {
             wrapMode: Text.Wrap
             text: root.library.search !== "" ? "Nada coincide con la búsqueda"
                   : root.library.total === 0 ? (root.library.archivedOnly ? "El Archivo está vacío" : "Tu biblioteca está vacía")
-                  : root.library.viewMode === LibraryModel.Franchises ? "No hay franquicias en esta vista" : root.emptyText
+                  : root.emptyText
             color: Theme.ink
             font.pixelSize: Theme.subtitle
             font.weight: Font.DemiBold
@@ -147,7 +218,6 @@ Item {
                 else {
                     root.library.search = ""
                     root.library.filter = LibraryModel.All
-                    root.library.viewMode = LibraryModel.Collection
                 }
             }
         }

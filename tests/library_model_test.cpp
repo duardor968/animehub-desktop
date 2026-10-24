@@ -40,7 +40,7 @@ private slots:
         LibraryModel model(service, downloads, api);
         QCOMPARE(model.rowCount(), 2); // a real group and an independent anime
         QCOMPARE(model.total(), 3);
-        model.setViewMode(LibraryModel::ViewMode::AllAnime);
+        model.setFilter(LibraryModel::Filter::AllAnime);
         QCOMPARE(model.rowCount(), 3);
         QSet<QString> unique;
         for (int row = 0; row < model.rowCount(); ++row) {
@@ -48,12 +48,12 @@ private slots:
             unique.insert(model.slugAt(row));
         }
         QCOMPARE(unique.size(), 3);
-        model.setViewMode(LibraryModel::ViewMode::Franchises);
+        model.setFilter(LibraryModel::Filter::Franchises);
         QCOMPARE(model.rowCount(), 1);
         QCOMPARE(model.groupAt(0), *group);
         QVERIFY(model.setFranchiseMember(*group, QStringLiteral("b"), false));
         QCOMPARE(model.rowCount(), 1); // one work is still an explicitly personal franchise
-        model.setViewMode(LibraryModel::ViewMode::Collection);
+        model.setFilter(LibraryModel::Filter::All);
         QCOMPARE(model.rowCount(), 3);
         model.toggleGroup(*group);
         QCOMPARE(model.rowCount(), 4);
@@ -67,7 +67,7 @@ private slots:
         model.setArchivedOnly(true);
         QCOMPARE(model.total(), 1);
         QCOMPARE(model.rowCount(), 2); // group plus its expanded archived member
-        model.setViewMode(LibraryModel::ViewMode::AllAnime);
+        model.setFilter(LibraryModel::Filter::AllAnime);
         QCOMPARE(model.rowCount(), 1);
         QCOMPARE(model.slugAt(0), QStringLiteral("a"));
         QVERIFY(model.archive({QStringLiteral("a")}, false));
@@ -98,10 +98,10 @@ private slots:
         QVERIFY(model.franchise().value(QStringLiteral("works")).toList().isEmpty());
         model.openFranchise(personal);
         QCOMPARE(model.franchise().value(QStringLiteral("works")).toList().size(), 2);
-        model.setViewMode(LibraryModel::ViewMode::Franchises);
+        model.setFilter(LibraryModel::Filter::Franchises);
         QCOMPARE(model.rowCount(), 1);
         QCOMPARE(model.groupAt(0), personal);
-        model.setViewMode(LibraryModel::ViewMode::Collection);
+        model.setFilter(LibraryModel::Filter::All);
         model.setSearch(QStringLiteral("A"));
         QCOMPARE(model.rowCount(), 2); // search opens the matching member under its personal group
         QCOMPARE(model.groupAt(0), personal);

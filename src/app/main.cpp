@@ -130,7 +130,8 @@ int main(int argc, char* argv[]) {
                                         QStringLiteral("tamaño"), QStringLiteral("1280x820"));
     const QCommandLineOption smoke_page(
         QStringLiteral("smoke-page"),
-        QStringLiteral("Página: library, library-relations, downloads, settings o linked-devices."),
+        QStringLiteral("Página: library, library-relations, catalog, downloads, settings o "
+                       "linked-devices."),
         QStringLiteral("página"), QStringLiteral("library"));
     const QCommandLineOption smoke_view(
         QStringLiteral("smoke-library-view"),
@@ -188,7 +189,8 @@ int main(int argc, char* argv[]) {
     const auto sizeMatch = QRegularExpression(QStringLiteral("^([0-9]{3,4})x([0-9]{3,4})$"))
                                .match(parser.value(smoke_size));
     const QStringList smokePages{QStringLiteral("library"), QStringLiteral("library-relations"),
-                                 QStringLiteral("downloads"), QStringLiteral("settings"),
+                                 QStringLiteral("catalog"), QStringLiteral("downloads"),
+                                 QStringLiteral("settings"),
                                  QStringLiteral("linked-devices")};
     if (smoke && (!sizeMatch.hasMatch() || !smokePages.contains(parser.value(smoke_page))))
         return 2;
@@ -297,9 +299,12 @@ int main(int argc, char* argv[]) {
         }
         QMetaObject::invokeMethod(
             window, "showPage",
-            Q_ARG(QVariant, parser.value(smoke_page) == u"downloads" ? QVariant(2) : QVariant(0)));
+            Q_ARG(QVariant, parser.value(smoke_page) == u"downloads" ? QVariant(2)
+                            : parser.value(smoke_page) == u"catalog"   ? QVariant(1)
+                                                                       : QVariant(0)));
         if (parser.value(smoke_page).startsWith(u"library")) {
-            controller.library()->setViewMode(static_cast<animehub::app::LibraryModel::ViewMode>(
+            if (parser.isSet(smoke_view))
+                controller.library()->setFilter(static_cast<animehub::app::LibraryModel::Filter>(
                 smokeViews.indexOf(parser.value(smoke_view))));
             controller.library()->setArchivedOnly(parser.isSet(smoke_archive));
             auto* page = window->findChild<QObject*>(QStringLiteral("libraryPage"));

@@ -115,7 +115,7 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
             return false;
         QMetaObject::invokeMethod(dialog, "close");
     } else if (flow == u"archive") {
-        model->setViewMode(LibraryModel::ViewMode::AllAnime);
+        model->setFilter(LibraryModel::Filter::AllAnime);
         model->setArchivedOnly(false);
         settle();
         const QString slug = model->slugAt(0);

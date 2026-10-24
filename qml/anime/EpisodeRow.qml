@@ -94,8 +94,12 @@ ItemDelegate {
             // On the thumbnail's corner, as on the web; shown on hover or while choosing.
             CheckBox {
                 id: box
-                x: 4
-                y: 4
+                x: 6
+                y: 6
+                // Fluent gives a check box without text a 120 px wide plate and centres the box
+                // in it: only the box, so it sits on the corner.
+                width: implicitIndicatorWidth
+                height: implicitIndicatorHeight
                 padding: 0
                 focusPolicy: Qt.NoFocus
                 checked: row.selected

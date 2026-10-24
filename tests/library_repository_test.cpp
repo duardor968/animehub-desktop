@@ -188,7 +188,7 @@ private slots:
     }
 
     void migratesToTheCurrentSchema() {
-        QCOMPARE(database_->schemaVersion(), 6);
+        QCOMPARE(database_->schemaVersion(), 7);
     }
 
     void fileReferenceLookupUsesTheReverseIndex() {
@@ -244,7 +244,20 @@ private slots:
         auto opened = storage::Database::open(path);
         QVERIFY2(opened, qPrintable(opened ? QString() : opened.error().message));
         const auto& database = **opened;
-        QCOMPARE(database.schemaVersion(), 6);
+        QCOMPARE(database.schemaVersion(), 7);
+        // The library as it was before the migration stays beside it.
+        const auto copy = QStringLiteral("%1.schema-%2.bak").arg(path).arg(version);
+        QVERIFY(QFileInfo::exists(copy));
+        {
+            auto saved = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("copy"));
+            saved.setDatabaseName(copy);
+            QVERIFY(saved.open());
+            QSqlQuery query(saved);
+            QVERIFY(query.exec(QStringLiteral("PRAGMA user_version")) && query.next());
+            QCOMPARE(query.value(0).toInt(), version);
+            saved.close();
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("copy"));
         auto columns = database.run(QStringLiteral("SELECT name FROM pragma_table_info('anime')"));
         QVERIFY(columns);
         QStringList names;

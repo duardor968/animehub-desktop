@@ -11,16 +11,36 @@ Item {
     required property AppController app
     property string selected
     property var selectedGroup: 0
+    // PROTOTYPE: "A" keeps what to watch and to download on the home, "B" in the list's filter.
+    property string variant: "A"
 
     signal browseCatalog()
     signal searchCatalog(string text)
     signal actionFailed(string text)
 
     // Why the list filter leaves nothing, by filter.
-    readonly property string emptyText: ["", "No estás viendo ningún anime",
-                                         "Ningún anime sin empezar", "Ningún anime visto",
-                                         "Ningún favorito",
-                                         "Ningún anime descargado"][app.library.filter]
+    readonly property string emptyText: ({
+        [LibraryModel.Franchises]: "Ninguna franquicia",
+        [LibraryModel.ToWatch]: "Nada que ver en disco",
+        [LibraryModel.ToDownload]: "Nada por descargar",
+        [LibraryModel.Airing]: "Ningún anime en emisión",
+        [LibraryModel.Watching]: "No estás viendo ningún anime",
+        [LibraryModel.NotStarted]: "Ningún anime sin empezar",
+        [LibraryModel.Watched]: "Ningún anime visto",
+        [LibraryModel.Favorites]: "Ningún favorito",
+        [LibraryModel.OnDisk]: "Ningún anime en disco"
+    })[app.library.filter] ?? ""
+
+    // The filter it was left with comes back; the model corrects an unknown one.
+    Component.onCompleted: app.library.filter = Number(app.settings.value("library/filter", 0))
+    Connections {
+        target: page.app.library
+        function onFilterChanged() { page.app.settings.setValue("library/filter", page.app.library.filter) }
+    }
+    // PROTOTYPE: A has no task views in its filter.
+    onVariantChanged: if (variant === "A" && (app.library.filter === LibraryModel.ToWatch
+                                              || app.library.filter === LibraryModel.ToDownload))
+                          app.library.filter = LibraryModel.All
 
     function select(slug) {
         selectedGroup = 0
@@ -50,6 +70,7 @@ Item {
 
         LibraryList {
             id: list
+            variant: page.variant
             SplitView.preferredWidth: page.app.settings.value("library/listWidth", 300)
             SplitView.minimumWidth: 240
             SplitView.maximumWidth: 480
@@ -64,10 +85,7 @@ Item {
                 page.selectedGroup = id
                 page.app.library.openFranchise(id)
             }
-            onArchiveActivated: {
-                page.select("")
-                page.app.library.archivedOnly = !page.app.library.archivedOnly
-            }
+            onFilterChosen: page.select("")
             onRemoveRequested: (slug, title) => removal.show([slug], title, page.app.library.archivedOnly)
             onCreateFranchiseRequested: (slug, title) => {
                 createGroup.slug = slug
@@ -89,6 +107,7 @@ Item {
 
             LibraryHome {
                 app: page.app
+                variant: page.variant
                 emptyText: page.emptyText
                 onActivated: slug => page.select(slug)
                 onFranchiseActivated: id => {

@@ -3,12 +3,16 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// A titled row of whole posters; the arrows page through the rest.
+// A titled row of whole posters; the arrows page through the rest. Items declared inside it
+// (a button acting on the whole row) go beside the title.
 Column {
     id: root
 
     property alias model: list.model
     property string title
+    // Shown after the title, muted; below 0, nothing.
+    property int count: -1
+    default property alias actions: actionsRow.data
 
     signal activated(string slug, real episode)
 
@@ -36,13 +40,27 @@ Column {
         width: root.width
 
         Label {
-            Layout.fillWidth: true
             text: root.title
             color: Theme.ink
             font.pixelSize: Theme.subtitle
             font.weight: Font.DemiBold
             Accessible.role: Accessible.Heading
         }
+
+        Label {
+            visible: root.count >= 0
+            text: "(" + root.count + ")"
+            color: Theme.muted
+            font.pixelSize: Theme.subtitle
+        }
+
+        RowLayout {
+            id: actionsRow
+            Layout.leftMargin: 12
+            spacing: 8
+        }
+
+        Item { Layout.fillWidth: true }
 
         ToolButton {
             visible: list.count > root.columns

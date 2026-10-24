@@ -232,16 +232,51 @@ FROM episode WHERE slug = ?
         entry.resumeNumber = watching->value(0).toDouble();
         entry.resumePositionMs = watching->value(1).toLongLong();
         entry.resumeDurationMs = watching->value(2).toLongLong();
+    } else {
+        auto next =
+            database_.run(QStringLiteral("SELECT MIN(number) FROM episode WHERE slug = ? "
+                                         "AND state = 0 AND number > ?"),
+                          {entry.slug, last_watched.isNull() ? -1.0 : last_watched.toDouble()});
+        if (!next) {
+            return std::unexpected(next.error());
+        }
+        if (next->next() && !next->value(0).isNull()) {
+            entry.resumeNumber = next->value(0).toDouble();
+        } else if (!entry.finished()) {
+            // Nothing past the last watched episode, yet the series is not seen: it goes on at
+            // the first whole episode skipped. A recap like 17.5 is not one.
+            auto skipped = database_.run(QStringLiteral("SELECT MIN(number) FROM episode WHERE "
+                                                        "slug = ? AND state = 0 AND number = "
+                                                        "CAST(number AS INTEGER)"),
+                                         {entry.slug});
+            if (!skipped) {
+                return std::unexpected(skipped.error());
+            }
+            if (skipped->next() && !skipped->value(0).isNull()) {
+                entry.resumeNumber = skipped->value(0).toDouble();
+            }
+        }
+    }
+    if (!entry.resumeNumber) {
         return entry;
     }
-    auto next = database_.run(QStringLiteral("SELECT MIN(number) FROM episode WHERE slug = ? "
-                                             "AND state = 0 AND number > ?"),
-                              {entry.slug, last_watched.isNull() ? -1.0 : last_watched.toDouble()});
-    if (!next) {
-        return std::unexpected(next.error());
+    auto ahead = database_.run(QStringLiteral(R"sql(
+SELECT number,
+       EXISTS(SELECT 1 FROM episode_file f WHERE f.slug = episode.slug AND f.number = episode.number)
+FROM episode WHERE slug = ? AND state <> 2 AND number >= ? ORDER BY number
+)sql"),
+                               {entry.slug, *entry.resumeNumber});
+    if (!ahead) {
+        return std::unexpected(ahead.error());
     }
-    if (next->next() && !next->value(0).isNull()) {
-        entry.resumeNumber = next->value(0).toDouble();
+    while (ahead->next()) {
+        const auto number = ahead->value(0).toDouble();
+        if (ahead->value(1).toBool()) {
+            entry.resumeOnDisk = entry.resumeOnDisk || number == *entry.resumeNumber;
+            ++entry.unwatchedOnDisk;
+        } else {
+            entry.missingEpisodes.append(number);
+        }
     }
     return entry;
 }

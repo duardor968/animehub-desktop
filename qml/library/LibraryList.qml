@@ -8,6 +8,8 @@ Rectangle {
     id: root
 
     required property LibraryModel model
+    // PROTOTYPE: "B" puts what to watch and to download first in the filter.
+    property string variant: "A"
     property string selectedSlug
     // The home beside the list explains an empty library or filter; the list does when an anime
     // is open instead.
@@ -17,7 +19,8 @@ Rectangle {
 
     signal activated(string slug)
     signal franchiseActivated(var groupId)
-    signal archiveActivated()
+    // The filter changed: the home shows what it lets through.
+    signal filterChosen()
     signal removeRequested(string slug, string title)
     signal createFranchiseRequested(string slug, string title)
     signal actionFailed(string text)
@@ -53,24 +56,52 @@ Rectangle {
             Keys.onDownPressed: list.forceActiveFocus()
         }
 
+        // What the list and the home's grid show; the Archive is one more place to look.
         ComboBox {
-            objectName: "libraryViewMode"
+            id: shown
+            objectName: "libraryFilter"
             Layout.fillWidth: true
             Layout.leftMargin: 12
             Layout.rightMargin: 12
-            model: ["Colección", "Todos los animes", "Solo franquicias"]
-            currentIndex: root.model.viewMode
-            onActivated: index => root.model.viewMode = index
-            Accessible.name: "Vista de biblioteca"
-        }
-
-        ComboBox {
-            Layout.fillWidth: true
-            Layout.leftMargin: 12
-            Layout.rightMargin: 12
-            model: ["Todo", "Viendo", "Sin empezar", "Vistos", "Favoritos", "Descargados"]
-            currentIndex: root.model.filter
-            onActivated: index => root.model.filter = index
+            readonly property int archive: -1
+            readonly property var choices: {
+                const tasks = root.variant === "B" ? [
+                    { value: LibraryModel.ToWatch, text: "Para ver (" + root.model.readyCount + ")" },
+                    { value: LibraryModel.ToDownload, text: "Para descargar (" + root.model.downloadCount + ")" }
+                ] : []
+                const archived = root.model.archivedCount > 0 || root.model.archivedOnly
+                    ? [{ value: archive, text: "Archivo (" + root.model.archivedCount + ")" }] : []
+                return tasks.concat([
+                    { value: LibraryModel.All, text: "Toda la biblioteca" },
+                    { value: LibraryModel.AllAnime, text: "Todos los animes" },
+                    { value: LibraryModel.Franchises, text: "Franquicias" },
+                    { value: LibraryModel.Airing, text: "En emisión" },
+                    { value: LibraryModel.Watching, text: "Viendo" },
+                    { value: LibraryModel.NotStarted, text: "Sin empezar" },
+                    { value: LibraryModel.Watched, text: "Vistos" },
+                    { value: LibraryModel.Favorites, text: "Favoritos" },
+                    { value: LibraryModel.OnDisk, text: "En disco" }
+                ], archived)
+            }
+            model: choices
+            textRole: "text"
+            valueRole: "value"
+            // Found in the list itself: indexOfValue() reads the delegates, which come later.
+            currentIndex: {
+                const value = root.model.archivedOnly ? archive : root.model.filter
+                return choices.findIndex(choice => choice.value === value)
+            }
+            onActivated: index => {
+                const value = choices[index].value
+                if (value === archive) {
+                    root.model.archivedOnly = true
+                    root.model.filter = LibraryModel.All
+                } else {
+                    root.model.archivedOnly = false
+                    root.model.filter = value
+                }
+                root.filterChosen()
+            }
             Accessible.name: "Mostrar"
         }
 
@@ -165,22 +196,12 @@ Rectangle {
                 contentItem: RowLayout {
                     spacing: 12
 
-                    ToolButton {
-                        visible: row.isGroup && root.model.viewMode === LibraryModel.Collection
-                        Layout.preferredWidth: 32
-                        leftPadding: 0
-                        rightPadding: 0
-                        text: row.expanded ? "Contraer" : "Expandir"
-                        icon.source: "image://glyph/" + (row.expanded ? "E70D" : "E76C")
-                        icon.width: 16
-                        icon.height: 16
-                        display: AbstractButton.IconOnly
-                        onClicked: root.model.toggleGroup(row.groupId)
-                        Accessible.name: text + " " + row.title
-                        ToolTip.visible: hovered
-                        ToolTip.text: text
+                    // A franchise's anime sit under it, a step in; every poster lines up otherwise.
+                    Item {
+                        visible: row.depth > 0
+                        Layout.preferredWidth: 20
                     }
-                    Item { visible: row.depth > 0; Layout.preferredWidth: 32 }
+
                     Poster {
                         Layout.preferredWidth: 34
                         Layout.preferredHeight: 48
@@ -228,6 +249,23 @@ Rectangle {
                             implicitHeight: 2
                         }
                     }
+
+                    // Unfolds the franchise's anime in place; the row itself opens its page.
+                    ToolButton {
+                        visible: row.isGroup && root.model.filter === LibraryModel.All
+                        Layout.preferredWidth: 28
+                        leftPadding: 0
+                        rightPadding: 0
+                        text: row.expanded ? "Contraer" : "Mostrar sus entregas"
+                        icon.source: "image://glyph/" + (row.expanded ? "E70E" : "E70D")
+                        icon.width: 12
+                        icon.height: 12
+                        display: AbstractButton.IconOnly
+                        onClicked: root.model.toggleGroup(row.groupId)
+                        Accessible.name: text + ", " + row.title
+                        ToolTip.visible: hovered
+                        ToolTip.text: text
+                    }
                 }
             }
 
@@ -269,14 +307,6 @@ Rectangle {
             text: "Revisar relaciones (" + root.model.pendingCandidates.length + ")"
             icon.source: "image://glyph/E946"
             onClicked: root.reviewCandidatesRequested()
-            Accessible.name: text
-        }
-        ToolButton {
-            objectName: "libraryArchiveLink"
-            Layout.fillWidth: true
-            text: root.model.archivedOnly ? "Volver a la biblioteca" : "Archivo · " + root.model.archivedCount
-            icon.source: "image://glyph/E7B8"
-            onClicked: root.archiveActivated()
             Accessible.name: text
         }
     }

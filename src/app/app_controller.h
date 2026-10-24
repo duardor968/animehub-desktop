@@ -48,6 +48,8 @@ class AppController final : public QObject {
     Q_PROPERTY(AnimeView* libraryAnime READ libraryAnime CONSTANT)
     Q_PROPERTY(AnimeView* catalogAnime READ catalogAnime CONSTANT)
     Q_PROPERTY(QString version READ version CONSTANT)
+    // PROTOTYPE: compares two library layouts; never committed.
+    Q_PROPERTY(QString prototype READ prototype CONSTANT)
     Q_PROPERTY(QString problem READ problem NOTIFY problemChanged)
 
 public:
@@ -60,6 +62,9 @@ public:
     }
     [[nodiscard]] QString problem() const {
         return problem_;
+    }
+    [[nodiscard]] static QString prototype() {
+        return qEnvironmentVariable("ANIMEHUB_PROTO");
     }
     [[nodiscard]] QNetworkAccessManager& network() {
         return network_;

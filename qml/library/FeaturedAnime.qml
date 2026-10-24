@@ -79,10 +79,11 @@ Item {
             source: root.featured.posterUrl ?? ""
         }
 
+        // Beside the poster, not centred in the room left: the filler takes that.
         ColumnLayout {
             Layout.fillWidth: true
             Layout.maximumWidth: 560
-            Layout.alignment: Qt.AlignBottom
+            Layout.alignment: Qt.AlignLeft | Qt.AlignBottom
             spacing: 6
 
             Label {
@@ -124,5 +125,7 @@ Item {
                 Accessible.name: text + ", " + (root.featured.title ?? "") + ", " + (root.featured.detail ?? "")
             }
         }
+
+        Item { Layout.fillWidth: true }
     }
 }
