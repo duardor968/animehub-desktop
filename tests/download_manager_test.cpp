@@ -14,6 +14,8 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <list>
+
 using namespace animehub;
 using namespace animehub::downloads;
 using animehub::testing::HttpTestServer;
@@ -180,6 +182,9 @@ class DownloadManagerTest final : public QObject {
     Q_OBJECT
 
     std::unique_ptr<QTemporaryDir> root_;
+    // The server's routes refer to them, and the manager still calls JDownloader while
+    // cleanup() shuts it down: they go after the server.
+    std::list<FakeJd> jds_;
     std::unique_ptr<HttpTestServer> server_;
     std::unique_ptr<QNetworkAccessManager> network_;
     std::unique_ptr<storage::Database> database_;
@@ -406,6 +411,7 @@ private slots:
         database_.reset();
         network_.reset();
         server_.reset();
+        jds_.clear();
         root_.reset();
     }
 
@@ -495,7 +501,7 @@ private slots:
 
     void jdReconcilesAfterRestartAndWaitsForExtraction() {
         engine_ = DownloadEngine::JDownloaderLocal;
-        FakeJd jd;
+        auto& jd = jds_.emplace_back();
         jd.install(*server_);
         resolveTo(
             resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
@@ -546,7 +552,7 @@ private slots:
 
     void jdCanonicalDestinationNeverOverwritesExistingCopy() {
         engine_ = DownloadEngine::JDownloaderLocal;
-        FakeJd jd;
+        auto& jd = jds_.emplace_back();
         jd.install(*server_);
         resolveTo(
             resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
@@ -587,7 +593,7 @@ private slots:
     void jdTasksLeaveTheNativeSlotsFree() {
         max_concurrent_ = 1;
         engine_ = DownloadEngine::JDownloaderLocal;
-        FakeJd jd;
+        auto& jd = jds_.emplace_back();
         jd.install(*server_);
         resolveTo(
             resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
@@ -609,7 +615,7 @@ private slots:
 
     void jdJobWithoutFilesFailsAndARetryHandsItOverAgain() {
         engine_ = DownloadEngine::JDownloaderLocal;
-        FakeJd jd;
+        auto& jd = jds_.emplace_back();
         jd.install(*server_);
         // The link grabber ends without anything from the link.
         server_->route("GET", "/linkgrabberv2/queryLinks", [](const auto&) {
@@ -635,7 +641,7 @@ private slots:
 
     void jdOrganizationFailurePreservesSourceAndRetriesSameJob() {
         engine_ = DownloadEngine::JDownloaderLocal;
-        FakeJd jd;
+        auto& jd = jds_.emplace_back();
         jd.install(*server_);
         resolveTo(
             resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/test1234")}}));
@@ -684,7 +690,7 @@ private slots:
 
     void jdCancellationDuringSubmissionWaitsForOwnedIds() {
         engine_ = DownloadEngine::JDownloaderLocal;
-        FakeJd jd;
+        auto& jd = jds_.emplace_back();
         jd.submitDelay = 300;
         jd.install(*server_);
         resolveTo(
@@ -701,7 +707,7 @@ private slots:
 
     void jdFinishedWithoutLocalMediaDoesNotComplete() {
         engine_ = DownloadEngine::JDownloaderLocal;
-        FakeJd jd;
+        auto& jd = jds_.emplace_back();
         jd.install(*server_);
         jd.finished = true;
         QFile outside(root_->filePath(QStringLiteral("outside-owned.mp4")));
