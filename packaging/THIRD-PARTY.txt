@@ -32,3 +32,18 @@ mpv 0.41.0 (engines/mpv)
 Biblioteca de ejecución de Microsoft Visual C++
   Microsoft Corporation. Se redistribuye según los términos de redistribución de
   Visual Studio.
+
+Los paquetes de Linux (AppImage y .deb) no incluyen aria2, mpv ni la biblioteca de
+Visual C++: usan el aria2 y el mpv del sistema. Incluyen en cambio:
+
+Uno Fluent Icons (la fuente de los iconos, en lugar de Segoe Fluent Icons)
+  nventive y los colaboradores de Uno Platform.
+  Licencia: Apache License 2.0 (licenses/Uno.Fonts/LICENSE.md).
+  Origen: https://github.com/unoplatform/uno.fonts, archivo
+  webfonts/Uno Fluent Icons/uno-fluentui-assets.ttf del commit f2a7214, sin cambios.
+
+Bibliotecas de Ubuntu 24.04 (solo el AppImage; el .deb las toma de los paquetes del sistema)
+  Las que Qt y AnimeHub cargan y un escritorio puede no tener (entre ellas libsecret, para el
+  llavero del sistema). El aviso de copyright y la licencia de cada una están en
+  usr/share/doc/<paquete>/copyright dentro del AppImage; su código fuente, en
+  https://launchpad.net/ubuntu/+source/<paquete>.

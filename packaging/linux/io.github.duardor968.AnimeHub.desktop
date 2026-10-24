@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=AnimeHub
+GenericName=Biblioteca de anime
+Comment=Biblioteca de anime con catálogo, descargas y seguimiento de lo visto
+Exec=animehub
+Icon=io.github.duardor968.AnimeHub
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=anime;episodios;descargas;
+StartupWMClass=AnimeHub
