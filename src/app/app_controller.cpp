@@ -271,19 +271,19 @@ void AppController::setupTray() {
     tray_menu_ = std::make_unique<QMenu>();
     tray_menu_->setDefaultAction(tray_menu_->addAction(QStringLiteral("Abrir AnimeHub"), this,
                                                        &AppController::showRequested));
-    auto* pause = tray_menu_->addAction(QStringLiteral("Pausar descargas incorporadas"));
+    // As the Downloads page's button: pausing goes first while anything can be paused.
+    auto* pause = tray_menu_->addAction(QStringLiteral("Pausar las descargas"));
     connect(pause, &QAction::triggered, this, [this] {
-        if (downloads_view_->canResumeNative()) {
-            downloads_view_->resumeAll();
-        } else {
+        if (downloads_view_->canPauseAll()) {
             downloads_view_->pauseAll();
+        } else {
+            downloads_view_->resumeAll();
         }
     });
     connect(tray_menu_.get(), &QMenu::aboutToShow, this, [this, pause] {
-        pause->setText(downloads_view_->canResumeNative()
-                           ? QStringLiteral("Reanudar descargas incorporadas")
-                           : QStringLiteral("Pausar descargas incorporadas"));
-        pause->setEnabled(downloads_view_->canPauseNative() || downloads_view_->canResumeNative());
+        pause->setText(downloads_view_->canPauseAll() ? QStringLiteral("Pausar las descargas")
+                                                      : QStringLiteral("Reanudar las descargas"));
+        pause->setEnabled(downloads_view_->canPauseAll() || downloads_view_->canResumeAll());
     });
     tray_menu_->addSeparator();
     tray_menu_->addAction(QStringLiteral("Salir"), this, &AppController::quit);

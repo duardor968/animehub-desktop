@@ -18,11 +18,8 @@ struct DownloadEpisodeRow {
     QString detail; // display::download
     bool problem = false;
     bool hasFile = false; // completed and still on disk
-    QString engine;
-    QString source;
-    QString connection;
-    QString destination;
-    QString phase;
+    // "JDownloader · D:\Anime\frieren": who downloads it and where; empty for native ones.
+    QString engineLine;
     bool canPause = false;
     bool canResume = false;
     bool canRetry = false;
@@ -43,8 +40,7 @@ struct DownloadSeriesRow {
     bool canPause = false;
     bool canResume = false;
     bool canRetry = false;
-    QString engines;
-    QString destinations;
+    QString engineLine;  // as its episodes', when JDownloader downloads some of them
     bool first = false;  // first in line
     QString cancelText;  // what cancelling deletes, said in full; empty when nothing
     int filesOnDisk = 0; // completed episodes whose file is still there
@@ -74,11 +70,7 @@ public:
         ProblemRole,
         HasFileRole,
         PartialRole,
-        EngineRole,
-        SourceRole,
-        ConnectionRole,
-        DestinationRole,
-        PhaseRole,
+        EngineLineRole,
         CanPauseRole,
         CanResumeRole,
         CanRetryRole,
@@ -117,8 +109,7 @@ public:
         CanResumeRole,
         FirstRole,
         CanRetryRole,
-        EnginesRole,
-        DestinationsRole,
+        EngineLineRole,
         CancelTextRole,
         FilesOnDiskRole,
         DiskTextRole,

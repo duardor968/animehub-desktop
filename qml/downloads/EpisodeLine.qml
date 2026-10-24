@@ -16,11 +16,7 @@ Item {
     required property string detail
     required property bool problem
     required property bool hasFile
-    required property string source
-    required property string engine
-    required property string connection
-    required property string destination
-    required property string phase
+    required property string engineLine
     required property bool canPause
     required property bool canResume
     required property bool canRetry
@@ -35,13 +31,13 @@ Item {
 
     readonly property bool completed: taskState === "completed"
     readonly property bool failed: taskState === "failed"
-    readonly property bool pausable: canPause
     readonly property bool running: taskState === "resolving" || taskState === "downloading"
                                     || taskState === "verifying"
 
-    implicitHeight: 72
+    // One more line when JDownloader downloads it: who and where.
+    implicitHeight: engineLine !== "" ? 72 : 52
     Accessible.role: Accessible.ListItem
-    Accessible.name: label + ", " + engine + ", " + connection + ", " + detail + ", " + destination
+    Accessible.name: label + ", " + detail + (engineLine !== "" ? ", " + engineLine : "")
 
     RowLayout {
         anchors.fill: parent
@@ -72,23 +68,25 @@ Item {
 
             Label {
                 Layout.fillWidth: true
-                text: root.engine + (root.source ? " · " + root.source : "") + (root.connection ? " · " + root.connection : "") + " · " + root.detail
+                text: root.detail
                 color: root.problem ? Theme.danger : Theme.muted
                 font.pixelSize: Theme.caption
                 elide: Text.ElideRight
-                ToolTip.visible: detailHover.hovered
+                ToolTip.visible: detailHover.hovered && truncated
                 ToolTip.text: text
                 HoverHandler { id: detailHover }
             }
+
             Label {
                 Layout.fillWidth: true
-                text: root.destination
+                visible: root.engineLine !== ""
+                text: root.engineLine
                 color: Theme.muted
                 font.pixelSize: Theme.caption
                 elide: Text.ElideMiddle
-                ToolTip.visible: destinationHover.hovered
-                ToolTip.text: root.destination
-                HoverHandler { id: destinationHover }
+                ToolTip.visible: engineHover.hovered && truncated
+                ToolTip.text: text
+                HoverHandler { id: engineHover }
             }
         }
 
@@ -102,7 +100,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
                 // Only what has started: a column of empty tracks says nothing.
-                visible: !root.completed && (root.progress > 0 || root.running)
+                visible: !root.completed && !root.failed && (root.progress > 0 || root.running)
                 value: root.progress
             }
         }
@@ -114,8 +112,10 @@ Item {
             layoutDirection: Qt.RightToLeft
             spacing: 4
 
+            // A JDownloader hand-over left unconfirmed (failed, no retry) stays in the list:
+            // asked for again, it could reach JDownloader twice.
             ToolButton {
-                visible: root.completed ? root.hasFile : !(root.failed && root.engine === "JDownloader" && !root.canRetry)
+                visible: root.completed ? root.hasFile : !(root.failed && !root.canRetry)
                 icon.source: Theme.source(root.completed ? Theme.icon.folder : Theme.icon.cancel)
                 display: AbstractButton.IconOnly
                 text: root.completed ? "Mostrar en la carpeta"
@@ -133,15 +133,15 @@ Item {
             }
 
             ToolButton {
-                visible: root.pausable || root.canResume || root.canRetry
+                visible: root.canPause || root.canResume || root.canRetry
                          || (root.completed && root.hasFile)
                 icon.source: Theme.source(root.completed ? Theme.icon.play
                                           : root.failed ? Theme.icon.retry
-                                          : root.pausable ? Theme.icon.pause : Theme.icon.download)
+                                          : root.canPause ? Theme.icon.pause : Theme.icon.download)
                 display: AbstractButton.IconOnly
                 text: root.completed ? "Ver"
                       : root.failed ? "Reintentar"
-                      : root.pausable ? "Pausar" : "Reanudar"
+                      : root.canPause ? "Pausar" : "Reanudar"
                 ToolTip.visible: hovered
                 ToolTip.text: text
                 onClicked: {
@@ -149,7 +149,7 @@ Item {
                         root.downloads.play(root.taskId)
                     else if (root.failed)
                         root.downloads.retry(root.taskId)
-                    else if (root.pausable)
+                    else if (root.canPause)
                         root.downloads.pause(root.taskId)
                     else
                         root.downloads.resume(root.taskId)

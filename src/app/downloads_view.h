@@ -23,12 +23,11 @@ class DownloadsView final : public QObject {
     // The series on view at the top of the page (none or one), out of the queue, as in Steam.
     Q_PROPERTY(DownloadSeriesModel* current READ current CONSTANT)
 
-    // Running, queued or due to retry: what goes on by itself. Paused ones wait for the user.
-    Q_PROPERTY(int activeCount READ activeCount NOTIFY summaryChanged)
-    Q_PROPERTY(bool canPauseNative READ canPauseNative NOTIFY summaryChanged)
-    Q_PROPERTY(bool canResumeNative READ canResumeNative NOTIFY summaryChanged)
+    // Whether pausing or resuming everything, or retrying the failures, has anything to act on.
+    // What JDownloader already transfers is not AnimeHub's to pause.
+    Q_PROPERTY(bool canPauseAll READ canPauseAll NOTIFY summaryChanged)
+    Q_PROPERTY(bool canResumeAll READ canResumeAll NOTIFY summaryChanged)
     Q_PROPERTY(bool canRetryFailed READ canRetryFailed NOTIFY summaryChanged)
-    Q_PROPERTY(bool anyPaused READ anyPaused NOTIFY summaryChanged)
 
     // The download on view at the top of the page.
     Q_PROPERTY(Mode headerMode READ headerMode NOTIFY summaryChanged)
@@ -75,11 +74,14 @@ public:
         return &current_;
     }
 
-    [[nodiscard]] int activeCount() const {
-        return active_count_;
+    [[nodiscard]] bool canPauseAll() const {
+        return can_pause_all_;
     }
-    [[nodiscard]] bool anyPaused() const {
-        return any_paused_;
+    [[nodiscard]] bool canResumeAll() const {
+        return can_resume_all_;
+    }
+    [[nodiscard]] bool canRetryFailed() const {
+        return can_retry_failed_;
     }
 
     [[nodiscard]] Mode headerMode() const {
@@ -127,9 +129,8 @@ public:
     [[nodiscard]] QString peakText() const;
     [[nodiscard]] QString totalText() const;
 
-    [[nodiscard]] bool canPauseNative() const;
-    [[nodiscard]] bool canResumeNative() const;
-    [[nodiscard]] bool canRetryFailed() const;
+    // Resuming all brings back only what pausing all stopped; what the user paused on its own
+    // waits for them (DownloadManager::resumeAll).
     Q_INVOKABLE void pauseAll();
     Q_INVOKABLE void resumeAll();
     Q_INVOKABLE void retryAllFailed();
@@ -218,8 +219,9 @@ private:
     QHash<QString, SeriesInfo> infos_;
     QTimer rebuild_timer_;
 
-    int active_count_ = 0;
-    bool any_paused_ = false;
+    bool can_pause_all_ = false;
+    bool can_resume_all_ = false;
+    bool can_retry_failed_ = false;
     Header header_;
     Bar bar_;
 

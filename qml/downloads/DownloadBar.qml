@@ -11,7 +11,6 @@ AbstractButton {
     required property DownloadsView downloads
 
     readonly property int mode: downloads.barMode
-    readonly property bool running: mode === DownloadsView.Active || mode === DownloadsView.Waiting
 
     implicitHeight: 40
     hoverEnabled: true
@@ -64,21 +63,24 @@ AbstractButton {
 
         Item { Layout.fillWidth: true }
 
+        // What JDownloader already transfers is not AnimeHub's to pause: with only that left,
+        // there is nothing to pause or resume here.
         Button {
             visible: root.mode === DownloadsView.Failed ? root.downloads.canRetryFailed
-                     : root.downloads.canPauseNative || root.downloads.canResumeNative
+                     : root.downloads.canPauseAll || root.downloads.canResumeAll
             Layout.rightMargin: 8
             flat: true
             text: root.mode === DownloadsView.Failed ? "Reintentar"
-                  : root.downloads.canPauseNative ? "Pausar incorporadas" : "Reanudar incorporadas"
+                  : root.downloads.canPauseAll ? "Pausar" : "Reanudar"
             icon.source: Theme.source(root.mode === DownloadsView.Failed ? Theme.icon.retry
-                                      : root.downloads.canPauseNative ? Theme.icon.pause : Theme.icon.download)
+                                      : root.downloads.canPauseAll ? Theme.icon.pause
+                                                                   : Theme.icon.download)
             icon.width: 16
             icon.height: 16
             onClicked: {
                 if (root.mode === DownloadsView.Failed)
                     root.downloads.retryAllFailed()
-                else if (root.downloads.canPauseNative)
+                else if (root.downloads.canPauseAll)
                     root.downloads.pauseAll()
                 else
                     root.downloads.resumeAll()

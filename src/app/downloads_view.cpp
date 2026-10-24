@@ -3,6 +3,7 @@
 #include "display.h"
 #include "shell.h"
 
+#include <QDir>
 #include <QFileInfo>
 #include <QLocale>
 
@@ -27,19 +28,28 @@ bool native(const Task& task) {
     return task.engine == downloads::DownloadEngine::Native;
 }
 
+// What DownloadManager pauses: anything unfinished that JDownloader does not have yet.
 bool pausable(const Task& task) {
-    return native(task) &&
+    return !task.handedOver() &&
            (task.state == TaskState::Queued || task.state == TaskState::Resolving ||
             task.state == TaskState::Downloading || task.state == TaskState::Waiting);
 }
 
 bool retryable(const Task& task) {
-    return task.state == TaskState::Failed &&
-           (native(task) || task.engineSubmission.isEmpty() || task.engineJobId > 0);
+    return task.state == TaskState::Failed && !task.unconfirmed();
 }
 
-QString engineName(const Task& task) {
-    return native(task) ? QStringLiteral("Incorporado") : QStringLiteral("JDownloader");
+// Where a JDownloader download ends up, said with the engine: native ones go where they
+// always do, so their row says nothing of it.
+QString jdFolder(const Task& task) {
+    return native(task) ? QString()
+                        : QDir::toNativeSeparators(QFileInfo(task.targetPath).absolutePath());
+}
+
+QString engineLine(const QStringList& folders) {
+    return folders.isEmpty()
+               ? QString()
+               : QStringLiteral("JDownloader · ") + folders.join(QStringLiteral(" · "));
 }
 
 QString phaseName(const Task& task) {
@@ -57,14 +67,22 @@ QString phaseName(const Task& task) {
 }
 
 QString taskDetail(const Task& task) {
+    using downloads::TaskIssue;
     if (native(task))
         return display::download(task);
-    if (task.state == TaskState::Failed && !retryable(task))
+    if (task.state == TaskState::Failed && task.unconfirmed())
         return QStringLiteral(
             "Envío sin confirmar · revisa el trabajo en JDownloader antes de volver a enviarlo");
     if ((task.state == TaskState::Waiting || task.state == TaskState::Failed) &&
-        task.issue == downloads::TaskIssue::Engine)
+        task.issue == TaskIssue::Engine)
         return QStringLiteral("Sin conexión con JDownloader · último estado: ") + phaseName(task);
+    // The usual reasons speak of MEGA, Pixeldrain and aria2. JDownloader takes other servers,
+    // and its own failures carry their reason; the network and the API keep theirs.
+    if (task.state == TaskState::Failed && task.issue == TaskIssue::NoSource)
+        return QStringLiteral("Ningún servidor tiene este episodio.");
+    if (task.state == TaskState::Failed && task.issue != TaskIssue::Network &&
+        !task.issueDetail.isEmpty())
+        return task.issueDetail;
     if (task.state == TaskState::Downloading || task.state == TaskState::Verifying)
         return phaseName(task) + (task.bytesTotal > 0
                                       ? QStringLiteral(" · ") + display::bytes(task.bytesDone) +
@@ -97,14 +115,14 @@ QString count(qsizetype n, const QString& one, const QString& many) {
     return n == 1 ? one : many.arg(n);
 }
 
+// Where the series' episodes end up, whoever downloads them: JDownloader's own folder goes once
+// its videos are moved there.
 QString folderOf(const QList<Task>& tasks) {
     for (const auto& task : tasks) {
-        if (task.engine == downloads::DownloadEngine::JDownloaderCloud)
-            continue;
-        const auto folder =
-            native(task) ? QFileInfo(task.targetPath).absolutePath() : task.engineDestination;
-        if (!folder.isEmpty() && QFileInfo(folder).isDir())
+        const auto folder = QFileInfo(task.targetPath).absolutePath();
+        if (QFileInfo(folder).isDir()) {
             return folder;
+        }
     }
     return {};
 }
@@ -232,6 +250,7 @@ void DownloadsView::rebuild() {
         qint64 total = 0;
         qint64 partial = 0;
         QList<double> partial_numbers; // episodes cancelling would delete bytes of
+        QStringList jd_folders;        // where JDownloader puts the episodes it downloads
         bool totals_known = true;
         double fraction = 0;
         QDateTime retry_at;
@@ -283,14 +302,13 @@ void DownloadsView::rebuild() {
                 ++files;
                 file_bytes += episode->fileSize;
             }
-            row.canPause = row.canPause || pausable(task);
-            row.canResume = row.canResume || (native(task) && task.state == TaskState::Paused);
-            row.canRetry = row.canRetry || retryable(task);
-            if (!row.engines.contains(engineName(task))) {
-                if (!row.engines.isEmpty())
-                    row.engines += QStringLiteral(" · ");
-                row.engines += engineName(task);
+            const auto folder = jdFolder(task);
+            if (!folder.isEmpty() && !jd_folders.contains(folder)) {
+                jd_folders.append(folder);
             }
+            row.canPause = row.canPause || pausable(task);
+            row.canResume = row.canResume || task.state == TaskState::Paused;
+            row.canRetry = row.canRetry || retryable(task);
             row.episodes.append(
                 {.id = task.id,
                  .number = task.number,
@@ -301,29 +319,15 @@ void DownloadsView::rebuild() {
                  .detail = taskDetail(task),
                  .problem = task.state == TaskState::Failed,
                  .hasFile = on_disk,
-                 .engine = engineName(task),
-                 .source = task.provider ? display::provider(*task.provider) : QString(),
-                 .connection = native(task) ? QString()
-                               : task.engine == downloads::DownloadEngine::JDownloaderLocal
-                                   ? QStringLiteral("Local")
-                                   : QStringLiteral("MyJDownloader"),
-                 .destination = native(task) ? QFileInfo(task.targetPath).absolutePath()
-                                             : task.engineDestination,
-                 .phase = native(task) ? downloads::stateKey(task.state) : task.enginePhase,
+                 .engineLine = folder.isEmpty() ? QString() : engineLine({folder}),
                  .canPause = pausable(task),
-                 .canResume = native(task) && task.state == TaskState::Paused,
+                 .canResume = task.state == TaskState::Paused,
                  .canRetry = retryable(task),
                  .partial = native(task) && task.state != TaskState::Completed && bytesOf(task) > 0
                                 ? display::bytes(bytesOf(task))
                                 : QString()});
         }
-
-        QStringList destinations;
-        for (const auto& episode : row.episodes) {
-            if (!episode.destination.isEmpty() && !destinations.contains(episode.destination))
-                destinations.append(episode.destination);
-        }
-        row.destinations = destinations.join(QStringLiteral(" · "));
+        row.engineLine = engineLine(jd_folders);
 
         const auto episodes = group.tasks.size();
         QStringList summary;
@@ -395,18 +399,20 @@ void DownloadsView::rebuild() {
 
     // What the top of the page and the bar show: something running, else what will start by
     // itself, else what waits for the user, else the failures.
-    int active = 0;
     int pending = 0; // will start or retry by itself
     int paused = 0;
     int failed = 0;
     qint64 speed = 0;
+    bool can_pause = false;
+    bool can_retry = false;
     const Task* shown = nullptr;
     const Task* next = nullptr;
     const Task* held = nullptr;
     const Task* broken = nullptr;
     for (const auto& task : tasks) {
+        can_pause = can_pause || pausable(task);
+        can_retry = can_retry || retryable(task);
         if (running(task.state)) {
-            ++active;
             if (!shown) {
                 shown = &task;
             }
@@ -489,11 +495,16 @@ void DownloadsView::rebuild() {
         bar.problem = QStringLiteral("%1 con error").arg(failed);
     }
 
+    const bool changed = header != header_ || bar != bar_ || can_pause_all_ != can_pause ||
+                         can_resume_all_ != (paused > 0) || can_retry_failed_ != can_retry;
     header_ = std::move(header);
     bar_ = std::move(bar);
-    active_count_ = active;
-    any_paused_ = paused > 0;
-    emit summaryChanged();
+    can_pause_all_ = can_pause;
+    can_resume_all_ = paused > 0;
+    can_retry_failed_ = can_retry;
+    if (changed) {
+        emit summaryChanged();
+    }
 
     if (speed != speed_ || speed > peak_) {
         speed_ = speed;
@@ -556,57 +567,36 @@ QList<Task> DownloadsView::tasksOf(const QString& slug) const {
     return tasks;
 }
 
-bool DownloadsView::canPauseNative() const {
-    return std::ranges::any_of(manager_.tasks(), pausable);
-}
-bool DownloadsView::canResumeNative() const {
-    return std::ranges::any_of(manager_.tasks(), [](const Task& task) {
-        return native(task) && task.state == TaskState::Paused;
-    });
-}
-bool DownloadsView::canRetryFailed() const {
-    return std::ranges::any_of(manager_.tasks(), retryable);
-}
 void DownloadsView::pauseAll() {
-    for (const auto& task : manager_.tasks()) {
-        if (pausable(task))
-            manager_.pause(task.id);
-    }
+    manager_.pauseAll();
 }
 
 void DownloadsView::resumeAll() {
-    for (const auto& task : manager_.tasks()) {
-        if (native(task) && task.state == TaskState::Paused)
-            manager_.resume(task.id);
-    }
+    manager_.resumeAll();
 }
 
 void DownloadsView::retryAllFailed() {
+    QStringList slugs;
     for (const auto& task : manager_.tasks()) {
-        if (retryable(task))
-            manager_.retry(task.id);
+        if (task.state == TaskState::Failed && !slugs.contains(task.slug)) {
+            slugs.append(task.slug);
+        }
+    }
+    for (const auto& slug : slugs) {
+        manager_.retryFailed(slug);
     }
 }
 
 void DownloadsView::pauseSeries(const QString& slug) {
-    for (const auto& task : tasksOf(slug)) {
-        if (pausable(task))
-            manager_.pause(task.id);
-    }
+    manager_.pauseSeries(slug);
 }
 
 void DownloadsView::resumeSeries(const QString& slug) {
-    for (const auto& task : tasksOf(slug)) {
-        if (native(task) && task.state == TaskState::Paused)
-            manager_.resume(task.id);
-    }
+    manager_.resumeSeries(slug);
 }
 
 void DownloadsView::retryFailed(const QString& slug) {
-    for (const auto& task : tasksOf(slug)) {
-        if (retryable(task))
-            manager_.retry(task.id);
-    }
+    manager_.retryFailed(slug);
 }
 
 // The page shows the new order at once, so a dropped row lands where it was let go.
@@ -722,8 +712,7 @@ void DownloadsView::resume(qint64 id) {
 }
 
 void DownloadsView::retry(qint64 id) {
-    if (const auto task = manager_.task(id); task && retryable(*task))
-        manager_.retry(id);
+    manager_.retry(id);
 }
 
 void DownloadsView::cancel(qint64 id) {

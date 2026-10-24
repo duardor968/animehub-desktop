@@ -19,8 +19,7 @@ Item {
     required property bool canPause
     required property bool canResume
     required property bool canRetry
-    required property string destinations
-    required property string engines
+    required property string engineLine
     required property bool first
     required property string cancelText
     required property int filesOnDisk
@@ -81,6 +80,7 @@ Item {
         hoverEnabled: true
         focusPolicy: Qt.StrongFocus
         Accessible.name: root.title + ", " + root.summary + (root.failed > 0 ? ", " + root.failedText : "")
+                         + (root.engineLine !== "" ? ", " + root.engineLine : "")
         Accessible.description: root.expanded ? "Desplegada" : "Plegada"
         Accessible.onPressAction: root.toggled()
         onClicked: root.toggled()
@@ -181,7 +181,7 @@ Item {
                                             - (failures.visible
                                                ? separator.implicitWidth + failures.implicitWidth : 0)
                                             - (retry.visible ? retry.width + 4 : 0))
-                            text: root.engines + " · " + root.summary
+                            text: root.summary
                             color: Theme.muted
                             font.pixelSize: Theme.body
                             elide: Text.ElideRight
@@ -227,15 +227,17 @@ Item {
                         }
                     }
                 }
+                // Who downloads it and where, only when JDownloader takes part.
                 Label {
                     Layout.fillWidth: true
-                    text: root.destinations
+                    visible: root.engineLine !== ""
+                    text: root.engineLine
                     color: Theme.muted
                     font.pixelSize: Theme.caption
                     elide: Text.ElideMiddle
-                    ToolTip.visible: destinationHover.hovered
+                    ToolTip.visible: engineHover.hovered && truncated
                     ToolTip.text: text
-                    HoverHandler { id: destinationHover }
+                    HoverHandler { id: engineHover }
                 }
             }
 
@@ -299,7 +301,7 @@ Item {
                     icon.source: Theme.source(!root.queued ? Theme.icon.folder
                                               : root.canPause ? Theme.icon.pause : Theme.icon.download)
                     display: AbstractButton.IconOnly
-                    text: !root.queued ? "Abrir la carpeta" : root.canPause ? "Pausar incorporadas" : "Reanudar incorporadas"
+                    text: !root.queued ? "Abrir la carpeta" : root.canPause ? "Pausar" : "Reanudar"
                     ToolTip.visible: hovered
                     ToolTip.text: text
                     onClicked: {

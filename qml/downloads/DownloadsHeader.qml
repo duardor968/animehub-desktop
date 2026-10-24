@@ -20,7 +20,6 @@ Rectangle {
 
     readonly property int mode: downloads.headerMode
     readonly property bool idle: mode === DownloadsView.Idle
-    readonly property bool paused: mode === DownloadsView.Paused
     readonly property bool wide: width >= 1280
 
     // Without a download on view there is no art: the band shrinks to the figures.
@@ -117,20 +116,21 @@ Rectangle {
             elide: Text.ElideRight
         }
 
+        // Who downloads the series and where, only when JDownloader takes part.
         Repeater {
             model: root.idle ? null : root.downloads.current
 
             Label {
-                required property string engines
-                required property string destinations
+                required property string engineLine
                 Layout.fillWidth: true
-                text: engines + (destinations ? " · " + destinations : "")
+                visible: engineLine !== ""
+                text: engineLine
                 color: Theme.muted
                 font.pixelSize: Theme.caption
                 elide: Text.ElideMiddle
-                ToolTip.visible: metadataHover.hovered
+                ToolTip.visible: engineHover.hovered && truncated
                 ToolTip.text: text
-                HoverHandler { id: metadataHover }
+                HoverHandler { id: engineHover }
             }
         }
         Repeater {
@@ -167,17 +167,19 @@ Rectangle {
 
             Button {
                 id: toggle
-                visible: root.downloads.canPauseNative || root.downloads.canResumeNative
+                visible: root.downloads.canPauseAll || root.downloads.canResumeAll
                 highlighted: true
                 display: AbstractButton.IconOnly
                 // The icon and Fluent's own side padding; narrower squeezes the icon.
                 implicitWidth: 40
                 // As Steam's, and as the bottom bar's and the tray's: every download.
-                text: root.downloads.canPauseNative ? "Pausar incorporadas" : "Reanudar incorporadas"
-                icon.source: Theme.source(root.downloads.canPauseNative ? Theme.icon.pause : Theme.icon.download)
+                text: root.downloads.canPauseAll ? "Pausar las descargas" : "Reanudar las descargas"
+                icon.source: Theme.source(root.downloads.canPauseAll ? Theme.icon.pause
+                                                                     : Theme.icon.download)
                 ToolTip.visible: hovered
                 ToolTip.text: text
-                onClicked: root.downloads.canPauseNative ? root.downloads.pauseAll() : root.downloads.resumeAll()
+                onClicked: root.downloads.canPauseAll ? root.downloads.pauseAll()
+                                                      : root.downloads.resumeAll()
             }
 
             ColumnLayout {
