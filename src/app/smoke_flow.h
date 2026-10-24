@@ -105,7 +105,8 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
                        u"Smoke flow franchise",
                    "Enter creates the franchise"))
             return false;
-        if (!check(!dialog->property("visible").toBool(), "dialog closes once created"))
+        // Closing, not closed: a hidden window may never run the exit transition to its end.
+        if (!check(!dialog->property("opened").toBool(), "dialog closes once created"))
             return false;
     } else if (flow == u"archive") {
         model->setFilter(LibraryModel::Filter::All);
