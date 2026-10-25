@@ -995,6 +995,97 @@ private slots:
         QCOMPARE(server.count("/api/v1/anime/" + sequel.toUtf8() + "/episodes"), 0);
     }
 
+    void linkedFollowedWorksFormAFranchiseNamedAfterTheFirst() {
+        const auto work = [&](const QString& slug, const QString& title, std::optional<int> year) {
+            auto record = frieren();
+            record.slug = slug;
+            record.title = title;
+            record.startYear = year;
+            return repository_->saveSnapshot(record) && repository_->setInLibrary(slug, true);
+        };
+        const auto link = [&](const QString& source, const QString& target) {
+            return bool(database_->run(QStringLiteral("INSERT INTO anime_relation(source_slug, "
+                                                      "target_slug) VALUES (?, ?)"),
+                                       {source, target}));
+        };
+        // Three followed seasons, a side story not followed and a sequel out of the library.
+        QVERIFY(work(QStringLiteral("stone-wars"), QStringLiteral("Dr. Stone: Stone Wars"), 2021));
+        QVERIFY(work(QStringLiteral("dr-stone"), QStringLiteral("Dr. Stone"), 2019));
+        QVERIFY(work(QStringLiteral("new-world"), QStringLiteral("Dr. Stone: New World"), {}));
+        QVERIFY(work(QStringLiteral("ryuusui"), QStringLiteral("Dr. Stone: Ryuusui"), 2022));
+        QVERIFY(repository_->setFlag(QStringLiteral("ryuusui"), Flag::Notify, false));
+        auto later = frieren();
+        later.slug = QStringLiteral("science-future");
+        QVERIFY(repository_->saveSnapshot(later));
+        QVERIFY(link(QStringLiteral("dr-stone"), QStringLiteral("stone-wars")));
+        QVERIFY(link(QStringLiteral("new-world"), QStringLiteral("stone-wars")));
+        QVERIFY(link(QStringLiteral("stone-wars"), QStringLiteral("ryuusui")));
+        QVERIFY(link(QStringLiteral("new-world"), QStringLiteral("science-future")));
+
+        QCOMPARE(*repository_->groupLinkedWorks(), 1);
+        const auto groups = repository_->franchises();
+        QCOMPARE(groups->size(), 1);
+        QCOMPARE(groups->first().title, QStringLiteral("Dr. Stone"));
+        QCOMPARE(groups->first().members,
+                 (QStringList{QStringLiteral("dr-stone"), QStringLiteral("new-world"),
+                              QStringLiteral("stone-wars")}));
+        QVERIFY(!inLibrary(later.slug));
+        QCOMPARE(*repository_->groupLinkedWorks(), 0);
+    }
+
+    void worksTakenOutByHandOrNextToAFranchiseStayAsTheyAre() {
+        for (const auto& slug : {QStringLiteral("a1"), QStringLiteral("a2"), QStringLiteral("b1"),
+                                 QStringLiteral("b2"), QStringLiteral("grouped")}) {
+            auto record = frieren();
+            record.slug = slug;
+            QVERIFY(repository_->saveSnapshot(record));
+            QVERIFY(repository_->setInLibrary(slug, true));
+        }
+        const auto group =
+            repository_->createFranchise(QStringLiteral("Personal"), QStringLiteral("grouped"));
+        QVERIFY(group);
+        QVERIFY(repository_->setFranchiseMember(*group, QStringLiteral("a1"), true));
+        QVERIFY(repository_->setFranchiseMember(*group, QStringLiteral("a1"), false));
+        for (const auto& [source, target] :
+             {std::pair{QStringLiteral("a1"), QStringLiteral("a2")},
+              std::pair{QStringLiteral("b1"), QStringLiteral("b2")},
+              std::pair{QStringLiteral("b2"), QStringLiteral("grouped")}}) {
+            QVERIFY(database_->run(QStringLiteral("INSERT INTO anime_relation(source_slug, "
+                                                  "target_slug) VALUES (?, ?)"),
+                                   {source, target}));
+        }
+        QCOMPARE(*repository_->groupLinkedWorks(), 0);
+        QCOMPARE(repository_->franchises()->size(), 1);
+        QCOMPARE(repository_->franchises()->first().members,
+                 QStringList{QStringLiteral("grouped")});
+    }
+
+    void libraryRefreshGroupsTheFollowedSeasonsOfAWork() {
+        testing::HttpTestServer server;
+        QVERIFY(server.listen());
+        server.json("/api/v1/anime/sousou-no-frieren", fixture("anime.json"));
+        server.json("/api/v1/anime/sousou-no-frieren/episodes", kOneEpisode);
+        QNetworkAccessManager network;
+        api::ApiClient api(network, {.baseUrl = server.url(QStringLiteral("/api/v1/"))});
+        LibraryService service(*repository_, api);
+        QSignalSpy members(&service, &LibraryService::newFranchiseMembers);
+        const auto detail = api::json::decodeAnime(fixture("anime.json"));
+        QVERIFY(detail);
+        // Both seasons are followed on their own.
+        const auto sequel = detail->relations.first().anime;
+        QVERIFY(repository_->saveSnapshot(snapshotOf(sequel)));
+        QVERIFY(repository_->setInLibrary(sequel.slug, true));
+        QVERIFY(repository_->setInLibrary(detail->slug, true));
+
+        service.refresh(detail->slug, true);
+        QTRY_VERIFY(!service.isRefreshing(detail->slug));
+        const auto groups = repository_->franchises();
+        QCOMPARE(groups->size(), 1);
+        QCOMPARE(groups->first().title, detail->title);
+        QCOMPARE(groups->first().members, (QStringList{detail->slug, sequel.slug}));
+        QVERIFY(members.isEmpty()); // nothing joined the library
+    }
+
     void listsOnlyTheLibrary() {
         auto other = frieren();
         other.slug = QStringLiteral("cowboy-bebop");

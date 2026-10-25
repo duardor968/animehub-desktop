@@ -2,8 +2,12 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
+#include <QSet>
 #include <QSqlRecord>
 #include <QTimeZone>
+
+#include <algorithm>
 
 namespace animehub::library {
 namespace {
@@ -822,6 +826,103 @@ Stored<QStringList> LibraryRepository::discoverFranchiseRelations(const api::Ani
         return std::unexpected(applied.error());
     return added;
 }
+
+Stored<int> LibraryRepository::groupLinkedWorks() {
+    int created = 0;
+    const auto applied = database_.transaction([&]() -> Stored<void> {
+        struct Work {
+            std::optional<int> year;
+            QString title;
+        };
+        auto followed = database_.run(QStringLiteral(
+            "SELECT slug, start_year, title FROM anime a WHERE in_library = 1 AND (notify = 1 OR "
+            "auto_download = 1) AND NOT EXISTS (SELECT 1 FROM personal_exclusion p WHERE p.slug = "
+            "a.slug) AND NOT EXISTS (SELECT 1 FROM franchise_member m WHERE m.slug = a.slug AND "
+            "(m.included = 1 OR m.manual = 1)) ORDER BY slug"));
+        if (!followed)
+            return std::unexpected(followed.error());
+        QHash<QString, Work> free;
+        QStringList order;
+        while (followed->next()) {
+            const auto slug = followed->value(0).toString();
+            free.insert(slug, {optionalInt(followed->value(1)), followed->value(2).toString()});
+            order.append(slug);
+        }
+        auto members =
+            database_.run(QStringLiteral("SELECT slug FROM franchise_member WHERE included = 1"));
+        if (!members)
+            return std::unexpected(members.error());
+        QSet<QString> grouped;
+        while (members->next())
+            grouped.insert(members->value(0).toString());
+        auto edges =
+            database_.run(QStringLiteral("SELECT source_slug, target_slug FROM anime_relation"));
+        if (!edges)
+            return std::unexpected(edges.error());
+        QHash<QString, QStringList> links;
+        QSet<QString> near_group;
+        while (edges->next()) {
+            const auto source = edges->value(0).toString();
+            const auto target = edges->value(1).toString();
+            if (free.contains(source) && free.contains(target)) {
+                links[source].append(target);
+                links[target].append(source);
+            } else if (free.contains(source) && grouped.contains(target)) {
+                near_group.insert(source);
+            } else if (free.contains(target) && grouped.contains(source)) {
+                near_group.insert(target);
+            }
+        }
+        QSet<QString> seen;
+        for (const auto& start : order) {
+            if (seen.contains(start) || !links.contains(start))
+                continue;
+            QStringList component;
+            QStringList pending{start};
+            seen.insert(start);
+            while (!pending.isEmpty()) {
+                const auto slug = pending.takeLast();
+                component.append(slug);
+                for (const auto& next : links.value(slug)) {
+                    if (!seen.contains(next)) {
+                        seen.insert(next);
+                        pending.append(next);
+                    }
+                }
+            }
+            // Joining an existing franchise is discovery's call, never a new group's.
+            if (std::ranges::any_of(component,
+                                    [&](const QString& slug) { return near_group.contains(slug); }))
+                continue;
+            const auto first = std::ranges::min(component, [&](const QString& a, const QString& b) {
+                const auto x = free.value(a);
+                const auto y = free.value(b);
+                if (x.year.has_value() != y.year.has_value())
+                    return x.year.has_value();
+                if (x.year != y.year)
+                    return *x.year < *y.year;
+                return x.title.compare(y.title, Qt::CaseInsensitive) < 0;
+            });
+            const auto id = createFranchise(free.value(first).title);
+            if (!id)
+                return std::unexpected(id.error());
+            for (const auto& slug : component) {
+                auto member = database_.run(
+                    QStringLiteral("INSERT INTO franchise_member(franchise_id, slug, included, "
+                                   "manual) VALUES (?, ?, 1, 0)"),
+                    {*id, slug});
+                if (!member)
+                    return std::unexpected(member.error());
+            }
+            ++created;
+        }
+        return {};
+    });
+    if (!applied)
+        return std::unexpected(applied.error());
+    return created;
+}
+
 Stored<void> LibraryRepository::storeEpisodeFile(const QString& slug, double number,
                                                  const QString& path, qint64 size) {
     if (path.trimmed().isEmpty() || !QFileInfo(path).isAbsolute() || size < 0)

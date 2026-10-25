@@ -283,7 +283,9 @@ void LibraryService::store(const api::AnimeDetail& detail, bool flag_new, bool d
         }
         if (!notify.isEmpty())
             emit newFranchiseMembers(notify);
-        emit listChanged(); // franchises and proposals may have changed
+        if (const auto grouped = repository_.groupLinkedWorks(); !grouped)
+            qWarning("library: %s", qPrintable(grouped.error().message));
+        emit listChanged(); // franchises may have changed
     }
     emit animeChanged(slug);
     // Episodes arrive in ascending pages of fifty; a known list only needs its tail.
@@ -368,6 +370,11 @@ void LibraryService::checkNow() {
 }
 
 void LibraryService::sweep() {
+    // Also groups the links stored before automatic grouping existed.
+    if (const auto grouped = repository_.groupLinkedWorks(); !grouped)
+        qWarning("library: %s", qPrintable(grouped.error().message));
+    else if (*grouped > 0)
+        emit listChanged();
     const auto entries = repository_.followedEntries();
     if (!entries) {
         return;

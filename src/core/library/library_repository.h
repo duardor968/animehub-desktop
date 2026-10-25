@@ -40,6 +40,10 @@ public:
     // to exactly one personal group. Returns newly added slugs; never changes existing manual
     // membership or download settings.
     Stored<QStringList> discoverFranchiseRelations(const api::AnimeDetail& detail);
+    // Followed works linked as installments, none of them in a franchise nor near one, form a new
+    // franchise named after the earliest. A work taken out of a franchise by hand never joins one
+    // this way. Returns how many franchises were created.
+    Stored<int> groupLinkedWorks();
     [[nodiscard]] Stored<std::optional<LibraryEntry>> entry(const QString& slug) const;
 
     // Stores the episode list; returns the numbers that were not known before. With `flag_new`
