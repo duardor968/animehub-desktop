@@ -173,6 +173,8 @@ AppController::AppController(AppPaths paths, QObject* parent)
                 return false;
             return (*anime)->inLibrary || library_->add(**anime).has_value();
         });
+    if (paths_.isolated)
+        remote_service_->keepCredentialsInProfile();
     remote_view_ = std::make_unique<RemoteView>(*remote_service_);
     publishRemoteProfiles();
     connect(settings_.get(), &AppSettings::changed, this, &AppController::publishRemoteProfiles);
@@ -261,8 +263,10 @@ void AppController::start() {
     if (!paths_.smoke)
         jdownloader_view_->start();
     library_model_->start();
+    // Also in a capture: a profile with its own device credential shows Dispositivos vinculados
+    // as the API has it; one without stays off the network.
+    remote_service_->start();
     if (!paths_.smoke) {
-        remote_service_->start();
         setupTray();
 #ifdef Q_OS_LINUX
         notifications_ = std::make_unique<Notifications>(appIcon().pixmap(128).toImage());

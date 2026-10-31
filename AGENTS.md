@@ -14,7 +14,7 @@ AnimeHub Desktop es una aplicación nativa C++26 con Qt Quick para Windows y Lin
 - Motores: en Windows, aria2 y mpv van incluidos; en Linux, los del sistema (el .deb los declara como dependencias; si faltan, la app dice qué paquete instalar).
 - Reproducción externa: mpv por defecto (seguimiento por IPC), PotPlayer si está instalado (seguimiento de su ventana, con los episodios siguientes en su lista; también cuando es el reproductor predeterminado) o la aplicación predeterminada del sistema (abrir marca visto). Nada de reproductor embebido sin una nueva decisión. Cerrar AnimeHub no detiene un vídeo.
 - Avisos de episodios nuevos activados por defecto; la descarga automática se activa por anime y con consentimiento explícito (destino y forma de desactivarla).
-- Credenciales de servicios opcionales solo en el almacén del sistema (Administrador de credenciales en Windows, Secret Service por libsecret en Linux); de MyJDownloader, solo las claves derivadas.
+- Credenciales de servicios opcionales solo en el almacén del sistema (Administrador de credenciales en Windows, Secret Service por libsecret en Linux); de MyJDownloader, solo las claves derivadas. Un perfil de prueba (`--data-dir`) guarda la del PC vinculado en su propia carpeta.
 
 ## Interfaz
 

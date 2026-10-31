@@ -9,6 +9,7 @@
 #include <optional>
 
 class QNetworkAccessManager;
+class QNetworkReply;
 
 namespace animehub::api {
 class ApiClient;
@@ -61,15 +62,22 @@ public:
     using SaveCredentials = std::function<bool(const Credentials&)>;
     RemoteService(QNetworkAccessManager& network, QUrl apiBase, QString dataDirectory,
                   Prepare prepare, Enqueue enqueue, QObject* parent = nullptr);
+    ~RemoteService() override;
     void setCredentialStore(ReadCredentials read, SaveCredentials save);
+    // For a test profile (--data-dir): the device credential stays in the profile, never in
+    // the system's store.
+    void keepCredentialsInProfile();
     // Call before start, and whenever the local configuration changes. revision must increase
     // when the profiles change; only a new revision is published.
     void setProfiles(int revision, QList<Profile> profiles);
-    void start(); // only loads an existing device; never registers without user action
+    // Only loads an existing device; never registers without user action. A registered device
+    // keeps the API's live channel open: a request or a browser linked shows at once, and the
+    // inbox is read every minute only while the channel is down.
+    void start();
     void registerDevice(const QString& name);
     void generatePairingCode();
-    // `quiet`, as a page watching the list does: no busy state, no error, and a change only
-    // when the list is another.
+    // `quiet`, as a page watching the list does or the live channel asks: no busy state, no
+    // error, and a change only when the list is another.
     void refreshLinks(bool quiet = false);
     void revokeLink(const QString& id);
     void poll();
@@ -88,8 +96,18 @@ public:
     [[nodiscard]] QString error() const {
         return error_;
     }
+    // An action of the user is under way. Reading the inbox in the background is not one: it
+    // never holds an action back.
     [[nodiscard]] bool busy() const {
         return operations_ > 0;
+    }
+    // No request to the API is under way, of any kind.
+    [[nodiscard]] bool idle() const {
+        return inFlight_ == 0;
+    }
+    // The live channel is open.
+    [[nodiscard]] bool live() const {
+        return live_;
     }
     [[nodiscard]] QJsonArray links() const;
     [[nodiscard]] static QString credentialTarget(const QUrl& apiBase,
@@ -99,9 +117,16 @@ signals:
 
 private:
     using Response = std::function<void(int, const QJsonObject&)>;
+    // User: busy while it runs, and its failure is the page's error. Background: only the error.
+    // Quiet: neither.
+    enum class Mode { User, Background, Quiet };
     void request(const QByteArray& method, const QString& path, const QJsonObject& body,
-                 Response done, bool quiet = false);
-    void publish(std::function<void(bool)> done);
+                 Response done, Mode mode = Mode::User);
+    void publish(Mode mode, std::function<void(bool)> done);
+    void begin();
+    void openChannel();
+    void readChannel();
+    void channelClosed();
     void process(const QJsonObject& request);
     void reconcile(const QString& id);
     // Accepts the request, or with a `problem` sends it back for attention.
@@ -124,9 +149,17 @@ private:
     QJsonObject journal_;
     QJsonObject links_;
     QTimer timer_;
+    QNetworkReply* channel_ = nullptr;
+    QByteArray channelBuffer_;
+    QTimer reconnect_;
+    int channelFailures_ = 0;
+    bool live_ = false;
+    bool started_ = false;
     QString deviceName_, code_, expiresAt_, error_;
     int operations_ = 0;
+    int inFlight_ = 0;
     bool polling_ = false;
+    bool pollAgain_ = false;
     bool journalValid_ = false;
     bool localAttention_ = false;
 };

@@ -5,7 +5,9 @@
 #include <QHash>
 #include <QList>
 #include <QObject>
+#include <QPointer>
 #include <QTcpServer>
+#include <QTcpSocket>
 #include <QUrl>
 
 #include <functional>
@@ -34,6 +36,7 @@ public:
         bool drop = false;         // close the socket without answering
         int bytesPerTick = 0;      // > 0 sends the body in slices every 10 ms (slow transfers)
         qsizetype stallAfter = -1; // with bytesPerTick: stop sending there, connection open
+        bool hold = false;         // send head and body, then keep the connection open for push()
     };
 
     using Handler = std::function<Response(const Request&)>;
@@ -54,6 +57,10 @@ public:
         return requests_;
     }
     [[nodiscard]] int count(const QByteArray& path) const;
+    // Writes to, or closes, the open responses of `path` (Response::hold): a server stream.
+    void push(const QByteArray& path, const QByteArray& bytes);
+    void release(const QByteArray& path);
+    [[nodiscard]] int held(const QByteArray& path) const;
 
 private:
     void accept();
@@ -62,6 +69,7 @@ private:
     QTcpServer server_;
     QHash<QByteArray, Handler> routes_;
     QList<Request> requests_;
+    QHash<QByteArray, QList<QPointer<QTcpSocket>>> held_;
 };
 
 } // namespace animehub::testing

@@ -16,15 +16,23 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
+#include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <utility>
 
 namespace animehub::remote {
 namespace {
 
 using namespace std::chrono_literals;
 
-// A request waits up to a minute to be seen; each look is a request to the API.
+// Without the live channel, a request waits up to a minute to be seen; each look is a request
+// to the API.
 constexpr auto kInboxInterval = 1min;
+// The API sends a heartbeat every 25 s: a silent minute is a dead connection.
+constexpr auto kChannelSilence = 60s;
+// Reconnection waits 1 s after a drop, doubling after each failed attempt.
+constexpr auto kReconnectLimit = 60s;
 
 QJsonObject profileJson(const Profile& p) {
     return {{QStringLiteral("id"), p.id},
@@ -98,10 +106,45 @@ RemoteService::RemoteService(QNetworkAccessManager& network, QUrl apiBase, QStri
     };
     timer_.setInterval(kInboxInterval);
     connect(&timer_, &QTimer::timeout, this, &RemoteService::poll);
+    reconnect_.setSingleShot(true);
+    connect(&reconnect_, &QTimer::timeout, this, &RemoteService::openChannel);
+}
+RemoteService::~RemoteService() {
+    if (channel_) {
+        channel_->disconnect(this);
+        channel_->abort();
+        channel_->deleteLater();
+    }
 }
 void RemoteService::setCredentialStore(ReadCredentials read, SaveCredentials save) {
     readCredentials_ = std::move(read);
     saveCredentials_ = std::move(save);
+}
+void RemoteService::keepCredentialsInProfile() {
+    const auto file =
+        QFileInfo(journalPath_).dir().filePath(QStringLiteral("remote-credential.json"));
+    setCredentialStore(
+        [file]() -> std::optional<Credentials> {
+            QFile in(file);
+            if (!in.open(QIODevice::ReadOnly))
+                return std::nullopt;
+            const auto value = QJsonDocument::fromJson(in.readAll()).object();
+            Credentials saved{value.value(QStringLiteral("id")).toString(),
+                              value.value(QStringLiteral("token")).toString().toUtf8()};
+            if (saved.id.isEmpty() || saved.token.isEmpty())
+                return std::nullopt;
+            return saved;
+        },
+        [file](const Credentials& value) {
+            QDir().mkpath(QFileInfo(file).absolutePath());
+            QSaveFile out(file);
+            const auto bytes = QJsonDocument(QJsonObject{{QStringLiteral("id"), value.id},
+                                                         {QStringLiteral("token"),
+                                                          QString::fromUtf8(value.token)}})
+                                   .toJson(QJsonDocument::Compact);
+            return out.open(QIODevice::WriteOnly) && out.write(bytes) == bytes.size() &&
+                   out.commit();
+        });
 }
 
 void RemoteService::setProfiles(int revision, QList<Profile> profiles) {
@@ -109,7 +152,7 @@ void RemoteService::setProfiles(int revision, QList<Profile> profiles) {
     revision_ = revision;
     profiles_ = std::move(profiles);
     // A new destination reaches the web at once, not at the next look at the inbox.
-    if (changed && timer_.isActive()) {
+    if (changed && started_) {
         poll();
     }
 }
@@ -118,11 +161,80 @@ void RemoteService::start() {
     journalValid_ = loadJournal();
     if (const auto saved = readCredentials_())
         credentials_ = *saved;
-    if (registered() && journalValid_) {
-        timer_.start();
-        poll();
-    }
+    if (registered() && journalValid_)
+        begin();
     emit changed();
+}
+void RemoteService::begin() {
+    started_ = true;
+    poll();
+    openChannel();
+}
+void RemoteService::openChannel() {
+    if (channel_ || !registered())
+        return;
+    QNetworkRequest request(base_.resolved(QUrl(QStringLiteral("devices/me/events"))));
+    request.setTransferTimeout(std::chrono::milliseconds(kChannelSilence));
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                         QNetworkRequest::ManualRedirectPolicy);
+    request.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
+                         QNetworkRequest::AlwaysNetwork);
+    request.setRawHeader("Accept", "text/event-stream");
+    request.setRawHeader("Authorization", "Bearer " + credentials_.token);
+    channel_ = network_.get(request);
+    connect(channel_, &QNetworkReply::readyRead, this, &RemoteService::readChannel);
+    connect(channel_, &QNetworkReply::finished, this, &RemoteService::channelClosed);
+}
+void RemoteService::readChannel() {
+    if (!live_) {
+        const auto status = channel_->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status != 200 || !channel_->header(QNetworkRequest::ContentTypeHeader)
+                                  .toString()
+                                  .startsWith(QStringLiteral("text/event-stream"))) {
+            channel_->abort(); // channelClosed() takes it from here
+            return;
+        }
+        // Open: what changed before it opened is read now, and then only what it announces.
+        live_ = true;
+        channelFailures_ = 0;
+        timer_.stop();
+        poll();
+        refreshLinks(true);
+        emit changed();
+    }
+    channelBuffer_ += channel_->readAll().replace('\r', QByteArray());
+    for (qsizetype end; (end = channelBuffer_.indexOf("\n\n")) >= 0;) {
+        const auto block = channelBuffer_.left(end);
+        channelBuffer_.remove(0, end + 2);
+        for (const auto& line : block.split('\n')) {
+            if (!line.startsWith("event:"))
+                continue;
+            const auto type = line.mid(6).trimmed();
+            if (type == "inbox")
+                poll();
+            else if (type == "links")
+                refreshLinks(true);
+        }
+    }
+}
+void RemoteService::channelClosed() {
+    const bool wasLive = live_;
+    channel_->deleteLater();
+    channel_ = nullptr;
+    channelBuffer_.clear();
+    live_ = false;
+    if (!registered())
+        return;
+    // Until it is back, the inbox is read every minute; after a drop, also at once.
+    if (!timer_.isActive())
+        timer_.start();
+    if (wasLive)
+        poll();
+    channelFailures_ = wasLive ? 0 : channelFailures_ + 1;
+    reconnect_.start(std::min<std::chrono::milliseconds>(
+        kReconnectLimit, std::chrono::seconds(1) * (1 << std::min(channelFailures_, 6))));
+    if (wasLive)
+        emit changed();
 }
 void RemoteService::fail(const QString& message) {
     error_ = message;
@@ -174,7 +286,7 @@ bool RemoteService::saveJournal() {
     return true;
 }
 void RemoteService::request(const QByteArray& method, const QString& path, const QJsonObject& body,
-                            Response done, bool quiet) {
+                            Response done, Mode mode) {
     QNetworkRequest request(base_.resolved(QUrl(path)));
     request.setTransferTimeout(15000);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
@@ -183,7 +295,8 @@ void RemoteService::request(const QByteArray& method, const QString& path, const
         request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     if (!credentials_.token.isEmpty())
         request.setRawHeader("Authorization", "Bearer " + credentials_.token);
-    if (!quiet) {
+    ++inFlight_;
+    if (mode == Mode::User) {
         ++operations_;
         emit changed();
     }
@@ -195,15 +308,17 @@ void RemoteService::request(const QByteArray& method, const QString& path, const
                             request, method,
                             method == "GET" ? QByteArray{}
                                             : QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, quiet, done = std::move(done)] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, mode, done = std::move(done)] {
         const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto payload = QJsonDocument::fromJson(reply->readAll()).object();
         reply->deleteLater();
-        if (quiet) {
+        --inFlight_;
+        if (mode == Mode::Quiet) {
             done(status, payload);
             return;
         }
-        --operations_;
+        if (mode == Mode::User)
+            --operations_;
         if (status < 200 || status >= 300)
             fail(QStringLiteral("No se pudo contactar con AnimeHub. Vuelve a intentarlo."));
         if (status >= 200 && status < 300 && journalValid_ && !localAttention_)
@@ -235,11 +350,10 @@ void RemoteService::registerDevice(const QString& name) {
                 if (!saveJournal())
                     return;
                 error_.clear();
-                timer_.start();
-                poll();
+                begin();
             });
 }
-void RemoteService::publish(std::function<void(bool)> done) {
+void RemoteService::publish(Mode mode, std::function<void(bool)> done) {
     if (revision_ <= 0 || profiles_.isEmpty()) {
         done(false);
         return;
@@ -263,21 +377,23 @@ void RemoteService::publish(std::function<void(bool)> done) {
                                 {QStringLiteral("isDefault"), p.isDefault}});
     }
     const int revision = revision_;
-    request("PUT", QStringLiteral("devices/me/profiles"),
-            {{QStringLiteral("revision"), revision}, {QStringLiteral("profiles"), list}},
-            [this, revision, done = std::move(done)](int status, const QJsonObject& body) {
-                const bool taken = status >= 200 && status < 300 &&
-                                   body.value(QStringLiteral("revision")).toInt() == revision;
-                if (taken) {
-                    publishedRevision_ = revision;
-                }
-                done(taken && revision_ == revision);
-            });
+    request(
+        "PUT", QStringLiteral("devices/me/profiles"),
+        {{QStringLiteral("revision"), revision}, {QStringLiteral("profiles"), list}},
+        [this, revision, done = std::move(done)](int status, const QJsonObject& body) {
+            const bool taken = status >= 200 && status < 300 &&
+                               body.value(QStringLiteral("revision")).toInt() == revision;
+            if (taken) {
+                publishedRevision_ = revision;
+            }
+            done(taken && revision_ == revision);
+        },
+        mode);
 }
 void RemoteService::generatePairingCode() {
     if (!registered() || busy())
         return;
-    publish([this](bool ok) {
+    publish(Mode::User, [this](bool ok) {
         if (!ok) {
             fail(QStringLiteral("Revisa el perfil de descarga antes de vincular."));
             return;
@@ -307,7 +423,7 @@ void RemoteService::refreshLinks(bool quiet) {
             if (quiet)
                 emit changed();
         },
-        quiet);
+        quiet ? Mode::Quiet : Mode::User);
 }
 void RemoteService::revokeLink(const QString& id) {
     if (!registered() || busy() || id.isEmpty())
@@ -322,12 +438,22 @@ void RemoteService::revokeLink(const QString& id) {
             });
 }
 void RemoteService::poll() {
-    if (!registered() || !journalValid_ || polling_)
+    if (!registered() || !journalValid_)
         return;
+    // A change announced while the inbox is being read may not be in that answer.
+    if (polling_) {
+        pollAgain_ = true;
+        return;
+    }
     polling_ = true;
-    publish([this](bool ok) {
+    const auto done = [this] {
+        polling_ = false;
+        if (std::exchange(pollAgain_, false))
+            poll();
+    };
+    publish(Mode::Background, [this, done](bool ok) {
         if (!ok) {
-            polling_ = false;
+            done();
             return;
         }
         const auto entries = journal_.value(QStringLiteral("requests")).toObject();
@@ -335,14 +461,16 @@ void RemoteService::poll() {
             if (it.value().toObject().value(QStringLiteral("state")).toString() ==
                 QStringLiteral("held"))
                 reconcile(it.key());
-        request("GET", QStringLiteral("devices/me/inbox"), {},
-                [this](int status, const QJsonObject& body) {
-                    polling_ = false;
-                    if (status >= 200 && status < 300) {
-                        for (const auto& value : body.value(QStringLiteral("requests")).toArray())
-                            process(value.toObject());
-                    }
-                });
+        request(
+            "GET", QStringLiteral("devices/me/inbox"), {},
+            [this, done](int status, const QJsonObject& body) {
+                if (status >= 200 && status < 300) {
+                    for (const auto& value : body.value(QStringLiteral("requests")).toArray())
+                        process(value.toObject());
+                }
+                done();
+            },
+            Mode::Background);
     });
 }
 void RemoteService::process(const QJsonObject& body) {
@@ -394,72 +522,76 @@ void RemoteService::process(const QJsonObject& body) {
     reconcile(id);
 }
 void RemoteService::reconcile(const QString& id) {
-    request("GET", QStringLiteral("devices/me/inbox/") + encoded(id), {},
-            [this, id](int status, const QJsonObject& body) {
-                if (status < 200 || status >= 300 || !journalValid_)
-                    return;
-                const auto state = body.value(QStringLiteral("status")).toString();
-                if (state == QStringLiteral("accepted")) {
-                    accepted(id);
+    request(
+        "GET", QStringLiteral("devices/me/inbox/") + encoded(id), {},
+        [this, id](int status, const QJsonObject& body) {
+            if (status < 200 || status >= 300 || !journalValid_)
+                return;
+            const auto state = body.value(QStringLiteral("status")).toString();
+            if (state == QStringLiteral("accepted")) {
+                accepted(id);
+                return;
+            }
+            if (state == QStringLiteral("pending")) {
+                const auto entry =
+                    journal_.value(QStringLiteral("requests")).toObject().value(id).toObject();
+                const auto snapshot = entry.value(QStringLiteral("profile")).toObject();
+                bool current = entry.value(QStringLiteral("request"))
+                                   .toObject()
+                                   .value(QStringLiteral("profileRevision"))
+                                   .toInt() == revision_;
+                bool matched = false;
+                for (const auto& profile : profiles_)
+                    if (profileJson(profile) == snapshot)
+                        matched = true;
+                current = current && matched;
+                if (!current) {
+                    acknowledge(id, QStringLiteral("local_profile_unavailable"));
                     return;
                 }
-                if (state == QStringLiteral("pending")) {
-                    const auto entry =
-                        journal_.value(QStringLiteral("requests")).toObject().value(id).toObject();
-                    const auto snapshot = entry.value(QStringLiteral("profile")).toObject();
-                    bool current = entry.value(QStringLiteral("request"))
-                                       .toObject()
-                                       .value(QStringLiteral("profileRevision"))
-                                       .toInt() == revision_;
-                    bool matched = false;
-                    for (const auto& profile : profiles_)
-                        if (profileJson(profile) == snapshot)
-                            matched = true;
-                    current = current && matched;
-                    if (!current) {
-                        acknowledge(id, QStringLiteral("local_profile_unavailable"));
+                // Accepted only once the PC can record it: an anime it does not know yet
+                // comes first, or the request waits, held, for the next look.
+                const auto slug = entry.value(QStringLiteral("request"))
+                                      .toObject()
+                                      .value(QStringLiteral("animeSlug"))
+                                      .toString();
+                prepare_(slug, [self = QPointer(this), id](Readiness readiness) {
+                    if (!self || !self->journalValid_ || readiness == Readiness::Later) {
                         return;
                     }
-                    // Accepted only once the PC can record it: an anime it does not know yet
-                    // comes first, or the request waits, held, for the next look.
-                    const auto slug = entry.value(QStringLiteral("request"))
-                                          .toObject()
-                                          .value(QStringLiteral("animeSlug"))
-                                          .toString();
-                    prepare_(slug, [self = QPointer(this), id](Readiness readiness) {
-                        if (!self || !self->journalValid_ || readiness == Readiness::Later) {
-                            return;
-                        }
-                        self->acknowledge(id, readiness == Readiness::Ready
-                                                  ? QString()
-                                                  : QStringLiteral("local_record_unavailable"));
-                    });
-                    return;
-                }
-                if (state == QStringLiteral("cancelled") ||
-                    state == QStringLiteral("requires_attention")) {
-                    auto entries = journal_.value(QStringLiteral("requests")).toObject();
-                    auto entry = entries.value(id).toObject();
-                    entry.insert(QStringLiteral("state"), state);
-                    entries.insert(id, entry);
-                    journal_.insert(QStringLiteral("requests"), entries);
-                    saveJournal();
-                }
-            });
+                    self->acknowledge(id, readiness == Readiness::Ready
+                                              ? QString()
+                                              : QStringLiteral("local_record_unavailable"));
+                });
+                return;
+            }
+            if (state == QStringLiteral("cancelled") ||
+                state == QStringLiteral("requires_attention")) {
+                auto entries = journal_.value(QStringLiteral("requests")).toObject();
+                auto entry = entries.value(id).toObject();
+                entry.insert(QStringLiteral("state"), state);
+                entries.insert(id, entry);
+                journal_.insert(QStringLiteral("requests"), entries);
+                saveJournal();
+            }
+        },
+        Mode::Background);
 }
 void RemoteService::acknowledge(const QString& id, const QString& problem) {
     const bool accept = problem.isEmpty();
-    request("POST", QStringLiteral("devices/me/inbox/") + encoded(id) + QStringLiteral("/ack"),
-            {{QStringLiteral("status"),
-              accept ? QStringLiteral("accepted") : QStringLiteral("requires_attention")},
-             {QStringLiteral("reason"), accept ? QJsonValue(QJsonValue::Undefined) : problem}},
-            [this, id](int status, const QJsonObject& ack) {
-                // A lost answer leaves the request held: the next look asks for it again.
-                if (status >= 200 && status < 300 &&
-                    ack.value(QStringLiteral("status")).toString() == QStringLiteral("accepted")) {
-                    accepted(id);
-                }
-            });
+    request(
+        "POST", QStringLiteral("devices/me/inbox/") + encoded(id) + QStringLiteral("/ack"),
+        {{QStringLiteral("status"),
+          accept ? QStringLiteral("accepted") : QStringLiteral("requires_attention")},
+         {QStringLiteral("reason"), accept ? QJsonValue(QJsonValue::Undefined) : problem}},
+        [this, id](int status, const QJsonObject& ack) {
+            // A lost answer leaves the request held: the next look asks for it again.
+            if (status >= 200 && status < 300 &&
+                ack.value(QStringLiteral("status")).toString() == QStringLiteral("accepted")) {
+                accepted(id);
+            }
+        },
+        Mode::Background);
 }
 
 void RemoteService::accepted(const QString& id) {

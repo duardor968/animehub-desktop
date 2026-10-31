@@ -103,6 +103,24 @@ int HttpTestServer::count(const QByteArray& path) const {
         requests_, [&](const Request& request) { return request.path == path; }));
 }
 
+void HttpTestServer::push(const QByteArray& path, const QByteArray& bytes) {
+    for (const auto& socket : held_.value(path))
+        if (socket && socket->state() == QAbstractSocket::ConnectedState)
+            socket->write(bytes);
+}
+
+void HttpTestServer::release(const QByteArray& path) {
+    for (const auto& socket : held_.take(path))
+        if (socket)
+            socket->disconnectFromHost();
+}
+
+int HttpTestServer::held(const QByteArray& path) const {
+    return static_cast<int>(std::ranges::count_if(held_.value(path), [](const auto& socket) {
+        return socket && socket->state() == QAbstractSocket::ConnectedState;
+    }));
+}
+
 void HttpTestServer::accept() {
     while (auto* socket = server_.nextPendingConnection()) {
         auto buffer = std::make_shared<QByteArray>();
@@ -144,7 +162,7 @@ void HttpTestServer::answer(QTcpSocket* socket, const Request& request) {
     const auto handler = routes_.value(request.method + ' ' + request.path);
     const auto response =
         handler ? handler(request) : Response{.status = 404, .body = "{\"title\":\"Not Found\"}"};
-    QTimer::singleShot(response.delayMs, socket, [socket, response] {
+    QTimer::singleShot(response.delayMs, socket, [this, socket, response, path = request.path] {
         if (response.drop) {
             socket->abort();
             return;
@@ -153,6 +171,11 @@ void HttpTestServer::answer(QTcpSocket* socket, const Request& request) {
                           reason(response.status) + "\r\n";
         for (const auto& [name, value] : response.headers) {
             head += name + ": " + value + "\r\n";
+        }
+        if (response.hold) {
+            socket->write(head + "Connection: close\r\n\r\n" + response.body);
+            held_[path].append(socket);
+            return;
         }
         head += "Content-Length: " + QByteArray::number(response.body.size()) +
                 "\r\nConnection: close\r\n\r\n";

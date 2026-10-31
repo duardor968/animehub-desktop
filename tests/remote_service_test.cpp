@@ -3,6 +3,7 @@
 #include "library/library_service.h"
 #include "remote/remote_service.h"
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonDocument>
 #include <QNetworkAccessManager>
@@ -216,7 +217,7 @@ private slots:
         };
         auto service = make();
         QTRY_VERIFY(server.count("/api/v1/remote/devices/me/inbox/request-1/ack") >= 1);
-        QTRY_VERIFY(!service->busy());
+        QTRY_VERIFY(service->idle());
         if (scenario == QStringLiteral("stale-profile")) {
             QCOMPARE(enqueueCalls, 0);
             QCOMPARE(state, QStringLiteral("requires_attention"));
@@ -226,7 +227,7 @@ private slots:
         if (scenario == QStringLiteral("cancel-race")) {
             QCOMPARE(enqueueCalls, 0);
             service->poll();
-            QTRY_VERIFY(!service->busy());
+            QTRY_VERIFY(service->idle());
             QCOMPARE(enqueueCalls, 0);
             return;
         }
@@ -252,7 +253,7 @@ private slots:
             file.close();
         }
         service = make();
-        QTRY_VERIFY(!service->busy());
+        QTRY_VERIFY(service->idle());
         if (scenario == QStringLiteral("legacy-audio")) {
             QCOMPARE(enqueueCalls, 0);
             QVERIFY(service->error().contains(QStringLiteral("idioma original")));
@@ -262,7 +263,7 @@ private slots:
             QCOMPARE(audio, QStringLiteral("dub"));
         QCOMPARE(enqueueCalls, scenario == QStringLiteral("enqueue-retry") ? 2 : 1);
         service->poll();
-        QTRY_VERIFY(!service->busy());
+        QTRY_VERIFY(service->idle());
         QCOMPARE(enqueueCalls, scenario == QStringLiteral("enqueue-retry") ? 2 : 1);
         for (const auto& req : server.requests())
             QCOMPARE(req.headers.value("authorization"), QByteArray("Bearer test-secret"));
@@ -301,7 +302,7 @@ private slots:
         signIn(service);
         service.setProfiles(1, {libraryProfile(dir.path())});
         service.start();
-        QTRY_VERIFY(asked.size() == 1 && !service.busy());
+        QTRY_VERIFY(asked.size() == 1 && service.idle());
         QCOMPARE(asked.first(), QStringLiteral("frieren"));
         QVERIFY(inbox.acks.isEmpty());
         QCOMPARE(inbox.state, QStringLiteral("pending"));
@@ -314,7 +315,7 @@ private slots:
 
         answer = recordable ? Readiness::Ready : Readiness::Never;
         service.poll();
-        QTRY_VERIFY(inbox.acks.size() == 1 && !service.busy());
+        QTRY_VERIFY(inbox.acks.size() == 1 && service.idle());
         QCOMPARE(asked.size(), 2);
         const auto ack = inbox.acks.first();
         if (recordable) {
@@ -329,7 +330,7 @@ private slots:
                  QStringLiteral("local_record_unavailable"));
         service.poll();
         QTRY_COMPARE(state(), QStringLiteral("requires_attention"));
-        QTRY_VERIFY(!service.busy());
+        QTRY_VERIFY(service.idle());
         QCOMPARE(queued, 0);
         QCOMPARE(inbox.acks.size(), 1);
     }
@@ -353,22 +354,185 @@ private slots:
         service.setProfiles(1, {libraryProfile(dir.path())});
         service.start();
         const QByteArray look("/api/v1/remote/devices/me/inbox");
-        QTRY_VERIFY(server.count(look) == 1 && !service.busy());
+        QTRY_VERIFY(server.count(look) == 1 && service.idle());
         service.poll();
-        QTRY_VERIFY(server.count(look) == 2 && !service.busy());
+        QTRY_VERIFY(server.count(look) == 2 && service.idle());
         service.poll();
-        QTRY_VERIFY(server.count(look) == 3 && !service.busy());
+        QTRY_VERIFY(server.count(look) == 3 && service.idle());
         QCOMPARE(inbox.published.size(), 1);
 
         const QList<Profile> changed{libraryProfile(dir.filePath(QStringLiteral("changed")))};
         service.setProfiles(2, changed);
-        QTRY_VERIFY(server.count(look) == 4 && !service.busy());
+        QTRY_VERIFY(server.count(look) == 4 && service.idle());
         QCOMPARE(inbox.published.size(), 2);
         QCOMPARE(inbox.published.last().value(QStringLiteral("revision")).toInt(), 2);
         service.setProfiles(2, changed); // settings saved again, nothing new
         service.poll();
-        QTRY_VERIFY(server.count(look) == 5 && !service.busy());
+        QTRY_VERIFY(server.count(look) == 5 && service.idle());
         QCOMPARE(inbox.published.size(), 2);
+    }
+
+    // While the API's live channel is open, a request or a browser linked is read when it says so,
+    // not at the next minute; until it opens, and after it drops, the PC reads the inbox at once
+    // and tries again, sooner after a drop than after a refusal.
+    void liveChannelAnnouncesWhatToRead() {
+        HttpTestServer server;
+        QVERIFY(server.listen());
+        FakeInbox inbox;
+        inbox.state = QStringLiteral("cancelled"); // an empty inbox
+        inbox.install(server);
+        const QByteArray events("/api/v1/remote/devices/me/events");
+        const QByteArray look("/api/v1/remote/devices/me/inbox");
+        const QByteArray linksPath("/api/v1/remote/devices/me/links");
+        bool refuse = true;
+        server.route("GET", events, [&](const auto& req) {
+            if (refuse || req.headers.value("accept") != "text/event-stream")
+                return HttpTestServer::Response{.status = 404};
+            return HttpTestServer::Response{
+                .body = "\n", .headers = {{"Content-Type", "text/event-stream"}}, .hold = true};
+        });
+        QJsonArray links;
+        server.route("GET", linksPath,
+                     [&](const auto&) { return json({{QStringLiteral("links"), links}}); });
+        QNetworkAccessManager network;
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        int queued = 0;
+        RemoteService service(
+            network, server.url(QStringLiteral("/api/v1/")), dir.path(),
+            [](const QString&, std::function<void(Readiness)> done) { done(Readiness::Ready); },
+            [&](const Submission&) {
+                ++queued;
+                return true;
+            });
+        signIn(service);
+        service.setProfiles(1, {libraryProfile(dir.path())});
+        service.start();
+
+        // Refused: the inbox is read at once, and the channel is tried again 2 s later.
+        QTRY_VERIFY(server.count(events) == 1 && server.count(look) == 1 && service.idle());
+        QVERIFY(!service.live());
+        refuse = false;
+        QTRY_VERIFY_WITH_TIMEOUT(service.live(), 4000);
+        QCOMPARE(server.count(events), 2);
+        QTRY_VERIFY(server.count(look) == 2 && server.count(linksPath) == 1 && service.idle());
+
+        // A heartbeat is nothing to read; an announced change is read at once.
+        server.push(events, ":\n\n");
+        QTest::qWait(200);
+        QCOMPARE(server.count(look), 2);
+        links.append(
+            QJsonObject{{QStringLiteral("id"), QStringLiteral("browser-1")},
+                        {QStringLiteral("name"), QStringLiteral("Chrome en Windows")},
+                        {QStringLiteral("createdAt"), QStringLiteral("2026-10-31T12:00:00.000Z")}});
+        QElapsedTimer elapsed;
+        elapsed.start();
+        server.push(events, "event: links\r\nid: 1\r\ndata: {}\r\n\r\n");
+        QTRY_COMPARE(service.links().size(), 1);
+        qInfo("links event -> list: %lld ms", elapsed.elapsed());
+        QCOMPARE(service.links().first().toObject().value(QStringLiteral("name")).toString(),
+                 QStringLiteral("Chrome en Windows"));
+        inbox.state = QStringLiteral("pending");
+        elapsed.restart();
+        server.push(events, "event: inbox\nid: 2\ndata: {}\n\n");
+        QTRY_COMPARE(queued, 1);
+        qInfo("inbox event -> queued: %lld ms", elapsed.elapsed());
+        QCOMPARE(server.count(look), 3);
+
+        // Dropped: read at once, open again a second later, and read what it missed.
+        server.release(events);
+        QTRY_VERIFY(!service.live());
+        QTRY_COMPARE(server.count(look), 4);
+        QTRY_VERIFY_WITH_TIMEOUT(service.live(), 3000);
+        QCOMPARE(server.count(events), 3);
+        QTRY_VERIFY(server.count(look) == 5 && service.idle());
+        QCOMPARE(queued, 1);
+        // Announced while the inbox is being read: read again once that answer is in.
+        server.push(events, "event: inbox\ndata: {}\n\nevent: inbox\ndata: {}\n\n");
+        QTRY_VERIFY(server.count(look) == 7 && service.idle());
+        QTest::qWait(200);
+        QCOMPARE(server.count(look), 7);
+        for (const auto& req : server.requests())
+            QCOMPARE(req.headers.value("authorization"), QByteArray("Bearer test-secret"));
+    }
+
+    // A test profile keeps the device credential in its own folder, and finds it there again.
+    void testProfileKeepsItsCredential() {
+        HttpTestServer server;
+        QVERIFY(server.listen());
+        server.route("POST", "/api/v1/remote/devices", [](const auto&) {
+            return json({{QStringLiteral("id"), QStringLiteral("device-9")},
+                         {QStringLiteral("token"), QStringLiteral("profile-secret")}});
+        });
+        QNetworkAccessManager network;
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const auto make = [&] {
+            auto service = std::make_unique<RemoteService>(
+                network, server.url(QStringLiteral("/api/v1/")), dir.path(),
+                [](const QString&, std::function<void(Readiness)> done) { done(Readiness::Ready); },
+                [](const Submission&) { return true; });
+            service->keepCredentialsInProfile();
+            service->start();
+            return service;
+        };
+        auto service = make();
+        QVERIFY(!service->registered());
+        service->registerDevice(QStringLiteral("PC de prueba"));
+        QTRY_VERIFY(service->registered() && service->idle());
+        QVERIFY(QFile::exists(dir.filePath(QStringLiteral("remote-credential.json"))));
+        service.reset();
+        service = make();
+        QVERIFY(service->registered());
+        QCOMPARE(service->deviceName(), QStringLiteral("PC de prueba"));
+    }
+
+    // Reading the inbox in the background holds no action back: the PC is not busy, and unlinking
+    // a browser meanwhile goes at once; the user's own action is.
+    void backgroundReadsLeaveActionsFree() {
+        HttpTestServer server;
+        QVERIFY(server.listen());
+        FakeInbox inbox;
+        inbox.state = QStringLiteral("cancelled"); // an empty inbox
+        inbox.install(server);
+        const QByteArray look("/api/v1/remote/devices/me/inbox");
+        const QByteArray unlink("/api/v1/remote/devices/me/links/browser-1");
+        server.route("GET", look, [](const auto&) {
+            return HttpTestServer::Response{.body = R"({"requests":[]})", .delayMs = 1500};
+        });
+        server.route("DELETE", unlink, [](const auto&) {
+            return json({{QStringLiteral("id"), QStringLiteral("browser-1")},
+                         {QStringLiteral("revoked"), true}});
+        });
+        server.route("GET", "/api/v1/remote/devices/me/links",
+                     [](const auto&) { return json({{QStringLiteral("links"), QJsonArray{}}}); });
+        QNetworkAccessManager network;
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        RemoteService service(
+            network, server.url(QStringLiteral("/api/v1/")), dir.path(),
+            [](const QString&, std::function<void(Readiness)> done) { done(Readiness::Ready); },
+            [](const Submission&) { return true; });
+        signIn(service);
+        service.setProfiles(1, {libraryProfile(dir.path())});
+        int changes = 0;
+        bool busyAtSomeChange = false;
+        connect(&service, &RemoteService::changed, this, [&] {
+            ++changes;
+            busyAtSomeChange |= service.busy();
+        });
+        service.start();
+        QTRY_COMPARE(server.count(look), 1); // answered 1.5 s later
+        QVERIFY(!service.idle());
+        QVERIFY(!service.busy());
+        QVERIFY(!busyAtSomeChange);
+
+        service.revokeLink(QStringLiteral("browser-1"));
+        QVERIFY(service.busy()); // the user's action
+        QTRY_VERIFY_WITH_TIMEOUT(server.count(unlink) == 1 && !service.busy(), 1000);
+        QVERIFY(!service.idle()); // the read is still under way
+        QTRY_VERIFY(service.idle());
+        QVERIFY(service.error().isEmpty());
     }
 
     // The anime of a request this PC has never seen comes from the API and is remembered, not

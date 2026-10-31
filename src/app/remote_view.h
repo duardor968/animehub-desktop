@@ -19,6 +19,8 @@ class RemoteView final : public QObject {
     Q_PROPERTY(QString expiresText READ expiresText NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
+    // The API's live channel is open: the list updates by itself.
+    Q_PROPERTY(bool live READ live NOTIFY changed)
     // [{id, name, since ("27 oct")}]
     Q_PROPERTY(QVariantList links READ links NOTIFY changed)
 public:
@@ -42,6 +44,9 @@ public:
     bool busy() const {
         return service_.busy();
     }
+    bool live() const {
+        return service_.live();
+    }
     QVariantList links() const;
     Q_INVOKABLE void registerDevice(const QString& name) {
         service_.registerDevice(name);
@@ -54,7 +59,8 @@ public:
     }
     // The code on view, to paste in the browser.
     Q_INVOKABLE void copyCode() const;
-    // What a page in view calls every few seconds: a browser that links shows at once.
+    // What a page in view calls every few seconds while the live channel is down: a browser that
+    // links shows at once.
     Q_INVOKABLE void watch() {
         service_.refreshLinks(true);
     }

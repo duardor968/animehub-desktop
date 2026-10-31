@@ -6,6 +6,7 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
+#include <QHash>
 #include <QJsonDocument>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -35,13 +36,18 @@ class RemoteApiIntegrationTest final : public QObject {
                 const QByteArray& token = {}, const QByteArray& key = {}) {
         QNetworkRequest request(base_.resolved(QUrl(path)));
         request.setTransferTimeout(5000);
-        request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        if (method != "DELETE")
+            request.setHeader(QNetworkRequest::ContentTypeHeader,
+                              QStringLiteral("application/json"));
         if (!token.isEmpty())
             request.setRawHeader("Authorization", "Bearer " + token);
         if (!key.isEmpty())
             request.setRawHeader("Idempotency-Key", key);
-        auto* reply = http_.sendCustomRequest(
-            request, method, method == "GET" ? QByteArray{} : QJsonDocument(body).toJson());
+        auto* reply = method == "DELETE"
+                          ? http_.deleteResource(request)
+                          : http_.sendCustomRequest(request, method,
+                                                    method == "GET" ? QByteArray{}
+                                                                    : QJsonDocument(body).toJson());
         QEventLoop loop;
         QElapsedTimer elapsed;
         elapsed.start();
@@ -64,11 +70,16 @@ private slots:
     void deleteTransport() {
         QTcpServer server;
         QVERIFY(server.listen(QHostAddress::LocalHost));
+        // Each connection's bytes: the live channel opens its own.
+        QHash<QTcpSocket*, QByteArray> wires;
         QByteArray wire;
         connect(&server, &QTcpServer::newConnection, this, [&] {
             auto* socket = server.nextPendingConnection();
-            connect(socket, &QTcpSocket::readyRead, this,
-                    [&, socket] { wire.append(socket->readAll()); });
+            connect(socket, &QTcpSocket::readyRead, this, [&, socket] {
+                wires[socket].append(socket->readAll());
+                if (wires[socket].toLower().startsWith("delete "))
+                    wire = wires[socket];
+            });
         });
         QNetworkAccessManager network;
         QTemporaryDir directory;
@@ -158,6 +169,7 @@ private slots:
         QString audio = QStringLiteral("dub");
         QString destination = directory.path();
         bool directApi = false;
+        auto readiness = Readiness::Ready;
         QNetworkAccessManager nativeNetwork;
         auto make = [&] {
             auto service = std::make_unique<RemoteService>(
@@ -166,7 +178,7 @@ private slots:
                           : proxy.url(QStringLiteral("/api/v1/")),
                 directory.path(),
                 // The fixture anime is not in the catalog; its queue rows need no anime row.
-                [](const QString&, std::function<void(Readiness)> done) { done(Readiness::Ready); },
+                [&](const QString&, std::function<void(Readiness)> done) { done(readiness); },
                 [&](const Submission& submission) {
                     const auto state =
                         call("GET", QStringLiteral("devices/me/inbox/") + submission.requestId, {},
@@ -208,10 +220,10 @@ private slots:
         };
         auto service = make();
         service->registerDevice(QStringLiteral("Isolated native integration"));
-        QTRY_VERIFY_WITH_TIMEOUT(service->registered() && !service->busy(), 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(service->registered() && service->idle(), 10000);
         QVERIFY(credentials.has_value());
         service->generatePairingCode();
-        QTRY_VERIFY_WITH_TIMEOUT(!service->code().isEmpty() && !service->busy(), 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(!service->code().isEmpty() && service->idle(), 10000);
         const auto browser = call("POST", QStringLiteral("sessions"));
         QCOMPARE(browser.status, 201);
         const auto token = browser.body.value(QStringLiteral("token")).toString().toUtf8();
@@ -259,7 +271,7 @@ private slots:
             dropAck = scenario == 1;
             const auto before = acceptedAcks;
             service->poll();
-            QTRY_VERIFY_WITH_TIMEOUT(acceptedAcks > before && !service->busy(), 10000);
+            QTRY_VERIFY_WITH_TIMEOUT(acceptedAcks > before && service->idle(), 10000);
             QVERIFY(sawHeld);
             QCOMPARE(submissions.size(), 1);
             if (dropAck) {
@@ -276,7 +288,7 @@ private slots:
                 audio = QStringLiteral("sub");
                 destination = QDir(directory.path()).filePath(QStringLiteral("changed"));
                 service = make();
-                QTRY_VERIFY_WITH_TIMEOUT(submissions.size() == 2 && !service->busy(), 10000);
+                QTRY_VERIFY_WITH_TIMEOUT(submissions.size() == 2 && service->idle(), 10000);
             }
             QVERIFY(acceptedBeforeEnqueue);
             QVERIFY(receiptSaved);
@@ -289,16 +301,28 @@ private slots:
         service.reset();
         directApi = true;
         service = make();
-        QTRY_VERIFY_WITH_TIMEOUT(!service->busy(), 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(service->idle(), 10000);
         QCOMPARE(submissions.size(), 2); // queued receipt is not delivered again after restart
 
         request.insert(QStringLiteral("profileRevision"), 2);
+        // The live channel delivers it at once: the PC holds it, pending, until the revocation.
+        readiness = Readiness::Later;
         const auto pending = call("POST", QStringLiteral("requests"), request, token,
                                   QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8());
         QCOMPARE(pending.status, 201);
+        const auto pendingId = pending.body.value(QStringLiteral("id")).toString();
+        QTRY_VERIFY_WITH_TIMEOUT(journal(directory.path())
+                                             .value(QStringLiteral("requests"))
+                                             .toObject()
+                                             .value(pendingId)
+                                             .toObject()
+                                             .value(QStringLiteral("state"))
+                                             .toString() == QStringLiteral("held") &&
+                                     service->idle(),
+                                 10000);
         const auto sessionId = browser.body.value(QStringLiteral("id")).toString();
         service->revokeLink(sessionId);
-        QTRY_VERIFY_WITH_TIMEOUT(!service->busy(), 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(service->idle(), 10000);
         QVERIFY2(service->error().isEmpty(), qPrintable(service->error()));
         QVERIFY(service->links().isEmpty());
         const auto cancelled = call("GET",
@@ -316,7 +340,7 @@ private slots:
                      .status,
                  409);
         service->poll();
-        QTRY_VERIFY_WITH_TIMEOUT(!service->busy(), 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(service->idle(), 10000);
         QCOMPARE(submissions.size(), 2);
         QCOMPARE(call("POST", QStringLiteral("requests"), request, token,
                       QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8())
@@ -360,6 +384,72 @@ private slots:
         QCOMPARE(queue->tasks().size(), 4);
         QVERIFY(!aria.isReady());
         QVERIFY(engineServer.requests().isEmpty());
+    }
+    // What a browser does reaches the PC over the live channel in well under the 1–2 s promised,
+    // measured from the browser's call to the PC's own state.
+    void liveChannelAgainstRealApi() {
+        if (qEnvironmentVariable("ANIMEHUB_REMOTE_INTEGRATION") != QStringLiteral("1"))
+            QSKIP("Requires explicitly enabled disposable API on loopback:18091");
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        std::optional<Credentials> credentials;
+        QList<Submission> submissions;
+        QNetworkAccessManager network;
+        RemoteService service(
+            network, QUrl(QStringLiteral("http://127.0.0.1:18091/api/v1/")), directory.path(),
+            [](const QString&, std::function<void(Readiness)> done) { done(Readiness::Ready); },
+            [&](const Submission& submission) {
+                submissions.append(submission);
+                return true;
+            });
+        service.setCredentialStore([&] { return credentials; },
+                                   [&](const Credentials& value) {
+                                       credentials = value;
+                                       return true;
+                                   });
+        service.setProfiles(1, {{QStringLiteral("library"),
+                                 QStringLiteral("Library"),
+                                 QStringLiteral("direct"),
+                                 directory.path(),
+                                 {},
+                                 {},
+                                 true,
+                                 QStringLiteral("sub")}});
+        service.start();
+        service.registerDevice(QStringLiteral("Live channel integration"));
+        QTRY_VERIFY_WITH_TIMEOUT(service.live() && service.idle(), 10000);
+        service.generatePairingCode();
+        QTRY_VERIFY_WITH_TIMEOUT(!service.code().isEmpty() && service.idle(), 10000);
+        const auto browser = call("POST", QStringLiteral("sessions"));
+        QCOMPARE(browser.status, 201);
+        const auto token = browser.body.value(QStringLiteral("token")).toString().toUtf8();
+
+        QElapsedTimer clock;
+        clock.start();
+        QCOMPARE(
+            call("POST", QStringLiteral("links"), {{QStringLiteral("code"), service.code()}}, token)
+                .status,
+            201);
+        QTRY_VERIFY_WITH_TIMEOUT(service.links().size() == 1, 2000);
+        const auto linked = clock.restart();
+        const QJsonObject request{
+            {QStringLiteral("deviceId"), credentials->id},
+            {QStringLiteral("animeSlug"), QStringLiteral("live-channel-fixture")},
+            {QStringLiteral("episodeNumbers"), QJsonArray{1}},
+            {QStringLiteral("profileId"), QStringLiteral("library")},
+            {QStringLiteral("profileRevision"), 1},
+            {QStringLiteral("engine"), QStringLiteral("direct")}};
+        QCOMPARE(call("POST", QStringLiteral("requests"), request, token,
+                      QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8())
+                     .status,
+                 201);
+        QTRY_VERIFY_WITH_TIMEOUT(submissions.size() == 1, 2000);
+        const auto delivered = clock.restart();
+        QCOMPARE(call("DELETE", QStringLiteral("links/") + credentials->id, {}, token).status, 200);
+        QTRY_VERIFY_WITH_TIMEOUT(service.links().isEmpty(), 2000);
+        const auto unlinked = clock.elapsed();
+        qInfo("live channel: link %lld ms, request to queue %lld ms, unlink %lld ms", linked,
+              delivered, unlinked);
     }
 };
 QTEST_GUILESS_MAIN(RemoteApiIntegrationTest)

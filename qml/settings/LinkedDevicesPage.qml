@@ -4,9 +4,9 @@ import QtQuick.Layouts
 import AnimeHub
 
 // Ajustes › Dispositivos vinculados: this PC joins the AnimeHub website, which can then send it
-// downloads from any browser linked to it. Unlinking one is confirmed in its own line. While the
-// page is on view it reads the list again every few seconds: a browser that links with the code
-// shows at once, and the spent code goes.
+// downloads from any browser linked to it. Unlinking one is confirmed in its own line. A browser
+// that links with the code shows at once, and the spent code goes: the API's live channel says so,
+// and while it is down the page on view reads the list again every few seconds.
 ColumnLayout {
     id: page
 
@@ -28,7 +28,7 @@ ColumnLayout {
     Timer {
         interval: 3000
         repeat: true
-        running: page.active && page.remote.registered
+        running: page.active && page.remote.registered && !page.remote.live
         onTriggered: page.remote.watch()
     }
 
