@@ -162,7 +162,7 @@ private slots:
         QCOMPARE(model.featured().value(QStringLiteral("slug")).toString(),
                  QStringLiteral("ready"));
         QCOMPARE(model.featured().value(QStringLiteral("detail")).toString(),
-                 QStringLiteral("Ep. 2 · 1 en disco"));
+                 QStringLiteral("Ep. 2 · 1/3 vistos"));
         QCOMPARE(model.featured().value(QStringLiteral("actionText")).toString(),
                  QStringLiteral("Continuar"));
         QVERIFY(model.readyShelf()->cards().isEmpty());
