@@ -180,11 +180,12 @@ AppController::AppController(AppPaths paths, QObject* parent)
     player_ = std::make_unique<playback::Player>(
         *library_repository_,
         [this] {
-            return playback::PlayerSettings{
-                .kind = settings_->systemPlayer() ? playback::PlayerKind::System
-                                                  : playback::PlayerKind::Bundled,
-                .mpvExecutable = mpvExecutable(paths_.engines),
-                .configDirectory = QDir(paths_.data).filePath(QStringLiteral("mpv"))};
+            return playback::PlayerSettings{.kind = settings_->playerKind(),
+                                            .mpvExecutable = mpvExecutable(paths_.engines),
+                                            .configDirectory =
+                                                QDir(paths_.data).filePath(QStringLiteral("mpv")),
+                                            .potPlayerExecutable = platform::potPlayerExecutable(),
+                                            .systemApplication = platform::defaultApplication};
         },
         [](const QString& path) { return shell::open(path); });
     connect(player_.get(), &playback::Player::progressChanged, library_.get(),

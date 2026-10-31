@@ -1,6 +1,7 @@
 #include "app_settings.h"
 
 #include "platform/autostart.h"
+#include "platform/installed_apps.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -15,6 +16,8 @@ const auto kProviders = QStringLiteral("downloads/providers");
 const auto kDisabledProviders = QStringLiteral("downloads/disabledProviders");
 const auto kDubbed = QStringLiteral("downloads/dubbed");
 const auto kConcurrent = QStringLiteral("downloads/concurrent");
+const auto kPlayer = QStringLiteral("playback/player");
+// Earlier versions only told the system's player from the bundled one.
 const auto kSystemPlayer = QStringLiteral("playback/systemPlayer");
 const auto kNotifications = QStringLiteral("notifications/enabled");
 const auto kCloseAction = QStringLiteral("window/closeAction");
@@ -89,12 +92,33 @@ void AppSettings::setMaxConcurrent(int count) {
     write(kConcurrent, std::clamp(count, 1, 4));
 }
 
-bool AppSettings::systemPlayer() const {
-    return settings_.value(kSystemPlayer, false).toBool();
+QString AppSettings::player() const {
+    const auto stored = settings_.value(kPlayer).toString();
+    if (stored == u"potplayer") {
+        return potPlayerFound() ? stored : QStringLiteral("system");
+    }
+    if (stored == u"mpv" || stored == u"system") {
+        return stored;
+    }
+    return settings_.value(kSystemPlayer, false).toBool() ? QStringLiteral("system")
+                                                          : QStringLiteral("mpv");
 }
 
-void AppSettings::setSystemPlayer(bool system) {
-    write(kSystemPlayer, system);
+void AppSettings::setPlayer(const QString& player) {
+    if (player == u"mpv" || player == u"system" || (player == u"potplayer" && potPlayerFound())) {
+        write(kPlayer, player);
+    }
+}
+
+bool AppSettings::potPlayerFound() const {
+    return !platform::potPlayerExecutable().isEmpty();
+}
+
+playback::PlayerKind AppSettings::playerKind() const {
+    const auto chosen = player();
+    return chosen == u"potplayer" ? playback::PlayerKind::PotPlayer
+           : chosen == u"system"  ? playback::PlayerKind::System
+                                  : playback::PlayerKind::Bundled;
 }
 
 bool AppSettings::notifications() const {

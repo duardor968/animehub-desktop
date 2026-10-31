@@ -25,7 +25,9 @@ class AppSettings final : public QObject {
                    NOTIFY changed)
     Q_PROPERTY(bool dubbed READ dubbed WRITE setDubbed NOTIFY changed)
     Q_PROPERTY(int maxConcurrent READ maxConcurrent WRITE setMaxConcurrent NOTIFY changed)
-    Q_PROPERTY(bool systemPlayer READ systemPlayer WRITE setSystemPlayer NOTIFY changed)
+    // "mpv" (bundled), "potplayer" (only while it is installed) or "system".
+    Q_PROPERTY(QString player READ player WRITE setPlayer NOTIFY changed)
+    Q_PROPERTY(bool potPlayerFound READ potPlayerFound CONSTANT)
     Q_PROPERTY(bool notifications READ notifications WRITE setNotifications NOTIFY changed)
     Q_PROPERTY(bool startWithWindows READ startWithWindows WRITE setStartWithWindows NOTIFY changed)
     Q_PROPERTY(bool isolated READ isolated CONSTANT)
@@ -75,8 +77,10 @@ public:
     void setDubbed(bool dubbed);
     [[nodiscard]] int maxConcurrent() const;
     void setMaxConcurrent(int count);
-    [[nodiscard]] bool systemPlayer() const;
-    void setSystemPlayer(bool system);
+    [[nodiscard]] QString player() const;
+    void setPlayer(const QString& player);
+    [[nodiscard]] bool potPlayerFound() const;
+    [[nodiscard]] playback::PlayerKind playerKind() const;
     [[nodiscard]] bool notifications() const;
     void setNotifications(bool enabled);
     // Windows starts this AnimeHub, in the tray, when the user signs in. An entry left by a moved

@@ -404,17 +404,24 @@ ModalDialog {
                     SettingRow {
                         label: "Reproductor"
                         info: dialog.windows
-                              ? "El reproductor incluido guarda el minuto en el que te quedas. Con la "
-                                + "aplicación de Windows, abrir un episodio lo marca como visto."
+                              ? "El reproductor incluido y PotPlayer guardan el minuto en el que te "
+                                + "quedas, y PotPlayer sigue con los siguientes episodios descargados. "
+                                + "Con otra aplicación de Windows, abrir un episodio lo marca como visto."
                               : "mpv guarda el minuto en el que te quedas. Con la aplicación "
                                 + "predeterminada, abrir un episodio lo marca como visto."
 
+                        // PotPlayer only while it is installed.
                         Choice {
+                            readonly property var keys: dialog.settings.potPlayerFound
+                                                        ? ["mpv", "potplayer", "system"]
+                                                        : ["mpv", "system"]
                             model: dialog.windows
-                                   ? ["Incluido (mpv)", "Aplicación predeterminada de Windows"]
+                                   ? (dialog.settings.potPlayerFound
+                                      ? ["Incluido (mpv)", "PotPlayer", "Aplicación predeterminada de Windows"]
+                                      : ["Incluido (mpv)", "Aplicación predeterminada de Windows"])
                                    : ["mpv", "Aplicación predeterminada"]
-                            currentIndex: dialog.settings.systemPlayer ? 1 : 0
-                            onActivated: index => dialog.settings.systemPlayer = index === 1
+                            currentIndex: Math.max(0, keys.indexOf(dialog.settings.player))
+                            onActivated: index => dialog.settings.player = keys[index]
                             Accessible.name: "Reproductor"
                         }
                     }
