@@ -2,8 +2,6 @@
 
 #include "display.h"
 
-#include <QLocale>
-
 #include <algorithm>
 
 namespace animehub::app {
@@ -15,24 +13,6 @@ namespace {
 bool sameNumbers(const QList<library::EpisodeRecord>& a, const QList<library::EpisodeRecord>& b) {
     return std::ranges::equal(a, b, {}, &library::EpisodeRecord::number,
                               &library::EpisodeRecord::number);
-}
-
-// When an episode came out: "12 oct" this year, "12 oct 2012" before.
-QString published(const QDateTime& at) {
-    if (!at.isValid()) {
-        return {};
-    }
-    static const QLocale kSpanish(QLocale::Spanish, QLocale::Spain);
-    const auto date = at.toLocalTime().date();
-    auto month = kSpanish.monthName(date.month(), QLocale::ShortFormat);
-    if (month.endsWith(QLatin1Char('.'))) {
-        month.chop(1);
-    }
-    auto text = QString::number(date.day()) + QLatin1Char(' ') + month;
-    if (date.year() != QDate::currentDate().year()) {
-        text += QLatin1Char(' ') + QString::number(date.year());
-    }
-    return text;
 }
 
 } // namespace
@@ -315,7 +295,7 @@ QVariant EpisodeModel::data(const QModelIndex& index, int role) const {
     case TitleRole:
         return episode.title;
     case DateRole:
-        return published(episode.publishedAt);
+        return display::date(episode.publishedAt);
     case ImageRole:
         return episode.imageUrl;
     case WatchStateRole:

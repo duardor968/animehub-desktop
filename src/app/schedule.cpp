@@ -62,7 +62,15 @@ QString day(const Next& next, const QDateTime& now) {
     if (days == 1) {
         return QStringLiteral("Mañana");
     }
-    auto name = kSpanish.dayName(local.date().dayOfWeek());
+    // A week or more away, the weekday alone would read as this week's: "Mar 3 nov".
+    auto name = days >= 7 ? kSpanish.dayName(local.date().dayOfWeek(), QLocale::ShortFormat)
+                          : kSpanish.dayName(local.date().dayOfWeek());
+    if (days >= 7) {
+        if (name.endsWith(QLatin1Char('.'))) {
+            name.chop(1);
+        }
+        name += QLatin1Char(' ') + display::date(next.at);
+    }
     name[0] = name[0].toUpper();
     return name;
 }

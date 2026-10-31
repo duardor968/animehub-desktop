@@ -133,15 +133,25 @@ QString issue(const downloads::Task& task) {
     return issue(task.issue);
 }
 
-QString time(const QDateTime& at) {
-    return spanish().toString(at.toLocalTime().time(), QStringLiteral("HH:mm"));
+QString date(const QDateTime& at) {
+    if (!at.isValid()) {
+        return {};
+    }
+    const auto day = at.toLocalTime().date();
+    auto month = spanish().monthName(day.month(), QLocale::ShortFormat);
+    if (month.endsWith(QLatin1Char('.'))) {
+        month.chop(1);
+    }
+    auto text = QString::number(day.day()) + QLatin1Char(' ') + month;
+    if (day.year() != QDate::currentDate().year()) {
+        text += QLatin1Char(' ') + QString::number(day.year());
+    }
+    return text;
 }
 
-QString date(const QDateTime& at) {
-    const auto day = at.toLocalTime().date();
-    return spanish().toString(day, day.year() == QDate::currentDate().year()
-                                       ? QStringLiteral("d MMM")
-                                       : QStringLiteral("d MMM yyyy"));
+QString time(const QDateTime& at) {
+    return at.isValid() ? spanish().toString(at.toLocalTime().time(), QStringLiteral("HH:mm"))
+                        : QString();
 }
 
 QString retry(const QDateTime& at) {
