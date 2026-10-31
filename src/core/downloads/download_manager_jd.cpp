@@ -13,6 +13,12 @@ using namespace Qt::StringLiterals;
 
 namespace {
 
+using namespace std::chrono_literals;
+
+// A JDownloader that AnimeHub started opens its API within this, looked at this often.
+constexpr auto kJdStartTimeout = 120s;
+constexpr auto kJdStartPoll = 2s;
+
 // The folder JDownloader downloaded into goes once its videos have left it, but only if nothing
 // else is in it: whatever stays (an archive, a file AnimeHub does not know) keeps it, untouched.
 void removeStaging(const QString& path) {
@@ -61,7 +67,7 @@ void DownloadManager::jdRequest(qint64 id, const QString& path, const QJsonArray
     const auto generation = live_[id].generation;
     jd::request(
         jd_network_, services_.myJDownloader, tasks_[id], path, params, this,
-        [this, id, generation, done = std::move(done)](const auto& result) {
+        [this, id, generation, path, params, done](const auto& result) {
             if (stopping_ || !tasks_.contains(id) || !live_.contains(id) ||
                 live_[id].generation != generation || !tasks_[id].active())
                 return;
@@ -74,6 +80,13 @@ void DownloadManager::jdRequest(qint64 id, const QString& path, const QJsonArray
             }
             if (!result) {
                 const auto failure = result.error();
+                // A closed local JDownloader is started once, in the tray, for the hand-over.
+                if (tasks_[id].engineJobId <= 0 && failure == myjd::Failure::DeviceOffline &&
+                    tasks_[id].engine == DownloadEngine::JDownloaderLocal &&
+                    services_.launchJDownloader && !live_[id].jdLaunched) {
+                    launchJd(id, path, params, done);
+                    return;
+                }
                 if (tasks_[id].engineJobId <= 0 && (failure == myjd::Failure::DeviceOffline ||
                                                     failure == myjd::Failure::WrongCredentials ||
                                                     failure == myjd::Failure::EmailNotConfirmed)) {
@@ -88,6 +101,55 @@ void DownloadManager::jdRequest(qint64 id, const QString& path, const QJsonArray
             }
             done(result);
         });
+}
+
+void DownloadManager::launchJd(qint64 id, const QString& path, const QJsonArray& params,
+                               myjd::Client::Callback<QJsonValue> done) {
+    live_[id].jdLaunched = true;
+    if (!services_.launchJDownloader()) {
+        unreachedJd(id, myjd::Failure::DeviceOffline);
+        return;
+    }
+    tasks_[id].enginePhase = u"launching"_s;
+    store(tasks_[id]);
+    live_[id].jdBusy = true;
+    awaitJd(id, live_[id].generation,
+            QDateTime::currentDateTimeUtc().addSecs(
+                std::chrono::duration_cast<std::chrono::seconds>(kJdStartTimeout).count()),
+            path, params, std::move(done));
+}
+
+void DownloadManager::awaitJd(qint64 id, quint64 generation, QDateTime deadline,
+                              const QString& path, const QJsonArray& params,
+                              myjd::Client::Callback<QJsonValue> done) {
+    const auto current = [this, id, generation] {
+        return !stopping_ && tasks_.contains(id) && live_.contains(id) &&
+               live_[id].generation == generation && tasks_[id].active();
+    };
+    QTimer::singleShot(kJdStartPoll, this, [=, this] {
+        if (!current())
+            return;
+        if (tasks_[id].enginePhase == u"cancel_requested") {
+            live_[id].jdBusy = false;
+            unreachedJd(id, myjd::Failure::DeviceOffline); // nothing reached it: cancelled
+            return;
+        }
+        jd::request(jd_network_, services_.myJDownloader, tasks_[id], u"/jd/version"_s, {}, this,
+                    [=, this](const auto& answer) {
+                        if (!current())
+                            return;
+                        if (answer) {
+                            jdRequest(id, path, params, done);
+                            return;
+                        }
+                        if (QDateTime::currentDateTimeUtc() >= deadline) {
+                            live_[id].jdBusy = false;
+                            unreachedJd(id, myjd::Failure::DeviceOffline);
+                            return;
+                        }
+                        awaitJd(id, generation, deadline, path, params, done);
+                    });
+    });
 }
 
 void DownloadManager::releaseJd(qint64 id) {
@@ -111,6 +173,21 @@ void DownloadManager::unreachedJd(qint64 id, myjd::Failure failure) {
         pump();
         return;
     }
+    // MEGA's quota sent it there: without JDownloader it goes on with AnimeHub's own servers,
+    // or waits for MEGA.
+    if (task.detour == TaskIssue::Quota) {
+        QDir().rmdir(task.engineDestination); // empty: nothing reached JDownloader
+        task.engine = DownloadEngine::Native;
+        task.engineEndpoint.clear();
+        task.engineDevice.clear();
+        task.engineDestination.clear();
+        task.provider.reset();
+        task.jdUnreachable = true;
+        task.state = TaskState::Queued;
+        store(task);
+        pump();
+        return;
+    }
     fail(id, TaskIssue::Engine,
          task.engine == DownloadEngine::JDownloaderLocal
              ? u"JDownloader no responde en este PC. Activa su API local o usa MyJDownloader."_s
@@ -120,8 +197,12 @@ void DownloadManager::unreachedJd(qint64 id, myjd::Failure failure) {
              : u"Conecta tu cuenta de MyJDownloader en Ajustes."_s);
 }
 
-void DownloadManager::submitJd(qint64 id, const api::ResolvedLink& link) {
+void DownloadManager::submitJd(qint64 id, const QList<api::ResolvedLink>& links) {
     auto& task = tasks_[id];
+    if (links.isEmpty()) {
+        fail(id, TaskIssue::NoSource);
+        return;
+    }
     if ((task.engine == DownloadEngine::JDownloaderLocal &&
          !jd::isLocalEndpoint(QUrl(task.engineEndpoint))) ||
         (task.engine == DownloadEngine::JDownloaderCloud && task.engineDevice.isEmpty())) {
@@ -135,7 +216,10 @@ void DownloadManager::submitJd(qint64 id, const api::ResolvedLink& link) {
     }
     task.engineSubmission = QUuid::createUuid().toString(QUuid::WithoutBraces);
     task.enginePhase = u"submitting"_s;
-    task.provider = link.provider;
+    task.provider = links.first().provider;
+    QStringList urls;
+    for (const auto& link : links)
+        urls.append(link.url.toString(QUrl::FullyEncoded));
     // Write-ahead intent: an uncertain addLinks response must never cause a duplicate add.
     if (!services_.repository.save(task)) {
         task.engineSubmission.clear();
@@ -145,7 +229,7 @@ void DownloadManager::submitJd(qint64 id, const api::ResolvedLink& link) {
     live_[id].jdBusy = true;
     jdRequest(
         id, u"/linkgrabberv2/addLinks"_s,
-        {QJsonObject{{u"links"_s, link.url.toString(QUrl::FullyEncoded)},
+        {QJsonObject{{u"links"_s, urls.join(u'\n')},
                      {u"packageName"_s, u"AnimeHub-"_s + task.engineSubmission},
                      {u"destinationFolder"_s, QDir::toNativeSeparators(task.engineDestination)},
                      {u"assignJobID"_s, true},
@@ -287,62 +371,100 @@ void DownloadManager::collectJd(qint64 id) {
                   jdRequest(id, u"/linkgrabberv2/queryLinks"_s,
                             {QJsonObject{{u"jobUUIDs"_s, QJsonArray{tasks_[id].engineJobId}},
                                          {u"maxResults"_s, -1},
-                                         {u"availability"_s, true}}},
+                                         {u"availability"_s, true},
+                                         {u"bytesTotal"_s, true}}},
                             [this, id](const auto& answer) {
                                 if (!answer->isArray()) {
                                     fail(id, TaskIssue::Engine);
                                     return;
                                 }
-                                QList<qint64> ids;
-                                for (const auto& item : answer->toArray()) {
-                                    const auto link = item.toObject();
-                                    const auto uuid = link.value(u"uuid").toInteger();
-                                    if (uuid <= 0) {
-                                        fail(id, TaskIssue::Engine);
-                                        return;
-                                    }
-                                    if (link.value(u"availability").toString() == u"OFFLINE") {
-                                        fail(id, TaskIssue::SourceRemoved);
-                                        return;
-                                    }
-                                    ids.append(uuid);
-                                }
-                                if (ids.isEmpty()) {
-                                    // Missing IDs are not completion, even if JD purged its
-                                    // history. Nor is there anything left in JDownloader to
-                                    // wait for: the task lets the job go, so a retry hands the
-                                    // episode over again.
-                                    const auto detail =
-                                        tasks_[id].engineLinkIds.isEmpty()
-                                            ? u"JDownloader no encontró ningún archivo en el "
-                                              u"enlace."_s
-                                            : u"JDownloader ya no tiene los archivos de este "
-                                              u"episodio."_s;
-                                    releaseJd(id);
-                                    fail(id, TaskIssue::SourceRemoved, detail);
-                                    return;
-                                }
-                                auto& task = tasks_[id];
-                                task.engineLinkIds = ids;
-                                task.enginePhase = u"moving"_s;
-                                if (!services_.repository.save(task)) {
-                                    fail(id, TaskIssue::Storage);
-                                    return;
-                                }
-                                live_[id].jdBusy = true;
-                                jdRequest(id, u"/linkgrabberv2/moveToDownloadlist"_s,
-                                          {jd::ids(ids), QJsonArray{}}, [this, id](const auto&) {
-                                              tasks_[id].enginePhase = u"starting"_s;
-                                              store(tasks_[id]);
-                                              live_[id].jdBusy = true;
-                                              jdRequest(
-                                                  id, u"/downloadsV2/forceDownload"_s,
-                                                  {jd::ids(tasks_[id].engineLinkIds), QJsonArray{}},
-                                                  [this, id](const auto&) {
-                                                      tasks_[id].enginePhase = u"transferring"_s;
-                                                      store(tasks_[id]);
-                                                  });
-                                          });
+                                keepMirrors(id, answer->toArray());
+                            });
+              });
+}
+
+void DownloadManager::keepMirrors(qint64 id, QJsonArray links) {
+    QList<QJsonObject> online;
+    QList<qint64> drop;
+    for (const auto& item : links) {
+        const auto link = item.toObject();
+        const auto uuid = link.value(u"uuid").toInteger();
+        if (uuid <= 0) {
+            fail(id, TaskIssue::Engine);
+            return;
+        }
+        if (link.value(u"availability").toString() == u"OFFLINE")
+            drop.append(uuid);
+        else
+            online.append(link);
+    }
+    if (online.isEmpty()) {
+        if (!drop.isEmpty()) {
+            fail(id, TaskIssue::SourceRemoved);
+            return;
+        }
+        // Missing IDs are not completion, even if JD purged its history. Nor is there anything
+        // left in JDownloader to wait for: the task lets the job go, so a retry hands the
+        // episode over again.
+        const auto detail = tasks_[id].engineLinkIds.isEmpty()
+                                ? u"JDownloader no encontró ningún archivo en el enlace."_s
+                                : u"JDownloader ya no tiene los archivos de este episodio."_s;
+        releaseJd(id);
+        fail(id, TaskIssue::SourceRemoved, detail);
+        return;
+    }
+    // JDownloader takes links of one package with the same name (and size, when known) as
+    // mirrors and downloads one. The first server's file names them; a file of another size is
+    // another video and leaves.
+    const auto name = online.first().value(u"name").toString();
+    const auto size = online.first().value(u"bytesTotal").toInteger();
+    QList<qint64> keep;
+    QList<std::pair<qint64, QString>> renames;
+    for (const auto& link : online) {
+        const auto uuid = link.value(u"uuid").toInteger();
+        const auto bytes = link.value(u"bytesTotal").toInteger();
+        if (size > 0 && bytes > 0 && bytes != size) {
+            drop.append(uuid);
+            continue;
+        }
+        keep.append(uuid);
+        if (!name.isEmpty() && link.value(u"name").toString().compare(name, Qt::CaseInsensitive))
+            renames.append({uuid, name});
+    }
+    auto& task = tasks_[id];
+    task.engineLinkIds = keep;
+    task.enginePhase = u"moving"_s;
+    if (!services_.repository.save(task)) {
+        fail(id, TaskIssue::Storage);
+        return;
+    }
+    prepareJd(id, drop, renames);
+}
+
+void DownloadManager::prepareJd(qint64 id, QList<qint64> drop,
+                                QList<std::pair<qint64, QString>> renames) {
+    live_[id].jdBusy = true;
+    if (!drop.isEmpty()) {
+        jdRequest(id, u"/linkgrabberv2/removeLinks"_s, {jd::ids(drop), QJsonArray{}},
+                  [this, id, renames](const auto&) { prepareJd(id, {}, renames); });
+        return;
+    }
+    if (!renames.isEmpty()) {
+        const auto [uuid, name] = renames.takeFirst();
+        jdRequest(id, u"/linkgrabberv2/renameLink"_s, {uuid, name},
+                  [this, id, renames](const auto&) { prepareJd(id, {}, renames); });
+        return;
+    }
+    jdRequest(id, u"/linkgrabberv2/moveToDownloadlist"_s,
+              {jd::ids(tasks_[id].engineLinkIds), QJsonArray{}}, [this, id](const auto&) {
+                  tasks_[id].enginePhase = u"starting"_s;
+                  store(tasks_[id]);
+                  live_[id].jdBusy = true;
+                  jdRequest(id, u"/downloadsV2/forceDownload"_s,
+                            {jd::ids(tasks_[id].engineLinkIds), QJsonArray{}},
+                            [this, id](const auto&) {
+                                tasks_[id].enginePhase = u"transferring"_s;
+                                store(tasks_[id]);
                             });
               });
 }
@@ -354,6 +476,8 @@ void DownloadManager::observeJd(qint64 id, const QJsonArray& links) {
     bool extracting = false;
     bool running = false;
     qint64 total = 0, done = 0, speed = 0;
+    // Mirrors share a name and only one moves bytes: each file counts once, by its furthest link.
+    QHash<QString, std::pair<qint64, qint64>> mirrors;
     for (const auto& item : links) {
         const auto link = item.toObject();
         const auto uuid = link.value(u"uuid").toInteger();
@@ -372,9 +496,14 @@ void DownloadManager::observeJd(qint64 id, const QJsonArray& links) {
             return;
         }
         extracting = extracting || (!extraction.isEmpty() && extraction != u"SUCCESSFUL");
-        done += link.value(u"bytesLoaded").toInteger();
-        total += link.value(u"bytesTotal").toInteger();
+        auto& file = mirrors[link.value(u"name").toString().toLower()];
+        if (const auto loaded = link.value(u"bytesLoaded").toInteger(); loaded >= file.first)
+            file = {loaded, link.value(u"bytesTotal").toInteger()};
         speed += link.value(u"speed").toInteger();
+    }
+    for (const auto& [loaded, size] : std::as_const(mirrors)) {
+        done += loaded;
+        total += size;
     }
     if (received.isEmpty() ||
         (!task.engineLinkIds.isEmpty() && received.size() != task.engineLinkIds.size())) {

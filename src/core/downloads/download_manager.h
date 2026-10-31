@@ -20,8 +20,10 @@ namespace animehub::downloads {
 
 struct DownloadSettings {
     QString directory;
-    // MEGA and Pixeldrain, in the user's order; JDownloader also gets MP4Upload and 1Fichier.
-    QList<api::Provider> providers{api::Provider::Mega, api::Provider::Pixeldrain};
+    // The servers the user enabled, in their order. AnimeHub downloads MEGA and Pixeldrain;
+    // JDownloader gets every enabled one. 1Fichier is off by default, as on the web.
+    QList<api::Provider> providers{api::Provider::Mega, api::Provider::Pixeldrain,
+                                   api::Provider::Mp4Upload};
     api::Audio audio = api::Audio::Sub;
     int maxConcurrent = 2;
     DownloadEngine engine = DownloadEngine::Native;
@@ -59,6 +61,16 @@ public:
         DownloadRepository& repository;
         library::LibraryRepository& library;
         myjd::Client* myJDownloader = nullptr;
+        // Starts the local JDownloader in the background (in the tray) when a hand-over finds
+        // its API closed; false when it is not installed. Never called otherwise.
+        std::function<bool()> launchJDownloader;
+    };
+
+    // MEGA's transfer quota ran out for this IP: MEGA is skipped until `until`. `known` says
+    // whether MEGA stated that time; otherwise it is when AnimeHub tries again.
+    struct MegaQuota {
+        QDateTime until;
+        bool known = false;
     };
 
     DownloadManager(Services services, std::function<DownloadSettings()> settings,
@@ -105,6 +117,7 @@ public:
     [[nodiscard]] QList<Task> tasks() const;
     [[nodiscard]] std::optional<Task> task(qint64 id) const;
     [[nodiscard]] std::optional<Task> activeTaskFor(const QString& slug, double number) const;
+    [[nodiscard]] std::optional<MegaQuota> megaQuota() const;
 
 signals:
     void loaded(); // the queue saved by the previous session is ready
@@ -113,16 +126,19 @@ signals:
     void taskRemoved(qint64 id);
     void taskCompleted(qint64 id);
     void taskFailed(qint64 id);
+    void megaQuotaChanged();
 
 private:
     struct Live {
         quint64 generation = 0;
         QString gid;
         std::optional<mega::FileLink> megaLink;
+        QUrl megaUrl; // the temporary URL being downloaded; memory only
         QString partialPath;
         std::shared_ptr<std::atomic<bool>> cancel;
         QDateTime savedAt;
         bool jdBusy = false;
+        bool jdLaunched = false; // this hand-over already started JDownloader once
     };
 
     void pump();
@@ -137,7 +153,19 @@ private:
     // Points a task JDownloader does not have yet at the JDownloader the settings name; false
     // when they name none.
     bool connectJd(qint64 id, const DownloadSettings& settings);
-    void submitJd(qint64 id, const api::ResolvedLink& link);
+    // Every link goes in one package: JDownloader takes them as mirrors of one file and picks
+    // the server itself.
+    void submitJd(qint64 id, const QList<api::ResolvedLink>& links);
+    // The links JDownloader found: offline ones and ones of another size leave, and the rest
+    // share one name so JDownloader downloads only one of them.
+    void keepMirrors(qint64 id, QJsonArray links);
+    // Removes `drop`, renames, then moves the kept links to the download list and starts them.
+    void prepareJd(qint64 id, QList<qint64> drop, QList<std::pair<qint64, QString>> renames);
+    // Starts JDownloader and repeats `path` once its API answers.
+    void launchJd(qint64 id, const QString& path, const QJsonArray& params,
+                  myjd::Client::Callback<QJsonValue> done);
+    void awaitJd(qint64 id, quint64 generation, QDateTime deadline, const QString& path,
+                 const QJsonArray& params, myjd::Client::Callback<QJsonValue> done);
     // JDownloader does not have the episode: the task lets the hand-over go, so a retry sends it
     // again.
     void releaseJd(qint64 id);
@@ -153,8 +181,11 @@ private:
     void verifyMega(qint64 id);
     void complete(qint64 id, const QString& path);
     void transferFailed(qint64 id, int code, const QString& message);
+    // MEGA said its quota ran out, with the time it frees if it said so.
+    void megaOverQuota(std::optional<std::chrono::seconds> time_left);
+    [[nodiscard]] bool megaBlocked() const;
 
-    void wait(qint64 id, TaskIssue issue, std::chrono::seconds delay, const QString& detail = {});
+    void wait(qint64 id, TaskIssue issue, const QDateTime& until, const QString& detail = {});
     void retryLater(qint64 id, TaskIssue issue, const QString& detail = {});
     void fail(qint64 id, TaskIssue issue, const QString& detail = {});
     void setState(qint64 id, TaskState state);
@@ -192,6 +223,8 @@ private:
     bool started_ = false;
     bool transfers_enabled_ = true;
     bool stopping_ = false;
+    QDateTime mega_until_;
+    bool mega_until_known_ = false;
 };
 
 } // namespace animehub::downloads

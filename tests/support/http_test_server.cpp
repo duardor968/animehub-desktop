@@ -34,8 +34,8 @@ HttpTestServer::HttpTestServer(QObject* parent) : QObject(parent) {
     connect(&server_, &QTcpServer::newConnection, this, &HttpTestServer::accept);
 }
 
-bool HttpTestServer::listen() {
-    return server_.listen(QHostAddress::LocalHost, 0);
+bool HttpTestServer::listen(quint16 port) {
+    return server_.listen(QHostAddress::LocalHost, port);
 }
 
 QUrl HttpTestServer::url(const QString& path) const {

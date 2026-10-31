@@ -23,6 +23,7 @@ using namespace std::chrono_literals;
 constexpr int kMaxNetworkAttempts = 6;
 constexpr int kMaxSourceAttempts = 3;
 constexpr qint64 kSpaceMargin = 256LL * 1024 * 1024;
+// Without MEGA's own time, when a quota-bound episode tries MEGA again.
 constexpr auto kQuotaWait = 30min;
 constexpr auto kProgressSaveInterval = 5s;
 // Each look at JDownloader is a request to it, through MyJDownloader's servers when it is not
@@ -130,8 +131,20 @@ void DownloadManager::start(bool transfers) {
         }
     }
     if (auto all = services_.repository.all()) {
-        for (const auto& task : *all) {
+        const auto now = QDateTime::currentDateTimeUtc();
+        for (auto task : *all) {
+            // Earlier versions called a transfer cut by its server "network", as if AnimeHub had
+            // no connection: one with a server was cut by that server.
+            if (task.issue == TaskIssue::Network && task.provider) {
+                task.issue = TaskIssue::Connection;
+            }
             tasks_.insert(task.id, task);
+            // MEGA's quota outlives a restart: what waits for it says until when MEGA is out.
+            if (task.state == TaskState::Waiting && task.issue == TaskIssue::Quota &&
+                task.retryAt > now && task.retryAt > mega_until_) {
+                mega_until_ = task.retryAt;
+                mega_until_known_ = task.issueDetail == kMegaStatedTime;
+            }
         }
     }
     // Earlier versions numbered every task on its own; a series now shares one place.
@@ -255,6 +268,37 @@ std::optional<Task> DownloadManager::activeTaskFor(const QString& slug, double n
         }
     }
     return std::nullopt;
+}
+
+std::optional<DownloadManager::MegaQuota> DownloadManager::megaQuota() const {
+    return megaBlocked()
+               ? std::optional(MegaQuota{.until = mega_until_, .known = mega_until_known_})
+               : std::nullopt;
+}
+
+bool DownloadManager::megaBlocked() const {
+    return mega_until_.isValid() && QDateTime::currentDateTimeUtc() < mega_until_;
+}
+
+void DownloadManager::megaOverQuota(std::optional<std::chrono::seconds> time_left) {
+    // A later failure without a time keeps the one MEGA stated, or the retry already set.
+    if (!time_left && megaBlocked()) {
+        return;
+    }
+    mega_until_ = QDateTime::currentDateTimeUtc().addSecs(
+        time_left ? time_left->count()
+                  : std::chrono::duration_cast<std::chrono::seconds>(kQuotaWait).count());
+    mega_until_known_ = time_left.has_value();
+    // What waits for MEGA tries again when it frees.
+    for (auto it = tasks_.begin(); it != tasks_.end(); ++it) {
+        if (it->state == TaskState::Waiting && it->issue == TaskIssue::Quota) {
+            it->retryAt = mega_until_;
+            it->issueDetail = mega_until_known_ ? kMegaStatedTime : QString();
+            store(*it);
+        }
+    }
+    emit megaQuotaChanged();
+    pump();
 }
 
 std::expected<qint64, QString> DownloadManager::enqueue(const QString& slug, double number,
@@ -387,6 +431,17 @@ void DownloadManager::pump() {
     }
     const auto now = QDateTime::currentDateTimeUtc();
     QDateTime next_wake;
+    if (mega_until_.isValid() && mega_until_ <= now) {
+        mega_until_ = {};
+        mega_until_known_ = false;
+        // JDownloader gets another chance with the next episode that needs it.
+        for (auto& task : tasks_) {
+            task.jdUnreachable = false;
+        }
+        emit megaQuotaChanged();
+    } else if (mega_until_.isValid()) {
+        next_wake = mega_until_;
+    }
     for (auto it = tasks_.begin(); it != tasks_.end(); ++it) {
         if (it->state != TaskState::Waiting) {
             continue;
@@ -447,6 +502,7 @@ void DownloadManager::resolve(qint64 id) {
     task.state = TaskState::Resolving;
     task.issue = TaskIssue::None;
     task.issueDetail.clear();
+    task.issueProvider.reset();
     store(task);
 
     if (task.handedOver()) {
@@ -455,22 +511,27 @@ void DownloadManager::resolve(qint64 id) {
         pollJd(id);
         return;
     }
+    task.detour = TaskIssue::None;
     const auto settings = settings_();
     // What JDownloader does not have yet goes to the one the settings name now.
     if (task.engine != DownloadEngine::Native)
         connectJd(id, settings);
+    const bool with_jd = task.engine != DownloadEngine::Native ||
+                         (jdRoute(settings) != DownloadEngine::Native && !task.jdUnreachable);
+    // Only the servers the user enabled: MEGA and Pixeldrain first, as AnimeHub downloads them;
+    // the rest only JDownloader can.
     QList<api::Provider> providers;
-    for (const auto provider : settings.providers) {
-        if (isNative(provider) && !providers.contains(provider)) {
-            providers.append(provider);
+    for (const bool native : {true, false}) {
+        for (const auto provider : settings.providers) {
+            if (isNative(provider) == native && (native || with_jd) &&
+                !providers.contains(provider)) {
+                providers.append(provider);
+            }
         }
     }
     if (providers.isEmpty()) {
-        providers = {api::Provider::Mega, api::Provider::Pixeldrain};
-    }
-    // MEGA and Pixeldrain first, as AnimeHub downloads them; the rest only JDownloader can.
-    if (task.engine != DownloadEngine::Native || jdRoute(settings) != DownloadEngine::Native) {
-        providers += {api::Provider::Mp4Upload, api::Provider::OneFichier};
+        fail(id, TaskIssue::NoSource);
+        return;
     }
     const auto generation = live.generation;
     services_.api.resolve(
@@ -483,7 +544,9 @@ void DownloadManager::resolve(qint64 id) {
                 const auto& error = result.error();
                 switch (error.kind) {
                 case api::ApiError::Kind::RateLimited:
-                    wait(id, TaskIssue::RateLimited, std::max(error.retryAfter, 30s));
+                    wait(id, TaskIssue::RateLimited,
+                         QDateTime::currentDateTimeUtc().addSecs(
+                             std::max(error.retryAfter, 30s).count()));
                     return;
                 case api::ApiError::Kind::NotFound:
                 case api::ApiError::Kind::Contract:
@@ -508,6 +571,13 @@ void DownloadManager::resolve(qint64 id) {
                 fail(id, TaskIssue::NoSource);
                 return;
             }
+            // Bytes already on disk from one server: that server goes first, so they are kept.
+            if (const auto& task = tasks_[id];
+                task.engine == DownloadEngine::Native && task.bytesDone > 0 && task.provider) {
+                std::ranges::stable_partition(candidates, [&task](const api::ResolvedLink& link) {
+                    return link.provider == *task.provider;
+                });
+            }
             tryCandidate(id, generation, candidates, 0, TaskIssue::NoSource);
         });
 }
@@ -515,28 +585,51 @@ void DownloadManager::resolve(qint64 id) {
 void DownloadManager::tryCandidate(qint64 id, quint64 generation,
                                    QList<api::ResolvedLink> candidates, int index,
                                    TaskIssue last_issue) {
+    if (tasks_[id].engine != DownloadEngine::Native) {
+        submitJd(id, candidates.mid(index));
+        return;
+    }
+    // Nothing else to try: an episode MEGA's quota holds waits until it frees.
+    const auto give_up = [this, id](TaskIssue issue) {
+        if (issue == TaskIssue::Quota && megaBlocked()) {
+            wait(id, TaskIssue::Quota, mega_until_,
+                 mega_until_known_ ? kMegaStatedTime : QString());
+        } else {
+            fail(id, issue);
+        }
+    };
     if (index >= candidates.size()) {
-        fail(id, last_issue);
+        give_up(last_issue);
         return;
     }
     const auto link = candidates[index];
-    // Neither MEGA nor Pixeldrain had it: the same task goes on with JDownloader.
-    if (tasks_[id].engine == DownloadEngine::Native && !isNative(link.provider)) {
-        if (!connectJd(id, settings_())) {
-            fail(id, last_issue);
-            return;
+    // The same task goes on with JDownloader, every server left in one package.
+    const auto hand_over = [this, id, &candidates, index] {
+        if (tasks_[id].jdUnreachable || !connectJd(id, settings_())) {
+            return false;
         }
-        submitJd(id, link);
+        submitJd(id, candidates.mid(index));
         pump(); // its native slot is free
-        return;
-    }
-    if (tasks_[id].engine != DownloadEngine::Native) {
-        submitJd(id, link);
+        return true;
+    };
+    // Neither MEGA nor Pixeldrain had it.
+    if (!isNative(link.provider)) {
+        if (!hand_over()) {
+            give_up(last_issue);
+        }
         return;
     }
     const auto next = [this, id, generation, candidates, index](TaskIssue issue) {
         tryCandidate(id, generation, candidates, index + 1, issue);
     };
+    if (link.provider == api::Provider::Mega && megaBlocked()) {
+        tasks_[id].detour = TaskIssue::Quota;
+        // JDownloader may leave through another IP: MEGA goes to it too, with the rest.
+        if (!hand_over()) {
+            next(TaskIssue::Quota);
+        }
+        return;
+    }
     if (link.provider == api::Provider::Mega) {
         const auto file_link = mega::parseFileLink(link.url);
         if (!file_link) {
@@ -544,7 +637,7 @@ void DownloadManager::tryCandidate(qint64 id, quint64 generation,
             return;
         }
         services_.mega.file(*file_link, this,
-                            [this, id, generation, file_link, next](
+                            [this, id, generation, file_link, next, candidates, index, last_issue](
                                 const std::expected<mega::RemoteFile, mega::ApiFailure>& answer) {
                                 if (!isCurrent(id, generation, TaskState::Resolving)) {
                                     return;
@@ -556,13 +649,17 @@ void DownloadManager::tryCandidate(qint64 id, quint64 generation,
                                         next(TaskIssue::SourceRemoved);
                                         return;
                                     case mega::ApiFailure::Kind::OverQuota:
-                                        wait(id, TaskIssue::Quota, kQuotaWait);
+                                        // MEGA is skipped from now on, this episode included.
+                                        megaOverQuota(answer.error().timeLeft);
+                                        tryCandidate(id, generation, candidates, index, last_issue);
                                         return;
                                     case mega::ApiFailure::Kind::Protocol:
                                         next(TaskIssue::NoSource);
                                         return;
                                     default:
-                                        retryLater(id, TaskIssue::Network, answer.error().message);
+                                        tasks_[id].issueProvider = api::Provider::Mega;
+                                        retryLater(id, TaskIssue::Connection,
+                                                   answer.error().message);
                                         return;
                                     }
                                 }
@@ -590,7 +687,8 @@ void DownloadManager::tryCandidate(qint64 id, quint64 generation,
                     } else if (info.error().kind == pixeldrain::Failure::Kind::Protocol) {
                         next(TaskIssue::NoSource);
                     } else {
-                        retryLater(id, TaskIssue::Network, info.error().message);
+                        tasks_[id].issueProvider = api::Provider::Pixeldrain;
+                        retryLater(id, TaskIssue::Connection, info.error().message);
                     }
                     return;
                 }
@@ -632,6 +730,7 @@ void DownloadManager::startTransfer(qint64 id, api::Provider provider, const QSt
     live.partialPath =
         task.targetPath + (is_mega ? QStringLiteral(".mega") : QStringLiteral(".part"));
     live.megaLink = std::move(mega_link);
+    live.megaUrl = is_mega ? url : QUrl();
     const qint64 on_disk = QFileInfo(live.partialPath).size();
     const qint64 needed = (is_mega ? 2 * size : size) - on_disk + kSpaceMargin;
     const QStorageInfo storage(target.absolutePath());
@@ -874,6 +973,7 @@ void DownloadManager::complete(qint64 id, const QString& path) {
     task.state = TaskState::Completed;
     task.issue = TaskIssue::None;
     task.issueDetail.clear();
+    task.detour = TaskIssue::None;
     task.finishedAt = QDateTime::currentDateTimeUtc();
     live_.remove(id);
     if (auto recorded = services_.library.setEpisodeFile(task.slug, task.number, path, size);
@@ -908,11 +1008,25 @@ void DownloadManager::transferFailed(qint64 id, int code, const QString& message
     case kResumeUnsupported:
         deletePartials(task.targetPath);
         task.bytesDone = 0;
-        retryLater(id, TaskIssue::Network, message);
+        task.issueProvider = task.provider;
+        retryLater(id, TaskIssue::Connection, message);
         return;
     case kHttpUnexpected:
-        if (message.contains(u"509")) { // MEGA: transfer quota exhausted
-            wait(id, TaskIssue::Quota, kQuotaWait, message);
+        if (message.contains(u"509") && task.provider == api::Provider::Mega) {
+            // The transfer quota ran out: the episode looks for its file again, skipping MEGA,
+            // while MEGA's own answer says when it frees.
+            if (const auto url = live.megaUrl; url.isValid()) {
+                services_.mega.quotaTimeLeft(url, this,
+                                             [this](std::optional<std::chrono::seconds> left) {
+                                                 if (left) {
+                                                     megaOverQuota(left);
+                                                 }
+                                             });
+            }
+            task.state = TaskState::Queued;
+            store(task);
+            megaOverQuota(std::nullopt);
+            pump();
             return;
         }
         [[fallthrough]];
@@ -928,19 +1042,21 @@ void DownloadManager::transferFailed(qint64 id, int code, const QString& message
         }
         return;
     default:
-        retryLater(id, TaskIssue::Network, message);
+        // The transfer was cut (reset, timeout, name lookup): the file's server, not AnimeHub.
+        task.issueProvider = task.provider;
+        retryLater(id, TaskIssue::Connection, message);
         return;
     }
 }
 
-void DownloadManager::wait(qint64 id, TaskIssue issue, std::chrono::seconds delay,
+void DownloadManager::wait(qint64 id, TaskIssue issue, const QDateTime& until,
                            const QString& detail) {
     auto& task = tasks_[id];
     ++live_[id].generation;
     task.state = TaskState::Waiting;
     task.issue = issue;
     task.issueDetail = detail;
-    task.retryAt = QDateTime::currentDateTimeUtc().addSecs(delay.count());
+    task.retryAt = until;
     store(task);
     pump();
 }
@@ -952,7 +1068,7 @@ void DownloadManager::retryLater(qint64 id, TaskIssue issue, const QString& deta
         return;
     }
     const auto delay = std::chrono::seconds(std::min(30 << (task.attempts - 1), 1800));
-    wait(id, issue, delay, detail);
+    wait(id, issue, QDateTime::currentDateTimeUtc().addSecs(delay.count()), detail);
 }
 
 void DownloadManager::fail(qint64 id, TaskIssue issue, const QString& detail) {
@@ -1140,6 +1256,7 @@ bool DownloadManager::retryTask(qint64 id) {
     it->attempts = 0;
     it->issue = TaskIssue::None;
     it->issueDetail.clear();
+    it->jdUnreachable = false;
     it->retryAt = {};
     it->finishedAt = {};
     setState(id, TaskState::Queued);

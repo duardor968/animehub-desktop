@@ -32,12 +32,16 @@ enum class TaskIssue {
     SourceRemoved, // the provider removed the file
     Quota,         // MEGA transfer quota exhausted
     RateLimited,   // AnimeHub API asked to slow down
-    Network,       // repeated connection failures
+    Network,       // AnimeHub API cannot be reached
+    Connection,    // the file's server cannot be reached or cut the transfer
     NoSpace,       // not enough free disk space
     Storage,       // the download folder cannot be written
     Integrity,     // the decrypted file does not match its MAC
     Engine,        // aria2 is missing or stopped
 };
+
+// The detail of a quota wait whose end MEGA stated, so a restart and the UI still know it.
+inline const auto kMegaStatedTime = QStringLiteral("mega-time-left");
 
 struct Task {
     qint64 id = 0;
@@ -70,6 +74,12 @@ struct Task {
     QString enginePhase;
     QString engineDestination;
     QString remoteRequestId;
+    // Live only, not stored. The server a Connection issue refers to.
+    std::optional<api::Provider> issueProvider;
+    // Live only: why the episode left the user's first server (TaskIssue::Quota: MEGA's quota),
+    // and whether JDownloader, which should have taken it then, did not answer.
+    TaskIssue detour = TaskIssue::None;
+    bool jdUnreachable = false;
 
     [[nodiscard]] bool active() const {
         return state != TaskState::Completed && state != TaskState::Cancelled &&

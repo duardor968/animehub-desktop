@@ -50,8 +50,10 @@ private slots:
         // The connection is the engine's: the same local API and MyJDownloader device.
         QCOMPARE(downloads.jdEndpoint, QUrl(QStringLiteral("http://127.0.0.1:3128")));
         QCOMPARE(downloads.jdDeviceId, QStringLiteral("dev1"));
+        // Every server but 1Fichier, which is off until the user turns it on.
         QCOMPARE(downloads.providers,
-                 (QList<api::Provider>{api::Provider::Mega, api::Provider::Pixeldrain}));
+                 (QList<api::Provider>{api::Provider::Mega, api::Provider::Pixeldrain,
+                                       api::Provider::Mp4Upload}));
     }
 };
 

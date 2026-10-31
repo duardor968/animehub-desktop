@@ -20,6 +20,9 @@ class AppSettings final : public QObject {
     Q_PROPERTY(
         QString downloadDirectory READ downloadDirectory WRITE setDownloadDirectory NOTIFY changed)
     Q_PROPERTY(QStringList providerOrder READ providerOrder WRITE setProviderOrder NOTIFY changed)
+    // Servers the user turned off (provider keys): never asked for, never handed to JDownloader.
+    Q_PROPERTY(QStringList disabledProviders READ disabledProviders WRITE setDisabledProviders
+                   NOTIFY changed)
     Q_PROPERTY(bool dubbed READ dubbed WRITE setDubbed NOTIFY changed)
     Q_PROPERTY(int maxConcurrent READ maxConcurrent WRITE setMaxConcurrent NOTIFY changed)
     Q_PROPERTY(bool systemPlayer READ systemPlayer WRITE setSystemPlayer NOTIFY changed)
@@ -66,6 +69,8 @@ public:
     void setDownloadDirectory(const QString& directory);
     [[nodiscard]] QStringList providerOrder() const;
     void setProviderOrder(const QStringList& order);
+    [[nodiscard]] QStringList disabledProviders() const;
+    void setDisabledProviders(const QStringList& keys);
     [[nodiscard]] bool dubbed() const;
     void setDubbed(bool dubbed);
     [[nodiscard]] int maxConcurrent() const;
@@ -90,6 +95,7 @@ public:
     void setTrayNoticeShown();
 
     [[nodiscard]] downloads::DownloadSettings downloads() const;
+    // The enabled servers: MEGA and Pixeldrain in the user's order, then MP4Upload and 1Fichier.
     [[nodiscard]] QList<api::Provider> providers() const;
 
     // A file shipped next to the executable (the license notices of an installed copy), or an

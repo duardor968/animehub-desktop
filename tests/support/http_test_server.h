@@ -40,7 +40,8 @@ public:
 
     explicit HttpTestServer(QObject* parent = nullptr);
 
-    [[nodiscard]] bool listen();
+    // On a free port, or on `port` (a program started late: JDownloader opening its API).
+    [[nodiscard]] bool listen(quint16 port = 0);
     [[nodiscard]] QUrl url(const QString& path = QStringLiteral("/")) const;
 
     void route(const QByteArray& method, const QByteArray& path, Handler handler);

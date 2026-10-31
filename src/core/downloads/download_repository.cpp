@@ -133,6 +133,8 @@ QString issueKey(TaskIssue issue) {
         return QStringLiteral("rate_limited");
     case TaskIssue::Network:
         return QStringLiteral("network");
+    case TaskIssue::Connection:
+        return QStringLiteral("connection");
     case TaskIssue::NoSpace:
         return QStringLiteral("no_space");
     case TaskIssue::Storage:
@@ -146,9 +148,10 @@ QString issueKey(TaskIssue issue) {
 }
 
 TaskIssue issueFromKey(QStringView key) {
-    for (const auto issue : {TaskIssue::NoSource, TaskIssue::SourceRemoved, TaskIssue::Quota,
-                             TaskIssue::RateLimited, TaskIssue::Network, TaskIssue::NoSpace,
-                             TaskIssue::Storage, TaskIssue::Integrity, TaskIssue::Engine}) {
+    for (const auto issue :
+         {TaskIssue::NoSource, TaskIssue::SourceRemoved, TaskIssue::Quota, TaskIssue::RateLimited,
+          TaskIssue::Network, TaskIssue::Connection, TaskIssue::NoSpace, TaskIssue::Storage,
+          TaskIssue::Integrity, TaskIssue::Engine}) {
         if (key == issueKey(issue)) {
             return issue;
         }

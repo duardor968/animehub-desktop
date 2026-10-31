@@ -105,11 +105,13 @@ QString issue(downloads::TaskIssue issue) {
     case TaskIssue::SourceRemoved:
         return QStringLiteral("El servidor ya no tiene este archivo.");
     case TaskIssue::Quota:
-        return QStringLiteral("Se agotó la cuota de descarga de MEGA.");
+        return QStringLiteral("MEGA llegó a su límite.");
     case TaskIssue::RateLimited:
         return QStringLiteral("El servidor de AnimeHub pidió esperar.");
     case TaskIssue::Network:
-        return QStringLiteral("No hay conexión con el servidor.");
+        return QStringLiteral("No hay conexión con AnimeHub.");
+    case TaskIssue::Connection:
+        return QStringLiteral("Se cortó la conexión con el servidor.");
     case TaskIssue::NoSpace:
         return QStringLiteral("No queda espacio en el disco.");
     case TaskIssue::Storage:
@@ -122,9 +124,39 @@ QString issue(downloads::TaskIssue issue) {
     return {};
 }
 
+QString issue(const downloads::Task& task) {
+    // After a restart only the server it was downloading from is known.
+    if (const auto server = task.issueProvider ? task.issueProvider : task.provider;
+        task.issue == downloads::TaskIssue::Connection && server) {
+        return QStringLiteral("Se cortó la conexión con %1.").arg(provider(*server));
+    }
+    return issue(task.issue);
+}
+
+QString time(const QDateTime& at) {
+    return spanish().toString(at.toLocalTime().time(), QStringLiteral("HH:mm"));
+}
+
+QString date(const QDateTime& at) {
+    const auto day = at.toLocalTime().date();
+    return spanish().toString(day, day.year() == QDate::currentDate().year()
+                                       ? QStringLiteral("d MMM")
+                                       : QStringLiteral("d MMM yyyy"));
+}
+
 QString retry(const QDateTime& at) {
-    return QStringLiteral("Se reintenta a las ") +
-           spanish().toString(at.toLocalTime().time(), QStringLiteral("HH:mm"));
+    return QStringLiteral("Se reintenta a las ") + time(at);
+}
+
+QString megaQuota(const QDateTime& until, bool known, const QString& meanwhile) {
+    QStringList parts{QStringLiteral("MEGA llegó a su límite")};
+    if (known) {
+        parts.append(QStringLiteral("se libera a las ") + time(until));
+    }
+    if (!meanwhile.isEmpty()) {
+        parts.append(meanwhile);
+    }
+    return parts.join(QStringLiteral(" · "));
 }
 
 QString download(const downloads::Task& task) {
@@ -155,7 +187,12 @@ QString download(const downloads::Task& task) {
     case TaskState::Paused:
         return size.isEmpty() ? QStringLiteral("En pausa") : QStringLiteral("En pausa · ") + size;
     case TaskState::Waiting:
-        return issue(task.issue) + QLatin1Char(' ') + retry(task.retryAt) + QLatin1Char('.');
+        // The time MEGA stated is said as the header says it.
+        if (task.issue == downloads::TaskIssue::Quota &&
+            task.issueDetail == downloads::kMegaStatedTime) {
+            return megaQuota(task.retryAt, true, {});
+        }
+        return issue(task) + QLatin1Char(' ') + retry(task.retryAt) + QLatin1Char('.');
     case TaskState::Completed: {
         QStringList parts{bytes(task.bytesTotal)};
         if (task.provider) {
@@ -164,7 +201,7 @@ QString download(const downloads::Task& task) {
         return parts.join(QStringLiteral(" · "));
     }
     case TaskState::Failed:
-        return issue(task.issue);
+        return issue(task);
     case TaskState::Cancelled:
         return QStringLiteral("Cancelada");
     }

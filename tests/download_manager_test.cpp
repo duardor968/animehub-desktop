@@ -114,6 +114,13 @@ public:
     int removed = 0;
     int submitDelay = 0;
     bool scoped = true;
+    // Two links of one file from two servers, named apart: JDownloader takes them as mirrors once
+    // they share a name.
+    bool mirrors = false;
+    QStringList renamed;
+    QByteArray owned() const {
+        return mirrors ? "[88,89]&[]" : "[88]&[]";
+    }
     void install(HttpTestServer& server) {
         server.route("GET", "/linkgrabberv2/addLinks", [this](const auto& r) {
             ++submissions;
@@ -133,6 +140,7 @@ public:
             if (moved)
                 links.append(QJsonObject{
                     {QStringLiteral("uuid"), 88},
+                    {QStringLiteral("name"), QStringLiteral("a.mp4")},
                     {QStringLiteral("finished"), finished},
                     {QStringLiteral("running"), !finished},
                     {QStringLiteral("bytesLoaded"), finished ? 8 : 2},
@@ -140,6 +148,14 @@ public:
                     {QStringLiteral("extractionStatus"), extracting  ? QStringLiteral("RUNNING")
                                                          : extracted ? QStringLiteral("SUCCESSFUL")
                                                                      : QString()}});
+            // The mirror waits, and ends as "mirror finished" with the other.
+            if (moved && mirrors)
+                links.append(QJsonObject{{QStringLiteral("uuid"), 89},
+                                         {QStringLiteral("name"), QStringLiteral("a.mp4")},
+                                         {QStringLiteral("finished"), finished},
+                                         {QStringLiteral("running"), false},
+                                         {QStringLiteral("bytesLoaded"), 0},
+                                         {QStringLiteral("bytesTotal"), 8}});
             return HttpTestServer::Response{
                 .body = QJsonDocument(QJsonObject{{QStringLiteral("data"), links}}).toJson()};
         });
@@ -148,18 +164,28 @@ public:
         server.route("GET", "/linkgrabberv2/queryLinks", [this](const auto& r) {
             scoped = scoped && QUrl::fromPercentEncoding(r.query).contains(
                                    QStringLiteral("\"jobUUIDs\":[77]"));
+            if (moved)
+                return HttpTestServer::Response{.body = "{\"data\":[]}"};
+            if (mirrors)
+                return HttpTestServer::Response{
+                    .body = "{\"data\":[{\"uuid\":88,\"name\":\"a.mp4\",\"availability\":"
+                            "\"ONLINE\",\"bytesTotal\":8},{\"uuid\":89,\"name\":\"B 01.mp4\","
+                            "\"availability\":\"ONLINE\",\"bytesTotal\":8},{\"uuid\":90,\"name\":"
+                            "\"c.mp4\",\"availability\":\"OFFLINE\"}]}"};
             return HttpTestServer::Response{
-                .body = moved
-                            ? QByteArray("{\"data\":[]}")
-                            : QByteArray("{\"data\":[{\"uuid\":88,\"availability\":\"ONLINE\"}]}")};
+                .body = "{\"data\":[{\"uuid\":88,\"availability\":\"ONLINE\"}]}"};
+        });
+        server.route("GET", "/linkgrabberv2/renameLink", [this](const auto& r) {
+            renamed.append(QUrl::fromPercentEncoding(r.query));
+            return HttpTestServer::Response{.body = "{\"data\":null}"};
         });
         server.route("GET", "/linkgrabberv2/moveToDownloadlist", [this](const auto& r) {
-            scoped = scoped && QUrl::fromPercentEncoding(r.query) == QStringLiteral("[88]&[]");
+            scoped = scoped && QUrl::fromPercentEncoding(r.query).toLatin1() == owned();
             moved = true;
             return HttpTestServer::Response{.body = "{\"data\":null}"};
         });
         server.route("GET", "/downloadsV2/forceDownload", [this](const auto& r) {
-            scoped = scoped && QUrl::fromPercentEncoding(r.query) == QStringLiteral("[88]&[]");
+            scoped = scoped && QUrl::fromPercentEncoding(r.query).toLatin1() == owned();
             return HttpTestServer::Response{.body = "{\"data\":null}"};
         });
         server.route("GET", "/linkgrabberv2/abort", [this](const auto& r) {
@@ -167,8 +193,11 @@ public:
             return HttpTestServer::Response{.body = "{\"data\":true}"};
         });
         for (const auto& prefix : {QByteArray("/linkgrabberv2/"), QByteArray("/downloadsV2/")}) {
-            server.route("GET", prefix + "removeLinks", [this](const auto& r) {
-                scoped = scoped && QUrl::fromPercentEncoding(r.query) == QStringLiteral("[88]&[]");
+            server.route("GET", prefix + "removeLinks", [this, prefix](const auto& r) {
+                // Offline mirrors leave the link grabber; a cancel takes the episode's own.
+                const auto query = QUrl::fromPercentEncoding(r.query).toLatin1();
+                scoped = scoped && (query == owned() || (mirrors && prefix == "/linkgrabberv2/" &&
+                                                         !moved && query == "[90]&[]"));
                 ++removed;
                 return HttpTestServer::Response{.body = "{\"data\":null}"};
             });
@@ -202,6 +231,10 @@ class DownloadManagerTest final : public QObject {
     DownloadEngine other_servers_ = DownloadEngine::Native;
     QUrl jd_endpoint_;
     QString jd_device_;
+    QList<api::Provider> providers_{api::Provider::Mega, api::Provider::Pixeldrain,
+                                    api::Provider::Mp4Upload};
+    std::function<bool()> launch_jd_;
+    int jd_launches_ = 0;
 
     void serveMega(int bytes_per_tick = 0, int status = 200) {
         server_->route("POST", "/cs", [this](const HttpTestServer::Request&) {
@@ -324,10 +357,15 @@ class DownloadManagerTest final : public QObject {
         aria2_ = std::make_unique<Aria2>(*network_, QStringLiteral(ANIMEHUB_ARIA2_EXECUTABLE),
                                          "AnimeHub-Desktop-Test");
         manager_ = std::make_unique<DownloadManager>(
-            DownloadManager::Services{*api_, *aria2_, *mega_, *pixeldrain_, *repository_,
-                                      *library_},
+            DownloadManager::Services{*api_, *aria2_, *mega_, *pixeldrain_, *repository_, *library_,
+                                      nullptr,
+                                      [this] {
+                                          ++jd_launches_;
+                                          return launch_jd_ && launch_jd_();
+                                      }},
             [this] {
                 return DownloadSettings{.directory = downloads_,
+                                        .providers = providers_,
                                         .maxConcurrent = max_concurrent_,
                                         .engine = engine_,
                                         .otherServers = other_servers_,
@@ -394,6 +432,9 @@ private slots:
         other_servers_ = DownloadEngine::Native;
         jd_endpoint_ = server_->url();
         jd_device_.clear();
+        providers_ = {api::Provider::Mega, api::Provider::Pixeldrain, api::Provider::Mp4Upload};
+        launch_jd_ = {};
+        jd_launches_ = 0;
         makeManager();
     }
 
@@ -755,12 +796,13 @@ private slots:
         QVERIFY(created);
         const auto id = *created;
         QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
-        // The same task, from one request that asks MEGA and Pixeldrain first.
+        // The same task, from one request that asks MEGA and Pixeldrain first, and only the
+        // servers the user enabled: 1Fichier is off by default.
         QCOMPARE(manager_->tasks().size(), 1);
         QCOMPARE(server_->count("/api/v1/anime/sousou-no-frieren/downloads/resolve"), 1);
         QCOMPARE(askedProviders(),
                  (QStringList{QStringLiteral("MEGA"), QStringLiteral("PIXELDRAIN"),
-                              QStringLiteral("MP4UPLOAD"), QStringLiteral("ONE_FICHIER")}));
+                              QStringLiteral("MP4UPLOAD")}));
         QCOMPARE(jd.links, mp4upload);
         const auto handed = *taskOf(id);
         QCOMPARE(handed.engine, DownloadEngine::JDownloaderLocal);
@@ -827,6 +869,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
         QCOMPARE(jd.submissions, 1);
         QCOMPARE(taskOf(*id)->engineEndpoint, server_->url().toString());
+        QCOMPARE(jd_launches_, 1); // asked to start it once; this test has no JDownloader to start
     }
 
     void otherServersThroughMyJDownloaderStopWithoutTheAccount() {
@@ -905,6 +948,8 @@ private slots:
         QCOMPARE(taskOf(*id)->issue, TaskIssue::NoSource);
     }
 
+    // Without another server, an episode MEGA's quota stops waits for it; without MEGA's time,
+    // it tries again in half an hour.
     void waitsWhenTheMegaQuotaRunsOut() {
         resolveTo(resolution({{"MEGA", megaUrl()}}));
         serveMega(0, 509);
@@ -914,6 +959,188 @@ private slots:
         QCOMPARE(taskOf(*id)->issue, TaskIssue::Quota);
         const auto wait = QDateTime::currentDateTimeUtc().secsTo(taskOf(*id)->retryAt);
         QVERIFY2(wait > 25 * 60 && wait <= 30 * 60, qPrintable(QString::number(wait)));
+        QVERIFY(manager_->megaQuota());
+        QVERIFY(!manager_->megaQuota()->known);
+    }
+
+    // The storage server's 509 says when the quota frees: the episode waits until then.
+    void waitsUntilTheTimeMegaStates() {
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        server_->route("POST", "/cs", [this](const HttpTestServer::Request&) {
+            const QJsonObject file{
+                {QStringLiteral("s"), vectors().value(u"size")},
+                {QStringLiteral("at"), vectors().value(u"attributes")},
+                {QStringLiteral("g"), server_->url(QStringLiteral("/files/episode")).toString()}};
+            return HttpTestServer::Response{
+                .body = QJsonDocument(QJsonArray{file}).toJson(QJsonDocument::Compact)};
+        });
+        server_->route("GET", "/files/episode", [](const HttpTestServer::Request&) {
+            return HttpTestServer::Response{.status = 509,
+                                            .headers = {{"X-MEGA-Time-Left", "600"}}};
+        });
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_VERIFY_WITH_TIMEOUT(manager_->megaQuota() && manager_->megaQuota()->known, kTimeout);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Waiting, kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::Quota);
+        const auto wait = QDateTime::currentDateTimeUtc().secsTo(taskOf(*id)->retryAt);
+        QVERIFY2(wait > 590 && wait <= 600, qPrintable(QString::number(wait)));
+        QCOMPARE(taskOf(*id)->retryAt, manager_->megaQuota()->until);
+    }
+
+    // MEGA over its quota (its API's -17 with the time left): the episode goes on with the next
+    // server the user enabled, and MEGA is skipped for the next ones until it frees.
+    void megaQuotaMovesTheEpisodeToTheNextServer() {
+        resolveTo(resolution({{"MEGA", megaUrl()},
+                              {"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/abc123")}}));
+        server_->route("POST", "/cs", [this](const HttpTestServer::Request&) {
+            ++mega_calls_;
+            return HttpTestServer::Response{.body = "[{\"e\":-17,\"tl\":1200}]"};
+        });
+        const auto data = plaintext();
+        server_->json("/api/file/abc123/info", QByteArrayLiteral("{\"name\":\"a.mp4\",\"size\":") +
+                                                   QByteArray::number(data.size()) + '}');
+        server_->file("/api/file/abc123", data);
+        QSignalSpy quota(manager_.get(), &DownloadManager::megaQuotaChanged);
+        const auto first = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(first);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*first)->state, TaskState::Completed, kTimeout);
+        QCOMPARE(taskOf(*first)->provider, api::Provider::Pixeldrain);
+        QVERIFY(quota.size() >= 1);
+        const auto state = manager_->megaQuota();
+        QVERIFY(state && state->known);
+        const auto left = QDateTime::currentDateTimeUtc().secsTo(state->until);
+        QVERIFY2(left > 1180 && left <= 1200, qPrintable(QString::number(left)));
+
+        // The next episode never asks MEGA while the quota lasts.
+        const auto calls = mega_calls_;
+        const auto second = manager_->enqueue(kFrieren, 2, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(second);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*second)->state, TaskState::Completed, kTimeout);
+        QCOMPARE(mega_calls_, calls);
+        QCOMPARE(taskOf(*second)->provider, api::Provider::Pixeldrain);
+    }
+
+    // With JDownloader for the other servers, MEGA's quota sends the episode to it with every
+    // enabled server's link at once, MEGA's included (JDownloader may leave through another
+    // IP), and never a server the user turned off.
+    void megaQuotaHandsTheEpisodeToJDownloaderWithEveryServer() {
+        other_servers_ = DownloadEngine::JDownloaderLocal;
+        FakeJd jd;
+        jd.install(*server_);
+        const auto pixeldrain = QStringLiteral("https://pixeldrain.com/u/abc123");
+        const auto mp4upload = QStringLiteral("https://www.mp4upload.com/abc123");
+        resolveTo(resolution({{"MEGA", megaUrl()},
+                              {"PIXELDRAIN", pixeldrain},
+                              {"MP4UPLOAD", mp4upload},
+                              {"ONE_FICHIER", QStringLiteral("https://1fichier.com/?x")}}));
+        server_->route("POST", "/cs", [](const HttpTestServer::Request&) {
+            return HttpTestServer::Response{.body = "[{\"e\":-17}]"};
+        });
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
+        QCOMPARE(jd.links, QStringList({megaUrl(), pixeldrain, mp4upload}).join(u'\n'));
+        QCOMPARE(taskOf(*id)->engine, DownloadEngine::JDownloaderLocal);
+        QCOMPARE(taskOf(*id)->detour, TaskIssue::Quota);
+        QVERIFY(manager_->megaQuota() && !manager_->megaQuota()->known);
+        QCOMPARE(jd.submissions, 1);
+        QVERIFY(jd.scoped);
+    }
+
+    // JDownloader takes links of one package with the same name as mirrors: AnimeHub gives them
+    // the first one's name, drops what is offline, and counts the file once.
+    void mirrorsShareOneNameAndCountOnce() {
+        other_servers_ = DownloadEngine::JDownloaderLocal;
+        FakeJd jd;
+        jd.mirrors = true;
+        jd.install(*server_);
+        resolveTo(resolution({{"MP4UPLOAD", QStringLiteral("https://www.mp4upload.com/abc123")}}));
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
+        QCOMPARE(jd.renamed, QStringList{QStringLiteral("89&\"a.mp4\"")});
+        QCOMPARE(jd.removed, 1); // the offline one
+        QCOMPARE(taskOf(*id)->engineLinkIds, (QList<qint64>{88, 89}));
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->bytesTotal, 8, kTimeout);
+        QCOMPARE(taskOf(*id)->bytesDone, 2);
+        QVERIFY(jd.scoped);
+    }
+
+    // A closed JDownloader is started (in the tray) when a hand-over needs it, and gets the
+    // episode once its API answers.
+    void startsJDownloaderWhenAHandOverFindsItClosed() {
+        other_servers_ = DownloadEngine::JDownloaderLocal;
+        jd_endpoint_ = closedPort();
+        QVERIFY(jd_endpoint_.isValid());
+        QVERIFY(jd_endpoint_.port() != 3128); // never the JDownloader of this computer
+        HttpTestServer started;
+        FakeJd jd;
+        launch_jd_ = [&] {
+            jd.install(started);
+            return started.listen(static_cast<quint16>(jd_endpoint_.port()));
+        };
+        resolveTo(resolution({{"MP4UPLOAD", QStringLiteral("https://www.mp4upload.com/abc123")}}));
+        started.json("/jd/version", "{\"data\":1}");
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
+        QCOMPARE(jd_launches_, 1);
+        QCOMPARE(jd.submissions, 1);
+        QCOMPARE(taskOf(*id)->state, TaskState::Downloading);
+        QVERIFY(jd.scoped);
+        bool stopped = false;
+        manager_->shutdown([&] { stopped = true; });
+        QTRY_VERIFY_WITH_TIMEOUT(stopped, 8000);
+        manager_.reset(); // before `started` and `jd` go
+        makeManager();
+    }
+
+    // MEGA's quota would send it to JDownloader, which does not answer and cannot be started:
+    // the episode goes on natively with Pixeldrain, and says so.
+    void withoutJDownloaderTheQuotaEpisodeGoesOnNatively() {
+        other_servers_ = DownloadEngine::JDownloaderLocal;
+        jd_endpoint_ = closedPort();
+        QVERIFY(jd_endpoint_.isValid());
+        QVERIFY(jd_endpoint_.port() != 3128);
+        resolveTo(resolution({{"MEGA", megaUrl()},
+                              {"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/abc123")}}));
+        server_->route("POST", "/cs", [](const HttpTestServer::Request&) {
+            return HttpTestServer::Response{.body = "[{\"e\":-17,\"tl\":900}]"};
+        });
+        const auto data = plaintext();
+        server_->json("/api/file/abc123/info", QByteArrayLiteral("{\"name\":\"a.mp4\",\"size\":") +
+                                                   QByteArray::number(data.size()) + '}');
+        server_->file("/api/file/abc123", data, 64 * 1024);
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Downloading, kTimeout);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->provider, api::Provider::Pixeldrain, kTimeout);
+        QCOMPARE(taskOf(*id)->engine, DownloadEngine::Native);
+        QVERIFY(taskOf(*id)->jdUnreachable);
+        QCOMPARE(taskOf(*id)->detour, TaskIssue::Quota);
+        QCOMPARE(jd_launches_, 1);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Completed, kTimeout);
+        QVERIFY(leftovers(downloads_).isEmpty());
+        QVERIFY(!QDir(QDir(downloads_).filePath(kFrieren))
+                     .entryList({QStringLiteral(".jd-*")}, QDir::Dirs | QDir::Hidden)
+                     .size());
+    }
+
+    // A transfer cut midway is the file server's doing: it says so, never that AnimeHub has no
+    // connection.
+    void aCutTransferBlamesTheFileServer() {
+        resolveTo(resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/abc123")}}));
+        server_->json("/api/file/abc123/info", "{\"name\":\"a.mp4\",\"size\":5000000}");
+        server_->route("GET", "/api/file/abc123", [](const HttpTestServer::Request&) {
+            return HttpTestServer::Response{.drop = true};
+        });
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        // aria2 tries five times, five seconds apart, before it gives up.
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Waiting, 2 * kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::Connection);
+        QCOMPARE(taskOf(*id)->issueProvider, api::Provider::Pixeldrain);
     }
 
     void pausesAndResumes() {

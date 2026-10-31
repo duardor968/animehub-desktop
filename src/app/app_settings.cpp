@@ -12,6 +12,7 @@ namespace {
 
 const auto kDownloadDirectory = QStringLiteral("downloads/directory");
 const auto kProviders = QStringLiteral("downloads/providers");
+const auto kDisabledProviders = QStringLiteral("downloads/disabledProviders");
 const auto kDubbed = QStringLiteral("downloads/dubbed");
 const auto kConcurrent = QStringLiteral("downloads/concurrent");
 const auto kSystemPlayer = QStringLiteral("playback/systemPlayer");
@@ -181,10 +182,30 @@ void AppSettings::setJdownloaderDevice(const QString& id) {
     write(kJDownloaderDevice, id);
 }
 
+QStringList AppSettings::disabledProviders() const {
+    // 1Fichier limits free downloads hard: off until the user turns it on, as on the web.
+    return settings_
+        .value(kDisabledProviders, QStringList{api::providerKey(api::Provider::OneFichier)})
+        .toStringList();
+}
+
+void AppSettings::setDisabledProviders(const QStringList& keys) {
+    QStringList known;
+    for (const auto& key : keys) {
+        if (api::providerFromKey(key) && !known.contains(key))
+            known.append(key);
+    }
+    write(kDisabledProviders, known);
+}
+
 QList<api::Provider> AppSettings::providers() const {
+    auto order = providerOrder();
+    order << api::providerKey(api::Provider::Mp4Upload)
+          << api::providerKey(api::Provider::OneFichier);
+    const auto disabled = disabledProviders();
     QList<api::Provider> providers;
-    for (const auto& key : providerOrder()) {
-        if (const auto provider = api::providerFromKey(key)) {
+    for (const auto& key : order) {
+        if (const auto provider = api::providerFromKey(key); provider && !disabled.contains(key)) {
             providers.append(*provider);
         }
     }

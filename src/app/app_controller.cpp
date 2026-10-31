@@ -1,6 +1,7 @@
 #include "app_controller.h"
 
 #include "display.h"
+#include "platform/installed_apps.h"
 #include "platform/trash.h"
 #include "shell.h"
 
@@ -14,6 +15,7 @@
 #include <QJsonDocument>
 #include <QLocalSocket>
 #include <QMenu>
+#include <QProcess>
 
 #ifdef Q_OS_LINUX
 #include "notifications_linux.h"
@@ -120,9 +122,20 @@ AppController::AppController(AppPaths paths, QObject* parent)
     const auto credential = QStringLiteral("AnimeHub/MyJDownloader/") + instanceName(paths_.data);
     jdownloader_view_ = std::make_unique<JDownloaderView>(*settings_, *myjd_, credential);
     downloads_ = std::make_unique<downloads::DownloadManager>(
-        downloads::DownloadManager::Services{*api_, *aria2_, *mega_, *pixeldrain_,
-                                             *download_repository_, *library_repository_,
-                                             myjd_.get()},
+        downloads::DownloadManager::Services{
+            *api_, *aria2_, *mega_, *pixeldrain_, *download_repository_, *library_repository_,
+            myjd_.get(),
+            // JDownloader opens in the tray ("-minimize") only when a hand-over finds it closed.
+            [this] {
+                if (paths_.isolated)
+                    return false; // a test profile never starts the user's JDownloader
+                auto executable = settings_->jdExecutable();
+                if (!QFileInfo(executable).isFile())
+                    executable = platform::jdownloaderExecutable();
+                return !executable.isEmpty() &&
+                       QProcess::startDetached(executable, {QStringLiteral("-minimize")},
+                                               QFileInfo(executable).absolutePath());
+            }},
         [this] { return settings_->downloads(); });
     remote_service_ = std::make_unique<remote::RemoteService>(
         network_, api_options.baseUrl, paths_.data,
@@ -211,7 +224,7 @@ AppController::AppController(AppPaths paths, QObject* parent)
         const auto task = downloads_->task(id);
         notify(QStringLiteral("Descarga detenida"),
                task->animeTitle + QStringLiteral(" · ") + display::episode(task->number) +
-                   QStringLiteral(". ") + display::issue(task->issue),
+                   QStringLiteral(". ") + display::issue(*task),
                task->slug);
     });
 #ifdef Q_OS_LINUX

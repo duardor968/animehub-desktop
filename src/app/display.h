@@ -21,10 +21,17 @@ namespace animehub::app::display {
 [[nodiscard]] QString category(const QString& name);
 [[nodiscard]] QString provider(api::Provider provider);
 [[nodiscard]] QString issue(downloads::TaskIssue issue);
+// As above, naming the server a connection issue is about: "Se cortó la conexión con MEGA.".
+[[nodiscard]] QString issue(const downloads::Task& task);
 // Where a download is, worded the same in every view: "En pausa · 143 MB de 348 MB".
 [[nodiscard]] QString download(const downloads::Task& task);
 // When a waiting download tries again: "Se reintenta a las 11:40".
 [[nodiscard]] QString retry(const QDateTime& at);
+[[nodiscard]] QString time(const QDateTime& at); // "15:20"
+[[nodiscard]] QString date(const QDateTime& at); // "25 oct", "25 oct 2025" another year
+// MEGA's quota and what the episode does meanwhile: "MEGA llegó a su límite · se libera a las
+// 15:20 · sigue con Pixeldrain"; without MEGA's time, "MEGA llegó a su límite · sigue con…".
+[[nodiscard]] QString megaQuota(const QDateTime& until, bool known, const QString& meanwhile);
 
 } // namespace animehub::app::display
 
