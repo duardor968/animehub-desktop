@@ -2,6 +2,7 @@
 
 #include "platform/trash.h"
 
+#include <QDir>
 #include <QFileInfo>
 
 namespace animehub::library {
@@ -198,6 +199,17 @@ Stored<Trashed> LibraryService::trash(const QString& slug,
         if (error)
             break;
     }
+    // A work's folder its last file left goes too; anything still in it keeps it.
+    QSet<QString> folders;
+    for (const auto& file : std::as_const(trashed.files)) {
+        folders.insert(QFileInfo(file.path).absolutePath());
+    }
+    for (const auto& folder : std::as_const(folders)) {
+        if (QDir(folder).isEmpty(QDir::AllEntries | QDir::Hidden | QDir::System |
+                                 QDir::NoDotAndDotDot)) {
+            QDir().rmdir(folder);
+        }
+    }
     if (touched) {
         emit animeChanged(slug);
         emit listChanged();
@@ -217,6 +229,8 @@ Stored<int> LibraryService::restore(const QString& slug, const QList<TrashedFile
             continue;
         }
         if (!restored_paths.contains(file.path)) {
+            // Its folder may have gone with its last file.
+            QDir().mkpath(QFileInfo(file.path).absolutePath());
             if (!restore_from_trash_(file.trashPath, file.path))
                 continue;
             restored_paths.insert(file.path);
