@@ -8,12 +8,16 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 
+#include <array>
+
 namespace animehub::app {
 namespace {
 
 const auto kDownloadDirectory = QStringLiteral("downloads/directory");
 const auto kProviders = QStringLiteral("downloads/providers");
 const auto kDisabledProviders = QStringLiteral("downloads/disabledProviders");
+constexpr std::array kAllProviders{api::Provider::Mega, api::Provider::Pixeldrain,
+                                   api::Provider::Mp4Upload, api::Provider::OneFichier};
 const auto kDubbed = QStringLiteral("downloads/dubbed");
 const auto kConcurrent = QStringLiteral("downloads/concurrent");
 const auto kPlayer = QStringLiteral("playback/player");
@@ -219,13 +223,20 @@ void AppSettings::setDisabledProviders(const QStringList& keys) {
         if (api::providerFromKey(key) && !known.contains(key))
             known.append(key);
     }
+    // At least one server stays on.
+    if (known.size() >= kAllProviders.size()) {
+        return;
+    }
     write(kDisabledProviders, known);
 }
 
 QList<api::Provider> AppSettings::providers() const {
+    // The natives in the user's order, then the others.
     auto order = providerOrder();
-    order << api::providerKey(api::Provider::Mp4Upload)
-          << api::providerKey(api::Provider::OneFichier);
+    for (const auto provider : kAllProviders) {
+        if (!order.contains(api::providerKey(provider)))
+            order << api::providerKey(provider);
+    }
     const auto disabled = disabledProviders();
     QList<api::Provider> providers;
     for (const auto& key : order) {

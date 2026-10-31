@@ -376,6 +376,55 @@ ModalDialog {
                         }
                     }
 
+                    // As the web's preferences: the servers episodes come from, one kept at least.
+                    SettingRow {
+                        id: providerRow
+                        label: "Proveedores"
+
+                        readonly property var off: dialog.settings.disabledProviders
+                        readonly property var choices: [
+                            { key: "MEGA", name: "MEGA" },
+                            { key: "PIXELDRAIN", name: "Pixeldrain" },
+                            { key: "MP4UPLOAD", name: "MP4Upload" },
+                            { key: "ONE_FICHIER", name: "1Fichier" }
+                        ]
+
+                        ColumnLayout {
+                            spacing: 8
+
+                            Repeater {
+                                model: providerRow.choices
+
+                                // The last one on cannot go off; a disabled switch gets no hover
+                                // of its own, so this says why.
+                                Item {
+                                    id: provider
+                                    required property var modelData
+                                    readonly property bool on: !providerRow.off.includes(modelData.key)
+                                    readonly property bool last:
+                                        on && providerRow.off.length === providerRow.choices.length - 1
+                                    Layout.alignment: Qt.AlignRight
+                                    implicitWidth: providerSwitch.implicitWidth
+                                    implicitHeight: providerSwitch.implicitHeight
+                                    HoverHandler { id: lastHover }
+                                    ToolTip.visible: provider.last && lastHover.hovered
+                                    ToolTip.text: "Al menos un proveedor"
+
+                                    Toggle {
+                                        id: providerSwitch
+                                        anchors.fill: parent
+                                        enabled: !provider.last
+                                        text: provider.modelData.name
+                                        checked: provider.on
+                                        onToggled: dialog.settings.disabledProviders = checked
+                                                   ? providerRow.off.filter(key => key !== provider.modelData.key)
+                                                   : providerRow.off.concat([provider.modelData.key])
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     SettingRow {
                         label: "Audio"
 

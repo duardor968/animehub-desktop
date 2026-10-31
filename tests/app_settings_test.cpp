@@ -55,6 +55,21 @@ private slots:
                  (QList<api::Provider>{api::Provider::Mega, api::Provider::Pixeldrain,
                                        api::Provider::Mp4Upload}));
     }
+
+    // The servers the user turns off are never asked for; the last one on stays on.
+    void turnedOffServersAreLeftOutAndOneStays() {
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        AppSettings settings(root.filePath(QStringLiteral("settings.ini")),
+                             root.filePath(QStringLiteral("Anime")));
+        QCOMPARE(settings.disabledProviders(), QStringList{QStringLiteral("ONE_FICHIER")});
+        settings.setDisabledProviders(
+            {QStringLiteral("MEGA"), QStringLiteral("MP4UPLOAD"), QStringLiteral("ONE_FICHIER")});
+        QCOMPARE(settings.providers(), QList<api::Provider>{api::Provider::Pixeldrain});
+        settings.setDisabledProviders({QStringLiteral("MEGA"), QStringLiteral("PIXELDRAIN"),
+                                       QStringLiteral("MP4UPLOAD"), QStringLiteral("ONE_FICHIER")});
+        QCOMPARE(settings.providers(), QList<api::Provider>{api::Provider::Pixeldrain});
+    }
 };
 
 QTEST_GUILESS_MAIN(AppSettingsTest)
