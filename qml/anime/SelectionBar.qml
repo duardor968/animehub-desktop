@@ -43,7 +43,7 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             icon.source: Theme.source(Theme.icon.cancel)
             display: AbstractButton.IconOnly
-            text: "Vaciar la selección (Esc)"
+            text: "Salir de la selección (Esc)"
             ToolTip.visible: hovered
             ToolTip.text: text
             onClicked: root.cleared()

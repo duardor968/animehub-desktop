@@ -3,8 +3,9 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// What the list shows, as posters: the same filter, grouping and order, to browse by sight.
-// GridView draws only the rows on view, so a long library costs nothing.
+// What the list shows, as posters: the same filter, grouping and order, to browse by sight, and
+// counted as the list's filter counts them. GridView draws only the rows on view, so a long
+// library costs nothing; for the keyboard it is one stop walked with the arrows.
 Item {
     id: root
 
@@ -13,6 +14,7 @@ Item {
     property string emptyText
 
     readonly property string title: library.archivedOnly ? "Archivo" : ({
+        [LibraryModel.ToWatch]: "Para ver",
         [LibraryModel.Watching]: "Viendo",
         [LibraryModel.Airing]: "En emisión",
         [LibraryModel.NotStarted]: "Sin empezar",
@@ -34,6 +36,9 @@ Item {
         clip: true
         ScrollBar.vertical: ScrollBar {}
         keyNavigationEnabled: true
+        activeFocusOnTab: true
+        // A card reached by keyboard brings itself into view.
+        highlightFollowsCurrentItem: false
         Accessible.name: root.title
 
         // The same posters as the shelves: their width, their gap, left of the scroll bar.
@@ -54,8 +59,9 @@ Item {
                 Accessible.role: Accessible.Heading
             }
 
+            // Works, as the filter counts them: a franchise counts its works.
             Label {
-                text: "(" + grid.count + ")"
+                text: "(" + root.library.shownCount + ")"
                 color: Theme.muted
                 font.pixelSize: Theme.subtitle
             }
@@ -69,19 +75,29 @@ Item {
             }
         }
 
-        delegate: Item {
+        // A scope, so the card inside takes the keyboard when the grid makes it current.
+        delegate: FocusScope {
             required property var modelData
+            required property int index
             width: grid.cellWidth
             height: grid.cellHeight
 
             PosterCard {
+                focus: true
+                // The grid is the keyboard's stop, not each card.
+                focusPolicy: Qt.ClickFocus
                 width: parent.width - Theme.posterGap
                 text: modelData.title
                 posterUrl: modelData.posterUrl
                 caption: modelData.caption
                 progress: modelData.progress
-                onClicked: modelData.groupId ? root.franchiseActivated(modelData.groupId)
-                                             : root.activated(modelData.slug)
+                onClicked: {
+                    grid.currentIndex = index
+                    if (modelData.groupId)
+                        root.franchiseActivated(modelData.groupId)
+                    else
+                        root.activated(modelData.slug)
+                }
             }
         }
     }

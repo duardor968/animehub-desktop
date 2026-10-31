@@ -61,6 +61,25 @@ Item {
         clip: true
         ScrollBar.vertical: ScrollBar {}
 
+        // Whatever the keyboard reaches comes into view, the agenda's last line too.
+        Connections {
+            target: root.Window.window
+            function onActiveFocusItemChanged() {
+                const item = root.Window.activeFocusItem
+                let inside = false
+                for (let parent = item; parent && !inside; parent = parent.parent)
+                    inside = parent === content
+                if (!inside || item.focusReason === Qt.MouseFocusReason)
+                    return
+                const top = item.mapToItem(content, 0, 0).y
+                if (top - 12 < page.contentY)
+                    page.contentY = Math.max(0, top - 12)
+                else if (top + item.height + 12 > page.contentY + page.height)
+                    page.contentY = Math.min(top + item.height + 12 - page.height,
+                                             Math.max(0, page.contentHeight - page.height))
+            }
+        }
+
         Column {
             id: content
             x: Theme.section
@@ -70,25 +89,13 @@ Item {
             spacing: Theme.section
 
             Shelf {
-                id: ready
                 width: parent.width
                 visible: root.library.readyCount > 0
                 title: "Para ver"
                 count: root.library.readyCount
                 model: root.library.readyShelf
-                lead: root.library.featured.slug ? featured : null
                 onActivated: slug => root.activated(slug)
                 onActed: (slug, episode, action) => root.act(slug, action)
-
-                Component {
-                    id: featured
-                    FeaturedCard {
-                        featured: root.library.featured
-                        imageHeight: Math.round(ready.cardWidth * 1.42)
-                        onOpen: slug => root.activated(slug)
-                        onAct: slug => root.app.continueWatching(slug)
-                    }
-                }
             }
 
             Shelf {

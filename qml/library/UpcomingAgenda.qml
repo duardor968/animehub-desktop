@@ -86,7 +86,11 @@ Column {
                         height: 68
                         leftPadding: 4
                         rightPadding: 4
+                        // Each one a stop for the keyboard, opened with Enter.
+                        focusPolicy: Qt.StrongFocus
                         onClicked: root.activated(modelData.slug)
+                        Keys.onReturnPressed: clicked()
+                        Keys.onEnterPressed: clicked()
                         Accessible.name: modelData.title + ", " + column.modelData.day + " "
                                          + modelData.caption
                         ToolTip.visible: hovered && name.truncated

@@ -23,10 +23,11 @@ Item {
         hasFile = row.hasFile
         first = row.first
         downloadState = row.downloadState
-        menu.show(anchor)
+        // Its right edge on the row's button, never against the window's.
+        menu.show(anchor, true)
     }
 
-    // "Continuar desde…" for one episode (or the film).
+    // "Indicar dónde te quedaste…" for one episode (or the film).
     function askPosition(number, label) {
         root.number = number
         root.label = label
@@ -36,8 +37,9 @@ Item {
     ActionMenu {
         id: menu
 
-        entries: [watchedEntry, throughEntry, positionEntry, fileSeparator, cancelEntry, revealEntry,
-                  trashEntry]
+        // What removes things, last and apart.
+        entries: [watchedEntry, throughEntry, positionEntry, fileSeparator, revealEntry,
+                  removalSeparator, cancelEntry, trashEntry]
 
         MenuEntry {
             id: watchedEntry
@@ -53,8 +55,7 @@ Item {
         }
         MenuEntry {
             id: positionEntry
-            text: "Continuar desde…"
-            glyph: Theme.icon.clock
+            text: "Indicar dónde te quedaste…"
             onTriggered: continueDialog.open()
         }
         MenuSeparator {
@@ -62,24 +63,25 @@ Item {
             property bool separator: true
         }
         MenuEntry {
-            id: cancelEntry
-            property bool wanted: root.downloadState !== ""
-            text: "Cancelar la descarga"
-            glyph: Theme.icon.cancel
-            onTriggered: root.view.cancelDownload(root.number, false)
-        }
-        MenuEntry {
             id: revealEntry
             property bool wanted: root.hasFile
             text: "Mostrar en la carpeta"
-            glyph: Theme.icon.folder
             onTriggered: root.view.showFile(root.number)
+        }
+        MenuSeparator {
+            id: removalSeparator
+            property bool separator: true
+        }
+        MenuEntry {
+            id: cancelEntry
+            property bool wanted: root.downloadState !== ""
+            text: "Cancelar la descarga"
+            onTriggered: root.view.cancelDownload(root.number, false)
         }
         MenuEntry {
             id: trashEntry
             property bool wanted: root.hasFile
             text: "Mover a la Papelera"
-            glyph: Theme.icon.trash
             onTriggered: root.view.trashFile(root.number)
         }
     }
@@ -87,7 +89,7 @@ Item {
     ModalDialog {
         id: continueDialog
         width: 360
-        title: "Continuar el " + root.label.toLowerCase() + " desde"
+        title: "¿Dónde te quedaste?"
 
         readonly property string problem: root.view.clockProblem(root.number, minute.text)
         readonly property bool valid: root.view.clockValid(root.number, minute.text)
@@ -115,12 +117,20 @@ Item {
             width: 312
             spacing: 8
 
+            // The episode ("Episodio 3") or the film's title, as it is written.
+            Label {
+                Layout.fillWidth: true
+                text: root.label + ", minuto"
+                color: Theme.ink
+                elide: Text.ElideRight
+            }
+
             TextField {
                 id: minute
                 Layout.fillWidth: true
                 placeholderText: "12:34"
                 inputMethodHints: Qt.ImhPreferNumbers
-                Accessible.name: "Minuto"
+                Accessible.name: root.label + ", minuto"
                 Accessible.description: continueDialog.problem
                 onAccepted: if (continueDialog.valid) continueDialog.accept()
             }

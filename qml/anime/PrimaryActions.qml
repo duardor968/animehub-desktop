@@ -2,10 +2,10 @@ import QtQuick
 import QtQuick.Controls
 import AnimeHub
 
-// The main button: what a press does with the episode to watch next ("Ver ep. 9", "Descargar
-// ep. 9", "Pausar · 45 %"…). Where that episode's download is goes in the bar's figures, and the
-// series' other downloads in its ⋯; only "Descargar ep. 9" offers more beside it. Fluent has no
-// SplitButton: as in WinUI, the action and its ▾ are two contiguous buttons.
+// The main button: what a press does ("Ver ep. 9", "Descargar todo (13)", "Pausar la descarga
+// (13)", "Pausar · 45 %"…). Where a download is goes in the bar's figures; only a download
+// ("Descargar ep. 9", "Descargar todo") offers more beside it. Fluent has no SplitButton: as in
+// WinUI, the action and its ▾ are two contiguous buttons.
 Row {
     id: root
 
@@ -27,12 +27,14 @@ Row {
     readonly property bool onlyNextMissing: view.missingCount === 1
                                             && (action === AnimeView.Download || action === AnimeView.Paused
                                                 || action === AnimeView.Failed)
-    // What else there is to download, for a series. Beside "Descargar ep. 9" as its ▾; in the
-    // page's ⋯ in any other state.
+    // What else there is to download, for a series. Beside a download as its ▾; in the page's ⋯
+    // in any other state.
     readonly property bool offersMore: !view.single && view.missingCount > 0 && !onlyNextMissing
-    readonly property bool offersSplit: action === AnimeView.Download && offersMore
+    readonly property bool offersSplit: (action === AnimeView.Download || action === AnimeView.DownloadAll)
+                                        && offersMore
 
-    visible: action !== AnimeView.None
+    // Waiting for the next airing is told by a figure, not by a button that cannot be pressed.
+    visible: action !== AnimeView.None && action !== AnimeView.Upcoming
     spacing: 1
 
     Button {
@@ -40,6 +42,8 @@ Row {
 
         readonly property bool transferring: root.action === AnimeView.Downloading
                                              || root.action === AnimeView.Paused
+                                             || root.action === AnimeView.PauseAll
+                                             || root.action === AnimeView.ResumeAll
 
         // Fluent keeps a disabled accent button blue: only a button that can be pressed is.
         highlighted: !root.selecting && enabled
@@ -53,6 +57,9 @@ Row {
             [AnimeView.Play]: Theme.icon.play,
             [AnimeView.Rewatch]: Theme.icon.play,
             [AnimeView.Download]: Theme.icon.download,
+            [AnimeView.DownloadAll]: Theme.icon.download,
+            [AnimeView.PauseAll]: Theme.icon.pause,
+            [AnimeView.ResumeAll]: Theme.icon.download,
             [AnimeView.Queued]: Theme.icon.pause,
             [AnimeView.Downloading]: Theme.icon.pause,
             // Play is for watching: resuming a download keeps the download glyph.
@@ -106,7 +113,9 @@ Row {
 
         MenuEntry {
             id: missingEntry
-            text: "Lo que falta · " + root.view.missingText
+            // "Descargar todo" already is this.
+            property bool wanted: root.action !== AnimeView.DownloadAll
+            text: "Todos los que faltan (" + root.view.missingCount + ")"
             onTriggered: root.view.downloadMissing()
         }
         MenuEntry {
@@ -114,18 +123,18 @@ Row {
             // Only when it is not all that is missing.
             property bool wanted: root.view.unwatchedMissingCount > 0
                                   && root.view.unwatchedMissingCount < root.view.missingCount
-            text: "Sin ver · " + root.view.unwatchedMissingText
+            text: "Los no vistos (" + root.view.unwatchedMissingCount + ")"
             onTriggered: root.view.downloadUnwatched()
         }
         MenuEntry {
             id: rangeEntry
-            text: "Un tramo…"
+            text: "Elegir un rango…"
             onTriggered: root.chooseRange()
         }
         MenuEntry {
             id: chooseEntry
             property bool wanted: !root.selecting
-            text: "Elegir episodios"
+            text: "Elegir episodios…"
             onTriggered: root.chooseEpisodes()
         }
     }

@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// "Un tramo…": the episodes from one number to another, specials in between included. It
+// "Elegir un rango…": the episodes from one number to another, specials in between included. It
 // already shows how many and where, so it is the only question asked.
 ModalDialog {
     id: dialog
@@ -13,7 +13,7 @@ ModalDialog {
     readonly property int count: view.missingBetween(start.value, end.value)
 
     width: 420
-    title: "Descargar un tramo"
+    title: "Descargar un rango"
 
     onAboutToShow: {
         start.from = Math.floor(view.firstNumber)
@@ -71,9 +71,18 @@ ModalDialog {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             color: Theme.muted
-            text: dialog.count === 0 ? "Ya está todo en disco o en la cola."
-                  : (dialog.count === 1 ? "1 episodio" : dialog.count + " episodios")
-                    + " · Se guardarán en " + dialog.view.downloadFolder + "."
+            text: dialog.count === 0 ? "Ya está todo en disco o en la cola"
+                  : (dialog.count === 1 ? "1 episodio, en:" : dialog.count + " episodios, en:")
+        }
+
+        // The folder on a line of its own: a path breaks anywhere, never leaving "C:" alone.
+        Label {
+            Layout.fillWidth: true
+            Layout.topMargin: -12
+            visible: dialog.count > 0
+            wrapMode: Text.WrapAnywhere
+            color: Theme.ink
+            text: dialog.view.downloadFolder
         }
     }
 

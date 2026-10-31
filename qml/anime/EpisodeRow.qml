@@ -31,8 +31,8 @@ ItemDelegate {
 
     readonly property bool watched: watchState === 2
     readonly property bool transferring: downloadState !== "" && downloadState !== "failed"
-    // "Visto · En disco", "8:12 de 24:00 · En disco", "Sin descargar"; while it downloads, the
-    // download's column says where it is.
+    // "Visto · En disco", "8:12 de 24:00 · En disco"; nothing for an episode with nothing to it
+    // yet. While it downloads, the download's column says where it is.
     readonly property string status: {
         const parts = []
         if (watched)
@@ -41,8 +41,6 @@ ItemDelegate {
             parts.push(progressText)
         if (hasFile)
             parts.push("En disco")
-        else if (downloadState === "")
-            parts.push("Sin descargar")
         return parts.join(" · ")
     }
 
@@ -240,66 +238,74 @@ ItemDelegate {
             Layout.preferredWidth: 4
         }
 
-        ToolButton {
-            visible: row.hasFile
-            icon.source: Theme.source(Theme.icon.play)
-            display: AbstractButton.IconOnly
-            text: "Ver " + row.label.toLowerCase()
-            ToolTip.visible: hovered
-            ToolTip.text: "Ver"
-            onClicked: row.view.play(row.number)
-        }
+        // While choosing, a press on the row chooses: its own actions step aside, keeping their
+        // place so nothing moves.
+        RowLayout {
+            spacing: 16
+            opacity: row.selecting ? 0 : 1
+            enabled: !row.selecting
 
-        ToolButton {
-            visible: !row.hasFile && row.downloadState === ""
-            icon.source: Theme.source(Theme.icon.download)
-            display: AbstractButton.IconOnly
-            text: "Descargar " + row.label.toLowerCase()
-            ToolTip.visible: hovered
-            ToolTip.text: "Descargar"
-            onClicked: row.view.download(row.number)
-        }
+            ToolButton {
+                visible: row.hasFile
+                icon.source: Theme.source(Theme.icon.play)
+                display: AbstractButton.IconOnly
+                text: "Ver " + row.label.toLowerCase()
+                ToolTip.visible: hovered
+                ToolTip.text: "Ver"
+                onClicked: row.view.play(row.number)
+            }
 
-        ToolButton {
-            visible: row.downloadState === "downloading" || row.downloadState === "queued"
-                     || row.downloadState === "waiting" || row.downloadState === "resolving"
-            icon.source: Theme.source(Theme.icon.pause)
-            display: AbstractButton.IconOnly
-            text: "Pausar la descarga"
-            ToolTip.visible: hovered
-            ToolTip.text: "Pausar"
-            onClicked: row.view.pauseDownload(row.number)
-        }
+            ToolButton {
+                visible: !row.hasFile && row.downloadState === ""
+                icon.source: Theme.source(Theme.icon.download)
+                display: AbstractButton.IconOnly
+                text: "Descargar " + row.label.toLowerCase()
+                ToolTip.visible: hovered
+                ToolTip.text: "Descargar"
+                onClicked: row.view.download(row.number)
+            }
 
-        ToolButton {
-            visible: row.downloadState === "paused"
-            // Play is for watching: resuming a download keeps the download glyph.
-            icon.source: Theme.source(Theme.icon.download)
-            display: AbstractButton.IconOnly
-            text: "Reanudar la descarga"
-            ToolTip.visible: hovered
-            ToolTip.text: "Reanudar"
-            onClicked: row.view.resumeDownload(row.number)
-        }
+            ToolButton {
+                visible: row.downloadState === "downloading" || row.downloadState === "queued"
+                         || row.downloadState === "waiting" || row.downloadState === "resolving"
+                icon.source: Theme.source(Theme.icon.pause)
+                display: AbstractButton.IconOnly
+                text: "Pausar la descarga"
+                ToolTip.visible: hovered
+                ToolTip.text: "Pausar"
+                onClicked: row.view.pauseDownload(row.number)
+            }
 
-        ToolButton {
-            visible: row.downloadState === "failed"
-            icon.source: Theme.source(Theme.icon.retry)
-            display: AbstractButton.IconOnly
-            text: "Reintentar la descarga"
-            ToolTip.visible: hovered
-            ToolTip.text: "Reintentar"
-            onClicked: row.view.retryDownload(row.number)
-        }
+            ToolButton {
+                visible: row.downloadState === "paused"
+                // Play is for watching: resuming a download keeps the download glyph.
+                icon.source: Theme.source(Theme.icon.download)
+                display: AbstractButton.IconOnly
+                text: "Reanudar la descarga"
+                ToolTip.visible: hovered
+                ToolTip.text: "Reanudar"
+                onClicked: row.view.resumeDownload(row.number)
+            }
 
-        ToolButton {
-            id: more
-            icon.source: Theme.source(Theme.icon.more)
-            display: AbstractButton.IconOnly
-            text: "Opciones de " + row.label.toLowerCase()
-            ToolTip.visible: hovered
-            ToolTip.text: "Más opciones"
-            onClicked: row.menu.show(row, more)
+            ToolButton {
+                visible: row.downloadState === "failed"
+                icon.source: Theme.source(Theme.icon.retry)
+                display: AbstractButton.IconOnly
+                text: "Reintentar la descarga"
+                ToolTip.visible: hovered
+                ToolTip.text: "Reintentar"
+                onClicked: row.view.retryDownload(row.number)
+            }
+
+            ToolButton {
+                id: more
+                icon.source: Theme.source(Theme.icon.more)
+                display: AbstractButton.IconOnly
+                text: "Opciones de " + row.label.toLowerCase()
+                ToolTip.visible: hovered
+                ToolTip.text: "Más opciones"
+                onClicked: row.menu.show(row, more)
+            }
         }
     }
 }

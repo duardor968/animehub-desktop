@@ -2,14 +2,17 @@ import QtQuick
 import QtQuick.Controls
 import AnimeHub
 
-// An anime as a poster with its title on two lines and one line under it; a title cut even so
-// shows whole in a tooltip. Hovered, the poster offers what the card is for: play the episode
-// or download it.
+// An anime as a poster with its title on up to two lines and one line under it; a title cut
+// even so shows whole in a tooltip. Hovered, the poster offers what the card is for: play the
+// episode or download it. Enter opens it, as a click does; a card reached by keyboard comes into
+// view in the page that scrolls it.
 AbstractButton {
     id: root
 
     property url posterUrl
     property string caption
+    // A second line under the caption ("Siguiente: Ep. 5"), for a page that needs one.
+    property string detail
     property real progress: -1
     property bool fresh: false
     // In the library: a check on the poster's corner, as Steam marks what one owns.
@@ -20,11 +23,34 @@ AbstractButton {
     // The poster's own button was pressed, not the card.
     signal act()
 
+    // The page around it scrolls it fully into view (a horizontal row pages by itself).
+    function reveal() {
+        for (let item = parent; item; item = item.parent) {
+            if (item.contentY === undefined || item.contentHeight <= item.height)
+                continue
+            const top = mapToItem(item.contentItem, 0, 0).y
+            const margin = 12
+            let target = item.contentY
+            if (top - margin < item.contentY)
+                target = top - margin
+            else if (top + height + margin > item.contentY + item.height)
+                target = top + height + margin - item.height
+            item.contentY = Math.max(item.originY,
+                                     Math.min(target, item.originY + item.contentHeight - item.height))
+            return
+        }
+    }
+
+    // Two lines of title and the caption, so cards of a row share one height.
     implicitWidth: 156
     implicitHeight: poster.height + titleLabel.height + captionLabel.height + 14
+                    + (detail !== "" ? detailLabel.height + 2 : 0)
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
-    Accessible.name: (caption ? text + ", " + caption : text) + (owned ? ", en la biblioteca" : "")
+    Accessible.name: (caption ? text + ", " + caption : text) + (owned ? ", en tu biblioteca" : "")
+    Keys.onReturnPressed: clicked()
+    Keys.onEnterPressed: clicked()
+    onActiveFocusChanged: if (activeFocus && focusReason !== Qt.MouseFocusReason) reveal()
 
     background: null
     ToolTip.visible: hovered && titleLabel.truncated
@@ -73,7 +99,7 @@ AbstractButton {
                 border.width: 1.5
                 border.color: Qt.rgba(1, 1, 1, 0.75)
                 ToolTip.visible: ownedHover.hovered
-                ToolTip.text: "En la biblioteca"
+                ToolTip.text: "En tu biblioteca"
 
                 HoverHandler { id: ownedHover }
 
@@ -96,7 +122,8 @@ AbstractButton {
                 icon.source: Theme.source(root.quickAction === "play" ? Theme.icon.play : Theme.icon.download)
                 focusPolicy: Qt.NoFocus
                 onClicked: root.act()
-                Accessible.name: text + ", " + root.text
+                // Not a button inside the card's for a reader: the card's page has the same action.
+                Accessible.ignored: true
                 ToolTip.visible: hovered
                 ToolTip.text: text
             }
@@ -110,13 +137,15 @@ AbstractButton {
                 radius: 0
             }
 
-            Rectangle {
-                anchors.fill: parent
-                color: "transparent"
-                border.color: Theme.accent
-                border.width: 2
-                visible: root.visualFocus
-            }
+        }
+
+        // The keyboard's frame, as every control's: around the poster, which is the card's shape.
+        // Also when the arrows of a row or a grid bring the keyboard here, which Qt does not
+        // count as visual focus.
+        FocusFrame {
+            target: poster
+            radiusInside: 0
+            visible: root.activeFocus && root.focusReason !== Qt.MouseFocusReason
         }
 
         Label {
@@ -141,12 +170,23 @@ AbstractButton {
             }
         }
 
+        // Right under the title, one line or two.
         Label {
             id: captionLabel
-            anchors.top: titleLabel.bottom
-            anchors.topMargin: 2
+            y: titleLabel.y + titleLabel.contentHeight + 4
             width: parent.width
             text: root.caption
+            color: Theme.muted
+            font.pixelSize: Theme.caption
+            elide: Text.ElideRight
+        }
+
+        Label {
+            id: detailLabel
+            y: captionLabel.y + captionLabel.height + 2
+            width: parent.width
+            visible: root.detail !== ""
+            text: root.detail
             color: Theme.muted
             font.pixelSize: Theme.caption
             elide: Text.ElideRight

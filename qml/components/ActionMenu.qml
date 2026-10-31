@@ -11,6 +11,9 @@ Menu {
     // Every entry, in order.
     property list<QtObject> entries
 
+    // Never against the window's edges.
+    margins: 12
+
     // Opens under `anchor`, left edges aligned, or right edges with `alignRight`.
     function show(anchor, alignRight) {
         if (entries.length > 0)

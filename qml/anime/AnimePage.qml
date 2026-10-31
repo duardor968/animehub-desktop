@@ -10,25 +10,35 @@ Item {
     id: page
 
     required property AnimeView view
+    // Where the page was opened from, for the breadcrumb over the title: [{text, go}].
+    property var steps: []
 
-    // Esc leaves the page; the window's ← and → go anywhere it has been.
+    // Esc goes back as the window's ← does; ← and → go anywhere it has been.
     signal back()
 
     // "Elegir episodios": every row shows its check box until the selection is used or emptied.
     property bool choosing: false
     readonly property bool selecting: choosing || view.episodes.selectedCount > 0
     // One column from the left margin for everything under the header's art, so all of it ends
-    // at one right edge; it stops at a width where the rows' buttons stay near their text.
-    readonly property real contentWidth: Math.min(list.width - 2 * Theme.section, 1100)
+    // at one right edge, as on a franchise's page.
+    readonly property real contentWidth: list.width - 2 * Theme.section
+
+    function focusTitle(reason) {
+        if (list.headerItem)
+            list.headerItem.focusTitle(reason)
+    }
 
     function clearSelection() {
         view.episodes.clearSelection()
         choosing = false
     }
 
+    // The list stays where it is when its head is already on view.
     function chooseEpisodes() {
         choosing = true
-        scrollToEpisodes(true)
+        const header = list.headerItem
+        if (header && header.y + header.episodesY - list.contentY < actionBar.height)
+            scrollToEpisodes(true)
     }
 
     // The head of the episode list at the top of the view, under the bar.
@@ -134,10 +144,17 @@ Item {
             readonly property real barY: barSlot.y
             readonly property real episodesY: episodesBar.y
 
+            function focusTitle(reason) { animeHeader.focusTitle(reason) }
+
             width: list.width
 
+            readonly property Item titleItem: animeHeader.titleItem
+
             AnimeHeader {
+                id: animeHeader
                 width: parent.width
+                steps: page.steps
+                bar: actionBar
                 contentWidth: page.contentWidth
                 title: page.view.title
                 subtitle: page.view.alternativeTitle
@@ -193,7 +210,9 @@ Item {
                     readonly property var paragraphs: page.view.synopsis.split(/\n\s*\n/)
                     // Each anime opens collapsed.
                     onParagraphsChanged: expanded = false
+                    // A line short enough to read, however wide the page.
                     Layout.fillWidth: true
+                    Layout.maximumWidth: 900
                     visible: text !== ""
                     text: expanded ? page.view.synopsis : paragraphs[0]
                     color: Theme.ink
@@ -308,6 +327,7 @@ Item {
         visible: list.headerItem !== null
         contentWidth: page.contentWidth
         title: page.view.title
+        titleItem: list.headerItem ? list.headerItem.titleItem : null
         posterUrl: page.view.posterUrl
         figures: page.view.figures
 
@@ -370,37 +390,20 @@ Item {
         ]
     }
 
+    // What the bar's buttons do not do, by kind: watching, downloading, the rest, and what removes
+    // things, last and apart.
     ActionMenu {
         id: moreMenu
 
         // Checked when the menu opens: the folder appears with the first download.
         property bool folderExists: false
 
-        entries: [autoEntry, airingSeparator, watchedEntry, unwatchedEntry, positionEntry,
-                  downloadsSeparator, missingEntry, unwatchedMissingEntry, rangeEntry, chooseEntry,
-                  pauseEntry, resumeEntry, retryEntry, cancelEntry,
-                  filesSeparator, trashWatchedEntry, trashFilmEntry, folderEntry, trailerEntry,
-                  librarySeparator, removeEntry]
+        entries: [watchedEntry, unwatchedEntry, positionEntry,
+                  downloadsSeparator, autoEntry, missingEntry, unwatchedMissingEntry, rangeEntry,
+                  chooseEntry, pauseEntry, resumeEntry, retryEntry,
+                  otherSeparator, trailerEntry, folderEntry,
+                  removalSeparator, cancelEntry, trashWatchedEntry, trashFilmEntry, removeEntry]
 
-        MenuEntry {
-            id: autoEntry
-            property bool wanted: page.view.airing
-            text: "Descargar episodios nuevos"
-            checkable: true
-            checked: page.view.autoDownload
-            onTriggered: {
-                if (checked) {
-                    checked = false // the user confirms first
-                    autoDownloadDialog.open()
-                } else {
-                    page.view.setAutoDownload(false)
-                }
-            }
-        }
-        MenuSeparator {
-            id: airingSeparator
-            property bool separator: true
-        }
         MenuEntry {
             id: watchedEntry
             property bool wanted: page.view.watchedProgress < 1
@@ -416,21 +419,33 @@ Item {
         MenuEntry {
             id: positionEntry
             property bool wanted: page.view.single
-            text: "Continuar desde…"
-            glyph: Theme.icon.clock
+            text: "Indicar dónde te quedaste…"
             onTriggered: episodeMenu.askPosition(page.view.firstNumber, page.view.title)
         }
         MenuSeparator {
             id: downloadsSeparator
             property bool separator: true
         }
+        // Says what a press does. Only for anime in the library, the ones watched for new
+        // episodes.
+        MenuEntry {
+            id: autoEntry
+            property bool wanted: page.view.airing && page.view.inLibrary
+            text: page.view.autoDownload ? "Dejar de descargar los episodios nuevos"
+                                         : "Descargar los episodios nuevos al salir…"
+            onTriggered: {
+                if (page.view.autoDownload)
+                    page.view.setAutoDownload(false)
+                else
+                    autoDownloadDialog.open() // the user confirms first
+            }
+        }
         // What else to download, while the main button does something other than downloading
         // (then its ▾ offers these).
         MenuEntry {
             id: missingEntry
             property bool wanted: primaryActions.offersMore && !primaryActions.offersSplit
-            text: "Descargar lo que falta · " + page.view.missingText
-            glyph: Theme.icon.download
+            text: "Descargar todos los que faltan (" + page.view.missingCount + ")"
             onTriggered: page.view.downloadMissing()
         }
         MenuEntry {
@@ -438,34 +453,34 @@ Item {
             // Only when it is not all that is missing.
             property bool wanted: missingEntry.wanted && page.view.unwatchedMissingCount > 0
                                   && page.view.unwatchedMissingCount < page.view.missingCount
-            text: "Descargar los no vistos · " + page.view.unwatchedMissingText
+            text: "Descargar los no vistos (" + page.view.unwatchedMissingCount + ")"
             onTriggered: page.view.downloadUnwatched()
         }
         MenuEntry {
             id: rangeEntry
             property bool wanted: missingEntry.wanted
-            text: "Descargar un tramo…"
+            text: "Descargar un rango…"
             onTriggered: rangeDialog.open()
         }
         MenuEntry {
             id: chooseEntry
             property bool wanted: missingEntry.wanted && !page.selecting
-            text: "Elegir episodios"
+            text: "Elegir episodios para descargar…"
             onTriggered: page.chooseEpisodes()
         }
-        // The series' downloads; the main button handles only the next episode's.
+        // The series' downloads, when the main button does not already pause or resume them.
         MenuEntry {
             id: pauseEntry
             property bool wanted: !page.view.single && page.view.downloadRunning
+                                  && page.view.primaryAction !== AnimeView.PauseAll
             text: "Pausar las descargas"
-            glyph: Theme.icon.pause
             onTriggered: page.view.pauseSeries()
         }
         MenuEntry {
             id: resumeEntry
             property bool wanted: !page.view.single && page.view.downloadPaused
+                                  && page.view.primaryAction !== AnimeView.ResumeAll
             text: "Reanudar las descargas"
-            glyph: Theme.icon.download
             onTriggered: page.view.resumeSeries()
         }
         MenuEntry {
@@ -474,58 +489,50 @@ Item {
             property bool wanted: !page.view.single && page.view.failedCount
                                   > (page.view.primaryAction === AnimeView.Failed ? 1 : 0)
             text: "Reintentar las fallidas"
-            glyph: Theme.icon.retry
             onTriggered: page.view.retryFailed()
+        }
+        MenuSeparator {
+            id: otherSeparator
+            property bool separator: true
+        }
+        MenuEntry {
+            id: trailerEntry
+            property bool wanted: page.view.trailerUrl.toString() !== ""
+            text: "Ver el tráiler"
+            onTriggered: page.view.openTrailer()
+        }
+        MenuEntry {
+            id: folderEntry
+            property bool wanted: moreMenu.folderExists
+            text: "Abrir la carpeta"
+            onTriggered: page.view.openFolder()
+        }
+        MenuSeparator {
+            id: removalSeparator
+            property bool separator: true
         }
         MenuEntry {
             id: cancelEntry
             property bool wanted: page.view.hasDownloads
             text: page.view.single ? "Cancelar la descarga" : "Cancelar las descargas"
-            glyph: Theme.icon.cancel
             onTriggered: page.view.cancelSeries(false)
-        }
-        MenuSeparator {
-            id: filesSeparator
-            property bool separator: true
         }
         MenuEntry {
             id: trashWatchedEntry
             property bool wanted: page.view.watchedOnDisk && !page.view.single
             text: "Mover los vistos a la Papelera"
-            glyph: Theme.icon.trash
             onTriggered: page.view.trashWatched()
         }
         MenuEntry {
             id: trashFilmEntry
             property bool wanted: page.view.single && page.view.onDiskCount > 0
             text: "Mover a la Papelera"
-            glyph: Theme.icon.trash
             onTriggered: page.view.trashFile(page.view.firstNumber)
-        }
-        MenuEntry {
-            id: folderEntry
-            property bool wanted: moreMenu.folderExists
-            text: "Abrir la carpeta"
-            glyph: Theme.icon.folder
-            onTriggered: page.view.openFolder()
-        }
-        MenuEntry {
-            id: trailerEntry
-            property bool wanted: page.view.trailerUrl.toString() !== ""
-            text: "Ver el tráiler"
-            // Segoe's "open in a new window": it plays in the browser.
-            glyph: "e8a7"
-            onTriggered: page.view.openTrailer()
-        }
-        MenuSeparator {
-            id: librarySeparator
-            property bool separator: true
         }
         MenuEntry {
             id: removeEntry
             property bool wanted: page.view.inLibrary
             text: "Quitar de la biblioteca…"
-            glyph: Theme.icon.remove
             onTriggered: removalDialog.show([page.view.slug], page.view.title, false)
         }
     }
@@ -547,7 +554,7 @@ Item {
             color: Theme.ink
             text: "Cuando salga un episodio nuevo de " + page.view.title
                   + ", AnimeHub lo descargará en " + page.view.downloadFolder
-                  + ". Puedes desactivarlo en este mismo menú."
+                  + ". Puedes dejar de hacerlo en este mismo menú."
         }
 
         footer: DialogButtonBox {

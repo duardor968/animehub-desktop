@@ -10,6 +10,12 @@ SearchField {
     property string placeholderText
 
     Accessible.name: placeholderText
+    // The text field inside is what takes the keyboard: it carries the name a reader announces.
+    Binding {
+        target: root.contentItem.Accessible
+        property: "name"
+        value: root.placeholderText
+    }
 
     Label {
         x: root.contentItem.x + root.contentItem.leftPadding

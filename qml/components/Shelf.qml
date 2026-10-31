@@ -4,9 +4,9 @@ import QtQuick.Layouts
 import AnimeHub
 
 // A titled row of whole posters; the arrows page through the rest. Items declared inside it
-// (a button acting on the whole row) go beside the title. A `lead` card may open the row, two
-// posters wide, as Steam's recent games do with the last one played.
-Column {
+// (a button acting on the whole row) go beside the title. For the keyboard the row is one stop:
+// ← and → walk its posters and page with them, Enter opens one.
+Item {
     id: root
 
     property alias model: list.model
@@ -14,18 +14,14 @@ Column {
     // Shown after the title, muted; below 0, nothing.
     property int count: -1
     default property alias actions: actionsRow.data
-    property Component lead
-    readonly property bool hasLead: lead !== null
 
     signal activated(string slug, real episode)
     // A poster's own button: play the episode or download what it lists.
     signal acted(string slug, real episode, string action)
 
     readonly property int gap: Theme.posterGap
-    // Columns as if every card were a poster; the lead takes two of them.
-    readonly property int allColumns: Theme.posterColumns(width)
-    readonly property real cardWidth: (width - (allColumns - 1) * gap) / allColumns
-    readonly property int columns: Math.max(1, allColumns - (hasLead ? 2 : 0))
+    readonly property int columns: Theme.posterColumns(width)
+    readonly property real cardWidth: (width - (columns - 1) * gap) / columns
     // The first whole poster on view; kept across resizes so the row never stops mid-poster.
     property int first: 0
     property bool paging: false
@@ -40,10 +36,12 @@ Column {
 
     onCardWidthChanged: show(first, false)
 
-    spacing: 12
-    visible: list.count > 0 || hasLead
+    // The posters 12 px under the title; the frame's margin around them takes no room.
+    implicitHeight: heading.height + 12 + list.height
+    visible: list.count > 0
 
     RowLayout {
+        id: heading
         width: root.width
         spacing: 8
 
@@ -101,33 +99,49 @@ Column {
         }
     }
 
-    Row {
-        spacing: root.gap
-
-        Loader {
-            id: leadLoader
-            active: root.hasLead
-            visible: active
-            width: 2 * root.cardWidth + root.gap
-            height: list.height
-            sourceComponent: root.lead
-        }
+    // Clips the posters of other pages, a little outside the row: the keyboard's frame stays whole
+    // and the gap keeps the neighbours out.
+    Item {
+        x: -4
+        y: heading.height + 12 - 4
+        width: Math.max(0, root.width) + 8
+        height: list.height + 8
+        clip: true
 
         ListView {
             id: list
-            width: root.width - (root.hasLead ? leadLoader.width + root.gap : 0)
-            // Fixed so the row exists before its delegates.
-            height: Theme.posterCardHeight(root.cardWidth)
+            x: 4
+            y: 4
+            width: Math.max(0, root.width)
+            // Fixed so the row exists before its delegates; nothing while the row has no width.
+            height: root.cardWidth > 0 ? Theme.posterCardHeight(root.cardWidth) : 0
             orientation: ListView.Horizontal
             spacing: root.gap
-            clip: true
             interactive: false
             highlightRangeMode: ListView.NoHighlightRange
+            // The row pages itself; it never stops between two posters.
+            highlightFollowsCurrentItem: false
             keyNavigationEnabled: true
+            activeFocusOnTab: true
             Accessible.name: root.title
             Behavior on contentX {
                 enabled: root.paging
                 NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+            }
+
+            // The poster with the keyboard stays on view: the row pages to it.
+            onCurrentIndexChanged: {
+                if (currentIndex < 0)
+                    return
+                if (currentIndex < root.first)
+                    root.show(currentIndex, true)
+                else if (currentIndex >= root.first + root.columns)
+                    root.show(currentIndex - root.columns + 1, true)
+            }
+            // A row reached by keyboard starts at the first poster on view.
+            onActiveFocusChanged: {
+                if (activeFocus && (currentIndex < root.first || currentIndex >= root.first + root.columns))
+                    currentIndex = root.first
             }
 
             // New posters start the row again.
@@ -138,6 +152,7 @@ Column {
 
             delegate: PosterCard {
                 required property var model
+                required property int index
 
                 width: root.cardWidth
                 text: model.title
@@ -147,7 +162,12 @@ Column {
                 fresh: model.fresh
                 quickAction: model.action ?? ""
                 owned: model.owned ?? false
-                onClicked: root.activated(model.slug, model.episode)
+                // The row is the keyboard's stop, not each poster.
+                focusPolicy: Qt.ClickFocus
+                onClicked: {
+                    list.currentIndex = index
+                    root.activated(model.slug, model.episode)
+                }
                 onAct: root.acted(model.slug, model.episode, model.action)
             }
 
