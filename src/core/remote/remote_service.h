@@ -68,7 +68,9 @@ public:
     void start(); // only loads an existing device; never registers without user action
     void registerDevice(const QString& name);
     void generatePairingCode();
-    void refreshLinks();
+    // `quiet`, as a page watching the list does: no busy state, no error, and a change only
+    // when the list is another.
+    void refreshLinks(bool quiet = false);
     void revokeLink(const QString& id);
     void poll();
     [[nodiscard]] bool registered() const {
@@ -98,7 +100,7 @@ signals:
 private:
     using Response = std::function<void(int, const QJsonObject&)>;
     void request(const QByteArray& method, const QString& path, const QJsonObject& body,
-                 Response done);
+                 Response done, bool quiet = false);
     void publish(std::function<void(bool)> done);
     void process(const QJsonObject& request);
     void reconcile(const QString& id);

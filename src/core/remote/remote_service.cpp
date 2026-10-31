@@ -174,7 +174,7 @@ bool RemoteService::saveJournal() {
     return true;
 }
 void RemoteService::request(const QByteArray& method, const QString& path, const QJsonObject& body,
-                            Response done) {
+                            Response done, bool quiet) {
     QNetworkRequest request(base_.resolved(QUrl(path)));
     request.setTransferTimeout(15000);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
@@ -183,8 +183,10 @@ void RemoteService::request(const QByteArray& method, const QString& path, const
         request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     if (!credentials_.token.isEmpty())
         request.setRawHeader("Authorization", "Bearer " + credentials_.token);
-    ++operations_;
-    emit changed();
+    if (!quiet) {
+        ++operations_;
+        emit changed();
+    }
     // This endpoint has no body. Qt's custom DELETE advertises the supplied JSON length
     // without transmitting it, leaving the server waiting for an incomplete request.
     auto* reply = method == "DELETE"
@@ -193,10 +195,14 @@ void RemoteService::request(const QByteArray& method, const QString& path, const
                             request, method,
                             method == "GET" ? QByteArray{}
                                             : QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, done = std::move(done)] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, quiet, done = std::move(done)] {
         const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto payload = QJsonDocument::fromJson(reply->readAll()).object();
         reply->deleteLater();
+        if (quiet) {
+            done(status, payload);
+            return;
+        }
         --operations_;
         if (status < 200 || status >= 300)
             fail(QStringLiteral("No se pudo contactar con AnimeHub. Vuelve a intentarlo."));
@@ -289,14 +295,19 @@ void RemoteService::generatePairingCode() {
 QJsonArray RemoteService::links() const {
     return links_.value(QStringLiteral("links")).toArray();
 }
-void RemoteService::refreshLinks() {
+void RemoteService::refreshLinks(bool quiet) {
     if (!registered())
         return;
-    request("GET", QStringLiteral("devices/me/links"), {},
-            [this](int status, const QJsonObject& body) {
-                if (status >= 200 && status < 300)
-                    links_ = body;
-            });
+    request(
+        "GET", QStringLiteral("devices/me/links"), {},
+        [this, quiet](int status, const QJsonObject& body) {
+            if (status < 200 || status >= 300 || body == links_)
+                return;
+            links_ = body;
+            if (quiet)
+                emit changed();
+        },
+        quiet);
 }
 void RemoteService::revokeLink(const QString& id) {
     if (!registered() || busy() || id.isEmpty())
