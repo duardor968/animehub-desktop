@@ -287,7 +287,7 @@ void DownloadsView::rebuild() {
     QList<DownloadSeriesRow> queue;
     QList<DownloadSeriesRow> completed;
     QSet<QString> line_slugs;        // series with something still in line
-    QHash<QString, QString> amounts; // "3 de 12 descargados", for the header
+    QHash<QString, QString> amounts; // "3 de 12 descargados · 1,1 GB de 4,2 GB", for the header
     for (auto& group : groups) {
         std::ranges::sort(group.tasks, {}, &Task::number);
         const auto& series = info(group.slug);
@@ -432,7 +432,8 @@ void DownloadsView::rebuild() {
             summary.append(display::date(finished_at));
         }
         row.summary = summary.join(QStringLiteral(" · "));
-        amounts.insert(group.slug, QStringLiteral("%1 de %2 descargados").arg(done).arg(episodes));
+        amounts.insert(group.slug, QStringLiteral("%1 de %2 descargados").arg(done).arg(episodes) +
+                                       (size.isEmpty() ? QString() : QStringLiteral(" · ") + size));
         row.progress = episodes > 0 ? fraction / static_cast<double>(episodes) : 0.0;
         row.failed = failed;
         row.failedText = failed > 0 ? QStringLiteral("%1 con error").arg(failed) : QString();
@@ -521,20 +522,23 @@ void DownloadsView::rebuild() {
     Bar bar;
     const auto* subject = shown ? shown : next ? next : held ? held : broken;
     if (subject) {
-        header = {.mode = shown  ? Mode::Active
-                          : next ? Mode::Waiting
-                          : held ? Mode::Paused
-                                 : Mode::Failed,
-                  .slug = subject->slug,
-                  .title = subject->animeTitle,
-                  .episode = display::episode(subject->number) + QStringLiteral(" · ") +
-                             amounts.value(subject->slug),
-                  .detail = headerDetailOf(*subject),
-                  // Its own reason, else the first one on the page: the top speaks for it.
-                  .notice =
-                      noticeFor(*subject, quota).isEmpty() ? notice : noticeFor(*subject, quota),
-                  .progress = fractionOf(*subject),
-                  .art = info(subject->slug).art};
+        const auto detail = headerDetailOf(*subject);
+        header = {
+            .mode = shown  ? Mode::Active
+                    : next ? Mode::Waiting
+                    : held ? Mode::Paused
+                           : Mode::Failed,
+            .slug = subject->slug,
+            .title = subject->animeTitle,
+            // The series' line, then the episode's under the bar: each figure named.
+            .episode = amounts.value(subject->slug),
+            .detail = detail.isEmpty()
+                          ? display::episode(subject->number)
+                          : display::episode(subject->number) + QStringLiteral(" · ") + detail,
+            // Its own reason, else the first one on the page: the top speaks for it.
+            .notice = noticeFor(*subject, quota).isEmpty() ? notice : noticeFor(*subject, quota),
+            .progress = fractionOf(*subject),
+            .art = info(subject->slug).art};
     } else {
         header.title = QStringLiteral("Nada descargando");
     }

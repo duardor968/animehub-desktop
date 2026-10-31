@@ -423,18 +423,21 @@ Item {
         property string slug
         property string name
         property bool first
+        // Waiting its turn, it can be held: the row's own button is for what transfers.
+        property bool holdable
         property bool hasFolder
         property string consequence
         property int cancelCount
         property bool withPage
 
-        entries: [nowEntry, folderEntry, animeEntry, cancelSeparator, cancelEntry, pageSeparator,
+        entries: [nowEntry, holdEntry, folderEntry, animeEntry, cancelSeparator, cancelEntry, pageSeparator,
             downloadsFolderEntry]
 
         function showFor(row, anchor, fromHeader) {
             slug = row.slug
             name = row.title
             first = row.first
+            holdable = row.canPause && !row.running
             hasFolder = row.hasFolder
             consequence = row.cancelText
             cancelCount = row.cancelCount
@@ -448,6 +451,13 @@ Item {
             text: "Descargar ahora"
             glyph: Theme.icon.download
             onTriggered: page.downloads.prioritize(queueMenu.slug)
+        }
+        MenuEntry {
+            id: holdEntry
+            property bool wanted: queueMenu.holdable
+            text: "Pausar"
+            glyph: Theme.icon.pause
+            onTriggered: page.downloads.pauseSeries(queueMenu.slug)
         }
         MenuEntry {
             id: folderEntry

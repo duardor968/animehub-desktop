@@ -322,9 +322,12 @@ private slots:
         QCOMPARE(view.barMode(), app::DownloadsView::Mode::Active);
         QCOMPARE(view.barText(), QStringLiteral("Descargando 2 de 3 · A ep. 2"));
         QCOMPARE(view.barPercent(), QStringLiteral("45 %"));
-        // The top of the page names the series' count once, and the episode's bytes once.
-        QCOMPARE(view.headerEpisode(), QStringLiteral("Episodio 2 · 1 de 3 descargados"));
-        QCOMPARE(view.headerDetail(), QStringLiteral("0 KB de 0 KB"));
+        // The top of the page: the series' figures on its line, the episode's under the bar,
+        // each named once.
+        QVERIFY2(view.headerEpisode().startsWith(QStringLiteral("1 de 3 descargados")),
+                 qPrintable(view.headerEpisode()));
+        QVERIFY(!view.headerEpisode().contains(QStringLiteral("Episodio")));
+        QCOMPARE(view.headerDetail(), QStringLiteral("Episodio 2 · 0 KB de 0 KB"));
         QCOMPARE(view.barProblem(), QStringLiteral("1 con error"));
         QCOMPARE(view.barPoster(), f.anime.posterUrl);
     }

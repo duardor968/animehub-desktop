@@ -300,6 +300,8 @@ Rectangle {
                 required property bool hasFolder
                 required property string cancelText
                 required property int cancelCount
+                required property bool canPause
+                required property bool running
 
                 spacing: 4
 
