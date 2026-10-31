@@ -10,10 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repository = Split-Path $PSScriptRoot -Parent
 
-$qtRoot = if ($env:QT_ROOT) { $env:QT_ROOT } else { "C:\Qt\6.11.0\msvc2022_64" }
-if (-not (Test-Path -LiteralPath (Join-Path $qtRoot "bin\qmake.exe"))) {
-    throw "Qt 6.11 MSVC was not found. Set QT_ROOT to the kit directory."
-}
+. (Join-Path $PSScriptRoot "quiet.ps1")
 $qtToolsRoot = Split-Path (Split-Path $qtRoot -Parent) -Parent
 
 # CMake 4.0+ is required; the one bundled with Qt is older. Prefer the one on PATH, then a
@@ -66,8 +63,8 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     if (-not $SkipTests -and $Configuration -eq "Debug") {
-        ctest --preset windows-debug
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $failed = Invoke-Quiet { ctest --preset windows-debug | Out-Host; $LASTEXITCODE }
+        if ($failed -ne 0) { exit $failed }
     }
 } finally {
     Pop-Location
