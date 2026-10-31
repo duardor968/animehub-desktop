@@ -393,8 +393,12 @@ void LibraryModel::rebuildShelves() {
     ready_count_ = static_cast<int>(watchable.size());
     download_count_ = static_cast<int>(missing.size());
 
+    // The first one to watch is featured; the shelf goes on with the rest.
+    featured_slug_ = watchable.isEmpty() ? QString() : watchable.first()->slug;
+    updateFeatured();
+
     QList<Card> ready_cards;
-    for (const auto* entry : watchable) {
+    for (const auto* entry : watchable | std::views::drop(1)) {
         ready_cards.append({.slug = entry->slug,
                             .title = entry->title,
                             .posterUrl = entry->posterUrl,
@@ -512,6 +516,34 @@ void LibraryModel::rebuildUpcoming(const QList<const LibraryEntry*>& shown) {
     if (days != upcoming_days_) {
         upcoming_days_ = std::move(days);
         emit upcomingChanged();
+    }
+}
+
+void LibraryModel::updateFeatured() {
+    const auto* entry = featured_slug_.isEmpty() ? nullptr : entryFor(featured_slug_);
+    QVariantMap featured;
+    if (entry && entry->resumeNumber) {
+        // The line reads as the posters' beside it; the button only says what it does.
+        double progress = -1;
+        if (entry->resumePositionMs > 0 && entry->resumeDurationMs > 0) {
+            progress = std::clamp(
+                static_cast<double>(entry->resumePositionMs) / entry->resumeDurationMs, 0.0, 1.0);
+        } else if (entry->resumePositionMs <= 0) {
+            progress = progressOf(*entry);
+        }
+        // It is on disk: the button plays it.
+        featured = {{QStringLiteral("slug"), entry->slug},
+                    {QStringLiteral("title"), entry->title},
+                    {QStringLiteral("backdropUrl"), entry->backdropUrl},
+                    {QStringLiteral("posterUrl"), entry->posterUrl},
+                    {QStringLiteral("detail"), readyCaption(*entry)},
+                    {QStringLiteral("progress"), progress},
+                    {QStringLiteral("actionText"),
+                     started(*entry) ? QStringLiteral("Continuar") : QStringLiteral("Empezar")}};
+    }
+    if (featured != featured_) {
+        featured_ = std::move(featured);
+        emit featuredChanged();
     }
 }
 

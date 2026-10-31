@@ -40,13 +40,16 @@ class LibraryModel final : public QAbstractListModel {
     Q_PROPERTY(QVariantMap franchise READ franchise NOTIFY franchiseChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
     Q_PROPERTY(QVariantList overview READ overview NOTIFY countChanged)
+    // The first of "Para ver", two posters wide at its head: slug, title, backdropUrl, posterUrl,
+    // detail, progress (< 0 hides the bar) and actionText. Empty when nothing is ready to watch.
+    Q_PROPERTY(QVariantMap featured READ featured NOTIFY featuredChanged)
     // What is followed, split by what it waits for: its next episode is on disk, or episodes
     // still have to be downloaded.
     Q_PROPERTY(CardModel* readyShelf READ readyShelf CONSTANT)
     Q_PROPERTY(CardModel* downloadShelf READ downloadShelf CONSTANT)
     // The episodes "Descargar todo" queues: every missing one of every anime on the shelf.
     Q_PROPERTY(int pendingCount READ pendingCount NOTIFY countChanged)
-    // How many anime each shelf holds.
+    // How many anime each shelf holds, the featured one counted with "Para ver".
     Q_PROPERTY(int readyCount READ readyCount NOTIFY countChanged)
     Q_PROPERTY(int downloadCount READ downloadCount NOTIFY countChanged)
     // What airs next among the anime of the library, by day: [{day, items}].
@@ -135,6 +138,9 @@ public:
     [[nodiscard]] CardModel* downloadShelf() {
         return &download_shelf_;
     }
+    [[nodiscard]] QVariantMap featured() const {
+        return featured_;
+    }
     [[nodiscard]] int pendingCount() const {
         return pending_count_;
     }
@@ -169,6 +175,7 @@ signals:
     void filterChanged();
     void searchChanged();
     void countChanged();
+    void featuredChanged();
     void upcomingChanged();
     void archivedOnlyChanged();
     void franchiseChanged();
@@ -181,6 +188,7 @@ private:
     void rebuildRows();
     void rebuildShelves();
     void rebuildUpcoming(const QList<const library::LibraryEntry*>& shown);
+    void updateFeatured();
     void fetchSchedule();
     void rebuildFranchise();
     QVariantMap workMap(const library::LibraryEntry& entry) const;
@@ -231,6 +239,8 @@ private:
     bool on_disk_only_ = false;
     bool grouped_ = true;
     QString search_;
+    QString featured_slug_;
+    QVariantMap featured_;
     CardModel ready_shelf_;
     CardModel download_shelf_;
     int pending_count_ = 0;

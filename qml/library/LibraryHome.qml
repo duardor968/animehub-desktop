@@ -89,13 +89,26 @@ Item {
             spacing: Theme.section
 
             Shelf {
+                id: ready
                 width: parent.width
                 visible: root.library.readyCount > 0
                 title: "Para ver"
                 count: root.library.readyCount
                 model: root.library.readyShelf
+                lead: root.library.featured.slug ? featured : null
                 onActivated: slug => root.activated(slug)
                 onActed: (slug, episode, action) => root.act(slug, action)
+
+                Component {
+                    id: featured
+                    FeaturedCard {
+                        featured: root.library.featured
+                        imageHeight: Math.round(ready.cardWidth * 1.42)
+                        onOpen: slug => root.activated(slug)
+                        onAct: slug => root.app.continueWatching(slug)
+                        onNext: ready.focusRow()
+                    }
+                }
             }
 
             Shelf {

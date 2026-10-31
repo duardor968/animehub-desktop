@@ -158,10 +158,14 @@ private slots:
 
         LibraryModel model(service, downloads, api);
         QCOMPARE(model.readyCount(), 1);
-        // Every card of "Para ver" reads the same: the episode, then how far the series is.
-        QCOMPARE(model.readyShelf()->cards().size(), 1);
-        QCOMPARE(model.readyShelf()->cards().first().slug, QStringLiteral("ready"));
-        QCOMPARE(model.readyShelf()->cards().first().caption, QStringLiteral("Ep. 2 · 1/3 vistos"));
+        // The first to watch leads the shelf, featured; its line reads as the cards' beside it.
+        QCOMPARE(model.featured().value(QStringLiteral("slug")).toString(),
+                 QStringLiteral("ready"));
+        QCOMPARE(model.featured().value(QStringLiteral("detail")).toString(),
+                 QStringLiteral("Ep. 2 · 1/3 vistos"));
+        QCOMPARE(model.featured().value(QStringLiteral("actionText")).toString(),
+                 QStringLiteral("Continuar"));
+        QVERIFY(model.readyShelf()->cards().isEmpty());
         QCOMPARE(model.downloadCount(), 2);
         QCOMPARE(model.pendingCount(), 2); // ready's 3 and hole's 2
         for (const auto& card : model.downloadShelf()->cards()) {

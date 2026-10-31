@@ -304,6 +304,17 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
                        row->isAncestorOf(window->activeFocusItem()),
                    "→ walks the row of posters"))
             return false;
+        // ← from the first poster reaches the featured card that leads the row; the capture
+        // shows its frame.
+        const auto featured = model->property("featured").toMap().value(QStringLiteral("title"));
+        key(Qt::Key_Left);
+        key(Qt::Key_Left);
+        settle();
+        qInfo() << "Flow lead:" << focused();
+        if (!check(featured.toString().isEmpty() ||
+                       window->activeFocusItem()->property("text") == featured,
+                   "← from the first poster reaches the featured card"))
+            return false;
     } else
         return false;
     settle();

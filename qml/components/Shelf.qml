@@ -4,8 +4,10 @@ import QtQuick.Layouts
 import AnimeHub
 
 // A titled row of whole posters; the arrows page through the rest. Items declared inside it
-// (a button acting on the whole row) go beside the title. For the keyboard the row is one stop:
-// ← and → walk its posters and page with them, Enter opens one.
+// (a button acting on the whole row) go beside the title. A `lead` card may open the row, two
+// posters wide, as Steam's recent games do with the last one played. For the keyboard the row
+// is one stop: ← and → walk its posters and page with them (← from the first reaches the lead),
+// Enter opens one.
 Item {
     id: root
 
@@ -14,14 +16,19 @@ Item {
     // Shown after the title, muted; below 0, nothing.
     property int count: -1
     default property alias actions: actionsRow.data
+    property Component lead
+    readonly property bool hasLead: lead !== null
 
     signal activated(string slug, real episode)
     // A poster's own button: play the episode or download what it lists.
     signal acted(string slug, real episode, string action)
 
     readonly property int gap: Theme.posterGap
-    readonly property int columns: Theme.posterColumns(width)
-    readonly property real cardWidth: (width - (columns - 1) * gap) / columns
+    // Columns as if every card were a poster; the lead takes two of them.
+    readonly property int allColumns: Theme.posterColumns(width)
+    readonly property real cardWidth: (width - (allColumns - 1) * gap) / allColumns
+    readonly property int columns: Math.max(1, allColumns - (hasLead ? 2 : 0))
+    readonly property real leadWidth: hasLead ? 2 * cardWidth + gap : 0
     // The first whole poster on view; kept across resizes so the row never stops mid-poster.
     property int first: 0
     property bool paging: false
@@ -33,12 +40,17 @@ Item {
         paging = false
     }
     function page(step) { show(first + step * columns, true) }
+    // The keyboard on the row of posters, from the lead.
+    function focusRow() {
+        if (list.count > 0)
+            list.forceActiveFocus(Qt.TabFocusReason)
+    }
 
     onCardWidthChanged: show(first, false)
 
     // The posters 12 px under the title; the frame's margin around them takes no room.
     implicitHeight: heading.height + 12 + list.height
-    visible: list.count > 0
+    visible: list.count > 0 || hasLead
 
     RowLayout {
         id: heading
@@ -99,12 +111,22 @@ Item {
         }
     }
 
+    Loader {
+        id: leadLoader
+        y: heading.height + 12
+        active: root.hasLead
+        visible: active
+        width: root.leadWidth
+        height: list.height
+        sourceComponent: root.lead
+    }
+
     // Clips the posters of other pages, a little outside the row: the keyboard's frame stays whole
     // and the gap keeps the neighbours out.
     Item {
-        x: -4
+        x: (root.hasLead ? root.leadWidth + root.gap : 0) - 4
         y: heading.height + 12 - 4
-        width: Math.max(0, root.width) + 8
+        width: Math.max(0, root.width - (root.hasLead ? root.leadWidth + root.gap : 0)) + 8
         height: list.height + 8
         clip: true
 
@@ -112,7 +134,7 @@ Item {
             id: list
             x: 4
             y: 4
-            width: Math.max(0, root.width)
+            width: Math.max(0, root.width - (root.hasLead ? root.leadWidth + root.gap : 0))
             // Fixed so the row exists before its delegates; nothing while the row has no width.
             height: root.cardWidth > 0 ? Theme.posterCardHeight(root.cardWidth) : 0
             orientation: ListView.Horizontal
@@ -137,6 +159,12 @@ Item {
                     root.show(currentIndex, true)
                 else if (currentIndex >= root.first + root.columns)
                     root.show(currentIndex - root.columns + 1, true)
+            }
+            // ← from the first poster goes to the lead card.
+            Keys.onLeftPressed: event => {
+                event.accepted = currentIndex <= 0 && leadLoader.item !== null
+                if (event.accepted)
+                    leadLoader.item.forceFocus(Qt.BacktabFocusReason)
             }
             // A row reached by keyboard starts at the first poster on view.
             onActiveFocusChanged: {
