@@ -426,18 +426,21 @@ Item {
             id: downloadsSeparator
             property bool separator: true
         }
-        // Says what a press does. Only for anime in the library, the ones watched for new
-        // episodes.
+        // Its check says whether it is on. Only for anime in the library, the ones watched for
+        // new episodes.
         MenuEntry {
             id: autoEntry
             property bool wanted: page.view.airing && page.view.inLibrary
-            text: page.view.autoDownload ? "Dejar de descargar los episodios nuevos"
-                                         : "Descargar los episodios nuevos al salir…"
+            text: "Descargar los episodios nuevos"
+            checkable: true
+            checked: page.view.autoDownload
             onTriggered: {
-                if (page.view.autoDownload)
+                if (checked) {
+                    checked = false // the user confirms first
+                    autoDownloadDialog.open()
+                } else {
                     page.view.setAutoDownload(false)
-                else
-                    autoDownloadDialog.open() // the user confirms first
+                }
             }
         }
         // What else to download, while the main button does something other than downloading

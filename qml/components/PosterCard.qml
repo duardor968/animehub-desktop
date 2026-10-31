@@ -122,8 +122,7 @@ AbstractButton {
                 icon.source: Theme.source(root.quickAction === "play" ? Theme.icon.play : Theme.icon.download)
                 focusPolicy: Qt.NoFocus
                 onClicked: root.act()
-                // Not a button inside the card's for a reader: the card's page has the same action.
-                Accessible.ignored: true
+                Accessible.name: text + ", " + root.text
                 ToolTip.visible: hovered
                 ToolTip.text: text
             }
