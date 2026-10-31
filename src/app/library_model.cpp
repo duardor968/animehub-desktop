@@ -137,8 +137,8 @@ QString LibraryModel::captionOf(const LibraryEntry& entry) {
     return QStringLiteral("Sin empezar");
 }
 
-// Every card of the home reads the same way: the episode it is about, then how far the series
-// is. " · 3/12 vistos", or nothing before the first one is watched.
+// The download shelf's cards: the episode they are about, then how far the series is.
+// " · 3/12 vistos", or nothing before the first one is watched.
 QString LibraryModel::seenCaption(const LibraryEntry& entry) {
     const int total = std::max(entry.episodeCount.value_or(0), entry.knownEpisodes);
     return entry.watchedEpisodes > 0 && total > 0
@@ -146,17 +146,10 @@ QString LibraryModel::seenCaption(const LibraryEntry& entry) {
                : QString();
 }
 
-// "Ep. 6 · 3/12 vistos", "Ep. 6 · 8:12 de 24:00" while it is under way.
+// "Ep. 6 · 3 en disco": what "Para ver" is for, how many are ready to watch.
 QString LibraryModel::readyCaption(const LibraryEntry& entry) {
-    auto caption = display::shortEpisode(*entry.resumeNumber);
-    if (entry.resumePositionMs > 0) {
-        caption += QStringLiteral(" · ") + display::clock(entry.resumePositionMs);
-        if (entry.resumeDurationMs > 0) {
-            caption += QStringLiteral(" de ") + display::clock(entry.resumeDurationMs);
-        }
-        return caption;
-    }
-    return caption + seenCaption(entry);
+    return display::shortEpisode(*entry.resumeNumber) +
+           QStringLiteral(" · %1 en disco").arg(entry.unwatchedOnDisk);
 }
 
 // "Ep. 4 · 3/12 vistos", "Ep. 4 a 7 · 3/12 vistos", "5 episodios"
