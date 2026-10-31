@@ -7,6 +7,10 @@ std::optional<PlayerWindowSample> samplePotPlayer(qint64) {
     return std::nullopt;
 }
 
+bool closePotPlayer(qint64, std::chrono::milliseconds) {
+    return true;
+}
+
 std::unique_ptr<QObject> watchExit(qint64, std::function<void()>) {
     return nullptr;
 }

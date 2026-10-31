@@ -80,6 +80,22 @@ std::optional<PlayerWindowSample> samplePotPlayer(qint64 pid) {
                               .durationMs = static_cast<qint64>(*duration)};
 }
 
+bool closePotPlayer(qint64 pid, std::chrono::milliseconds wait) {
+    const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
+    if (!process) {
+        return true; // already gone
+    }
+    Search search{.pid = static_cast<DWORD>(pid)};
+    EnumWindows(findMain, reinterpret_cast<LPARAM>(&search));
+    if (search.window) {
+        PostMessageW(search.window, WM_CLOSE, 0, 0);
+    }
+    const bool ended =
+        WaitForSingleObject(process, static_cast<DWORD>(wait.count())) == WAIT_OBJECT_0;
+    CloseHandle(process);
+    return ended;
+}
+
 namespace {
 
 // Owns the process handle the notifier waits on.

@@ -185,6 +185,7 @@ AppController::AppController(AppPaths paths, QObject* parent)
                                             .configDirectory =
                                                 QDir(paths_.data).filePath(QStringLiteral("mpv")),
                                             .potPlayerExecutable = platform::potPlayerExecutable(),
+                                            .potPlayer = playback::platformPotPlayer(),
                                             .systemApplication = platform::defaultApplication};
         },
         [](const QString& path) { return shell::open(path); });

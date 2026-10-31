@@ -20,6 +20,8 @@ namespace {
 constexpr int kConnectAttempts = 75; // 15 s for mpv to open its pipe
 constexpr qint64 kSaveIntervalMs = 5000;
 constexpr auto kPotPlayerSampleInterval = std::chrono::seconds(1);
+// How long a replaced PotPlayer gets to close before the next playback starts.
+constexpr auto kPotPlayerCloseWait = std::chrono::seconds(2);
 
 // "/seek=hh:mm:ss", as PotPlayer takes a start position.
 QString seekOption(qint64 ms) {
@@ -80,10 +82,33 @@ bool Player::isTracking() const {
     return session_ != nullptr || playlist_ != nullptr;
 }
 
+PotPlayerControl platformPotPlayer() {
+    return {
+        .start = [](const QString& program, const QStringList& arguments) -> std::optional<qint64> {
+            // Detached and without AnimeHub's standard handles, as mpv.
+            QProcess potplayer;
+            potplayer.setProgram(program);
+            potplayer.setArguments(arguments);
+            potplayer.setWorkingDirectory(QFileInfo(program).absolutePath());
+            potplayer.setStandardInputFile(QProcess::nullDevice());
+            potplayer.setStandardOutputFile(QProcess::nullDevice());
+            potplayer.setStandardErrorFile(QProcess::nullDevice());
+            qint64 pid = 0;
+            if (!potplayer.startDetached(&pid)) {
+                return std::nullopt;
+            }
+            return pid;
+        },
+        .sample = platform::samplePotPlayer,
+        .watchExit = platform::watchExit,
+        .close = [](qint64 pid) { platform::closePotPlayer(pid, kPotPlayerCloseWait); }};
+}
+
 std::expected<void, QString> Player::play(const PlayRequest& request) {
     if (!QFileInfo(request.filePath).isFile()) {
         return std::unexpected(QStringLiteral("El archivo ya no está en el disco."));
     }
+    closePlaylist();
     const auto settings = settings_();
     if (settings.kind == PlayerKind::Bundled) {
         return playWithMpv(request, settings);
@@ -128,7 +153,6 @@ std::expected<void, QString> Player::playWithMpv(const PlayRequest& request,
                                               "elige la aplicación predeterminada en Ajustes."));
 #endif
     }
-    endPlaylist();
     if (session_) {
         // One followed playback at a time: the previous one closes with its progress saved.
         save(true);
@@ -226,8 +250,7 @@ std::expected<void, QString> Player::playWithMpv(const PlayRequest& request,
     return {};
 }
 
-PotPlayerLaunch potPlayerLaunch(library::LibraryRepository& library, const PlayRequest& request,
-                                const QStringList& options) {
+PotPlayerLaunch potPlayerLaunch(library::LibraryRepository& library, const PlayRequest& request) {
     QStringList files{QDir::toNativeSeparators(request.filePath)};
     PotPlayerLaunch launch{.folders = {QFileInfo(request.filePath).absolutePath()}};
     if (const auto episodes = library.episodes(request.slug)) {
@@ -250,37 +273,45 @@ PotPlayerLaunch potPlayerLaunch(library::LibraryRepository& library, const PlayR
     if (request.startMs > 0) {
         launch.arguments.append(seekOption(request.startMs));
     }
-    launch.arguments << options << files;
+    launch.arguments << files;
     return launch;
 }
 
 std::expected<void, QString> Player::playWithPotPlayer(const PlayRequest& request,
                                                        const PlayerSettings& settings,
                                                        const QString& executable) {
-    auto launch = potPlayerLaunch(library_, request, settings.potPlayerOptions);
-    QProcess potplayer;
-    potplayer.setProgram(executable);
-    potplayer.setArguments(launch.arguments);
-    potplayer.setWorkingDirectory(QFileInfo(executable).absolutePath());
-    potplayer.setStandardInputFile(QProcess::nullDevice());
-    potplayer.setStandardOutputFile(QProcess::nullDevice());
-    potplayer.setStandardErrorFile(QProcess::nullDevice());
-    qint64 pid = 0;
-    if (!potplayer.startDetached(&pid)) {
+    const auto& control = settings.potPlayer;
+    const auto launch = potPlayerLaunch(library_, request);
+    const auto pid = control.start ? control.start(executable, launch.arguments) : std::nullopt;
+    if (!pid) {
         return std::unexpected(QStringLiteral("No se pudo abrir PotPlayer."));
     }
     // One followed playback at a time.
-    endPlaylist();
     if (session_) {
         save(true);
         endSession();
     }
     playlist_ = std::make_unique<PlaylistTracker>(
-        library_, launch.folders, [pid] { return platform::samplePotPlayer(pid); },
+        library_, launch.folders, [sample = control.sample, pid = *pid] { return sample(pid); },
         kPotPlayerSampleInterval);
     connect(playlist_.get(), &PlaylistTracker::progressChanged, this, &Player::progressChanged);
-    playlist_exit_ = platform::watchExit(pid, [this] { endPlaylist(); });
+    playlist_exit_ = control.watchExit(*pid, [this] { endPlaylist(); });
+    playlist_pid_ = *pid;
+    playlist_close_ = control.close;
     return {};
+}
+
+void Player::closePlaylist() {
+    if (!playlist_) {
+        return; // none, or it already ended: its exit ended the following
+    }
+    playlist_->finish();
+    // Still followed, so still running: its process is the one AnimeHub started, held by the
+    // exit watch until here.
+    if (playlist_close_) {
+        playlist_close_(playlist_pid_);
+    }
+    endPlaylist();
 }
 
 void Player::endPlaylist() {
@@ -288,6 +319,8 @@ void Player::endPlaylist() {
         return;
     }
     playlist_->finish();
+    playlist_pid_ = 0;
+    playlist_close_ = {};
     // Often called from the exit watch's own signal: both go once it returns.
     std::shared_ptr<PlaylistTracker> playlist(playlist_.release());
     std::shared_ptr<QObject> exit(playlist_exit_.release());

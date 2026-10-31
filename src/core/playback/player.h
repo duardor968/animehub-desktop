@@ -18,12 +18,25 @@ namespace animehub::playback {
 
 enum class PlayerKind { Bundled, PotPlayer, System };
 
+// How a followed PotPlayer is started, looked at and closed: the system's
+// (platformPotPlayer()) in the app, fakes in tests.
+struct PotPlayerControl {
+    // Its process id, or none when it could not start.
+    std::function<std::optional<qint64>(const QString& program, const QStringList& arguments)>
+        start;
+    std::function<std::optional<platform::PlayerWindowSample>(qint64 pid)> sample;
+    std::function<std::unique_ptr<QObject>(qint64 pid, std::function<void()> exited)> watchExit;
+    // Only ever for a process `start` returned and still running.
+    std::function<void(qint64 pid)> close;
+};
+[[nodiscard]] PotPlayerControl platformPotPlayer();
+
 struct PlayerSettings {
     PlayerKind kind = PlayerKind::Bundled;
     QString mpvExecutable;   // the bundled mpv
     QString configDirectory; // mpv's own settings, separate from any user mpv setup
     QString potPlayerExecutable;
-    QStringList potPlayerOptions; // before the files ("/volume=0" mutes it in tests)
+    PotPlayerControl potPlayer;
     // The program the system opens a file type with (".mp4" -> its executable); unset, the
     // system's player is only ever opened, never followed.
     std::function<QString(const QString& suffix)> systemApplication;
@@ -45,8 +58,7 @@ struct PotPlayerLaunch {
     QStringList folders;
 };
 [[nodiscard]] PotPlayerLaunch potPlayerLaunch(library::LibraryRepository& library,
-                                              const PlayRequest& request,
-                                              const QStringList& options);
+                                              const PlayRequest& request);
 
 // Whether a stop at `position` of `duration` counts as watched: the last 10 %, or the last two
 // minutes of an episode longer than ten (ending and preview).
@@ -83,6 +95,9 @@ private:
                                                    const QString& executable);
     // Stops following the previous playback, its progress saved; the player stays open.
     void endPlaylist();
+    // A new playback replaces the PotPlayer AnimeHub started: where it was is saved, then it
+    // closes as when its window is closed.
+    void closePlaylist();
     void handleMessage(const QByteArray& line);
     void save(bool final_save);
     void endSession();
@@ -93,6 +108,8 @@ private:
     std::unique_ptr<Session> session_;
     std::unique_ptr<PlaylistTracker> playlist_;
     std::unique_ptr<QObject> playlist_exit_;
+    qint64 playlist_pid_ = 0;
+    std::function<void(qint64)> playlist_close_;
 };
 
 } // namespace animehub::playback

@@ -151,19 +151,69 @@ private slots:
         }
     }
 
+    // A new playback replaces the PotPlayer AnimeHub started: where it was is saved first, then
+    // that process, and only that one, is asked to close. One that already ended is left alone.
+    void playingAnotherEpisodeClosesThePotPlayerItStarted() {
+        FakeWindow window;
+        window.push(at(1, 600'000));
+        QList<qint64> started;
+        QList<qint64> closed;
+        qint64 saved_when_closed = -1;
+        std::function<void()> last_exit;
+        const playback::PotPlayerControl control{
+            .start = [&](const QString&, const QStringList&) -> std::optional<qint64> {
+                started.append(4000 + started.size());
+                return started.last();
+            },
+            .sample = [&window](qint64) { return window.next(); },
+            .watchExit =
+                [&](qint64, std::function<void()> exited) {
+                    last_exit = std::move(exited);
+                    return std::make_unique<QObject>();
+                },
+            .close =
+                [&](qint64 pid) {
+                    saved_when_closed = episode(1).positionMs;
+                    closed.append(pid);
+                }};
+        playback::Player player(
+            *library_,
+            [&] {
+                return playback::PlayerSettings{.kind = playback::PlayerKind::PotPlayer,
+                                                .potPlayerExecutable =
+                                                    QStringLiteral("PotPlayerMini64.exe"),
+                                                .potPlayer = control};
+            },
+            [](const QString&) { return false; });
+
+        QVERIFY(player.play({.slug = kSlug, .number = 1, .filePath = episode(1).filePath}));
+        QTRY_VERIFY_WITH_TIMEOUT(window.drained(), 5000);
+        const int looks = window.looks();
+        QTRY_VERIFY_WITH_TIMEOUT(window.looks() > looks, 5000); // the sample was applied
+        QVERIFY(player.play({.slug = kSlug, .number = 2, .filePath = episode(2).filePath}));
+        QCOMPARE(closed, QList<qint64>{4000});
+        QCOMPARE(saved_when_closed, 600'000);
+        QCOMPARE(episode(1).state, library::WatchState::Watching);
+        QCOMPARE(started, (QList<qint64>{4000, 4001}));
+
+        // The second one is closed by the person: nothing is left to close.
+        last_exit();
+        QVERIFY(!player.isTracking());
+        QVERIFY(player.play({.slug = kSlug, .number = 3, .filePath = episode(3).filePath}));
+        QCOMPARE(closed, QList<qint64>{4000});
+    }
+
     // What PotPlayer is started with: its own process at the minute left, the episode and then
     // the later ones on disk not watched yet. Nothing is started: the launch is only data.
     void startsPotPlayerWithTheEpisodesStillToWatch() {
         QVERIFY(library_->setWatchState(kSlug, 2, library::WatchState::Watched));
         const auto launch = playback::potPlayerLaunch(
             *library_,
-            {.slug = kSlug, .number = 1, .filePath = episode(1).filePath, .startMs = 1'418'000},
-            {QStringLiteral("/volume=0")});
-        QCOMPARE(
-            launch.arguments,
-            (QStringList{QStringLiteral("/new"), QStringLiteral("/seek=00:23:38"),
-                         QStringLiteral("/volume=0"), QDir::toNativeSeparators(episode(1).filePath),
-                         QDir::toNativeSeparators(episode(3).filePath)}));
+            {.slug = kSlug, .number = 1, .filePath = episode(1).filePath, .startMs = 1'418'000});
+        QCOMPARE(launch.arguments,
+                 (QStringList{QStringLiteral("/new"), QStringLiteral("/seek=00:23:38"),
+                              QDir::toNativeSeparators(episode(1).filePath),
+                              QDir::toNativeSeparators(episode(3).filePath)}));
         QCOMPARE(launch.folders, QStringList{folder_});
     }
 };
