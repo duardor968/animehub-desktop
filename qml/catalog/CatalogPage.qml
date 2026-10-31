@@ -4,16 +4,22 @@ import QtQuick.Layouts
 import AnimeHub
 
 // What AnimeHub has: the episodes added last, then the whole catalog with search, filters and
-// its own order. Opening an anime pushes its page; Esc or the back button returns to the same
-// scroll position. While something loads, its place already has its shape; a refresh leaves
-// what was on view, dimmed, until the new results arrive.
+// its own order. Opening an anime pushes its page; Esc, the breadcrumb or the back button returns
+// to the same scroll position. While something loads, its place already has its shape; a refresh
+// leaves what was on view, dimmed, until the new results arrive.
 StackView {
     id: stack
 
     required property AppController app
     property bool active: false
+    // Where the anime on view was opened from: "catalog", or "downloads" for the Downloads tab.
+    property string from: "catalog"
 
     readonly property CatalogView catalog: app.catalog
+
+    // Esc on an anime: the window goes back as its ← does.
+    signal back()
+    signal showDownloads()
 
     onActiveChanged: if (active) catalog.start()
 
@@ -23,10 +29,22 @@ StackView {
             pop(null)
     }
 
-    function openAnime(slug) {
+    // Unless `quiet` (← and →), the keyboard goes to the anime's title, framed when the keyboard
+    // opened it.
+    function openAnime(slug, origin, quiet) {
+        const reason = ApplicationWindow.window ? ApplicationWindow.window.openingReason()
+                                                : Qt.OtherFocusReason
+        from = origin || "catalog"
         app.openCatalogAnime(slug)
         if (depth === 1)
             push(animePage)
+        if (!quiet)
+            focusTitle(reason)
+    }
+
+    function focusTitle(reason) {
+        if (depth > 1)
+            currentItem.focusTitle(reason)
     }
 
     // The whole catalog searched for `text` (from the library's search).
@@ -90,7 +108,9 @@ StackView {
 
         AnimePage {
             view: stack.app.catalogAnime
-            onBack: stack.pop()
+            steps: stack.from === "downloads" ? [{ text: "Descargas", go: () => stack.showDownloads() }]
+                                              : [{ text: "Catálogo", go: () => stack.home() }]
+            onBack: stack.back()
         }
     }
 
@@ -163,6 +183,9 @@ StackView {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
             keyNavigationEnabled: true
+            // One stop for the keyboard, walked with the arrows; a card reached so comes into view.
+            activeFocusOnTab: true
+            highlightFollowsCurrentItem: false
             Accessible.name: "Catálogo"
 
             // The shelf above resizes with the window: whoever was at the top stays at the top.
@@ -198,7 +221,7 @@ StackView {
                     count: model ? model.count : 0
                     title: "Episodios recientes"
                     model: stack.catalog.recentEpisodes
-                    onActivated: slug => stack.openAnime(slug)
+                    onActivated: slug => stack.openAnime(slug, "catalog")
                 }
 
                 // The recent episodes on their way.
@@ -324,25 +347,28 @@ StackView {
                         spacing: 16
 
                         Label {
-                            text: !stack.catalog.browsing ? "El catálogo no tiene animes todavía."
-                                  : stack.catalog.search.trim() === "" ? "Ningún anime coincide con los filtros."
+                            text: !stack.catalog.browsing ? "El catálogo no tiene animes todavía"
+                                  : stack.catalog.search.trim() === "" ? "Ningún anime coincide con los filtros"
                                   : stack.catalog.status === 0 && stack.catalog.genre === ""
-                                    ? "Ningún anime coincide con «" + stack.catalog.search.trim() + "»."
-                                    : "Ningún anime coincide con «" + stack.catalog.search.trim() + "» y los filtros."
+                                    ? "Ningún anime coincide con «" + stack.catalog.search.trim() + "»"
+                                    : "Ningún anime coincide con «" + stack.catalog.search.trim() + "» y los filtros"
                             color: Theme.ink
                             font.pixelSize: Theme.body
                         }
+                        // While searching, "Quitar filtros" is already in the toolbar.
                         Button {
-                            text: stack.catalog.browsing ? "Quitar filtros" : "Reintentar"
-                            onClicked: stack.catalog.browsing ? stack.catalog.clearFilters()
-                                                              : stack.catalog.reload()
+                            visible: !stack.catalog.browsing
+                            text: "Reintentar"
+                            onClicked: stack.catalog.reload()
                         }
                     }
                 }
             }
 
-            delegate: Item {
+            // A scope, so the card inside takes the keyboard when the grid makes it current.
+            delegate: FocusScope {
                 required property var model
+                required property int index
                 width: grid.cellWidth
                 height: grid.cellHeight
                 // The previous results stay, dimmed, until the new ones arrive.
@@ -350,12 +376,18 @@ StackView {
                 Behavior on opacity { NumberAnimation { duration: 150 } }
 
                 PosterCard {
+                    focus: true
+                    // The grid is the keyboard's stop, not each card.
+                    focusPolicy: Qt.ClickFocus
                     width: parent.width - Theme.posterGap
                     text: model.title
                     posterUrl: model.posterUrl
                     caption: model.caption
                     owned: model.owned
-                    onClicked: stack.openAnime(model.slug)
+                    onClicked: {
+                        grid.currentIndex = index
+                        stack.openAnime(model.slug, "catalog")
+                    }
                 }
             }
 
@@ -411,10 +443,11 @@ StackView {
         }
     }
 
+    // Esc from anywhere in the tab, as on the anime's own page: a selection of episodes is
+    // emptied first. Alt+← is the window's.
     Shortcut {
-        sequences: [StandardKey.Back, "Esc"]
+        sequence: "Esc"
         enabled: stack.active && stack.depth > 1
-        // As on the anime's own page, a selection of episodes is emptied first.
-        onActivated: stack.currentItem.selecting ? stack.currentItem.clearSelection() : stack.pop()
+        onActivated: stack.currentItem.selecting ? stack.currentItem.clearSelection() : stack.back()
     }
 }

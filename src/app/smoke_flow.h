@@ -35,6 +35,16 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
         QKeyEvent release(QEvent::KeyRelease, code, Qt::NoModifier);
         QCoreApplication::sendEvent(window, &release);
     };
+    // What has the keyboard, for the log: its name or its text.
+    const auto focused = [window] {
+        auto* item = window->activeFocusItem();
+        if (!item)
+            return QStringLiteral("(nada)");
+        const auto name = item->objectName();
+        const auto text = item->property("text").toString();
+        return QString::fromLatin1(item->metaObject()->className()) + u' ' +
+               (name.isEmpty() ? text.left(40) : name);
+    };
     const auto descendants = [window] {
         QList<QObject*> result{window};
         QSet<QObject*> seen{window};
@@ -192,6 +202,108 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
             key(Qt::Key_Down);
         }
         QMetaObject::invokeMethod(dialog, "close");
+    } else if (flow == u"navigate") {
+        // The library list by keyboard: the arrows open what they reach and keep the keyboard;
+        // Enter takes it to the page's title, under its breadcrumb; Esc goes back without
+        // losing the way forward, and the keyboard returns to the list.
+        model->setFilter(LibraryModel::Filter::All);
+        model->setGrouped(false);
+        model->setArchivedOnly(false);
+        settle();
+        auto* page = named("libraryPage");
+        auto* list = qobject_cast<QQuickItem*>(listWith("franchiseActivated(QVariant,bool)"));
+        QQuickItem* view = nullptr;
+        if (list)
+            for (auto* object : list->findChildren<QQuickItem*>())
+                if (object->property("keyNavigationEnabled").toBool() &&
+                    object->property("activeFocusOnTab").toBool()) {
+                    view = object;
+                    break;
+                }
+        if (!check(page && view && model->rowCount() > 1, "navigate fixture, list and page"))
+            return false;
+        view->forceActiveFocus(Qt::TabFocusReason);
+        settle();
+        qInfo() << "Flow focus after Tab into the list:" << focused();
+        const auto first = page->property("selected").toString();
+        key(Qt::Key_Down);
+        settle();
+        const auto second = page->property("selected").toString();
+        qInfo() << "Flow arrow opened" << first << "->" << second << "focus" << focused();
+        if (!check(!second.isEmpty() && second != first, "Down opens the next anime"))
+            return false;
+        if (!check(view->hasActiveFocus(), "the arrows leave the keyboard in the list"))
+            return false;
+        key(Qt::Key_Return);
+        settle();
+        auto* title = window->activeFocusItem();
+        qInfo() << "Flow focus after Enter:" << focused();
+        if (!check(title && title->objectName() == u"pageTitle",
+                   "Enter puts the keyboard on the title"))
+            return false;
+        if (!check(byText(QStringLiteral("Biblioteca")) != nullptr,
+                   "the breadcrumb leads to Biblioteca"))
+            return false;
+        const int length = window->property("history").toList().size();
+        const int index = window->property("historyIndex").toInt();
+        // Back to the home, then the page again, so there is a way forward to keep.
+        QMetaObject::invokeMethod(page, "select", Q_ARG(QVariant, QString()),
+                                  Q_ARG(QVariant, QString()), Q_ARG(QVariant, false));
+        settle();
+        // Alt+← and Alt+→ are shortcuts, which a sent key event does not reach: what they call.
+        qInfo() << "Flow history" << window->property("historyIndex").toInt()
+                << window->property("history");
+        QMetaObject::invokeMethod(window, "travel", Q_ARG(QVariant, -1));
+        settle();
+        if (!check(page->property("selected").toString() == second, "back returns to the anime"))
+            return false;
+        const int forward = window->property("history").toList().size();
+        key(Qt::Key_Escape);
+        settle();
+        qInfo() << "Flow after Esc:" << page->property("selected").toString() << "index"
+                << window->property("historyIndex").toInt() << "of" << forward << "focus"
+                << focused();
+        if (!check(window->property("history").toList().size() == forward &&
+                       window->property("historyIndex").toInt() < index + 1,
+                   "Esc goes back and keeps the way forward"))
+            return false;
+        if (!check(view->hasActiveFocus(), "the keyboard is back on the list"))
+            return false;
+        QMetaObject::invokeMethod(window, "travel", Q_ARG(QVariant, 1));
+        settle();
+        qInfo() << "Flow after forward:" << page->property("selected").toString() << "focus"
+                << focused() << "history" << length;
+        if (!check(page->property("selected").toString() == second, "forward goes to it again"))
+            return false;
+        // Tab from the title walks on; nothing in the page is a trap.
+        for (int step = 0; step < 6; ++step) {
+            key(Qt::Key_Tab);
+            qInfo() << "Flow Tab" << step + 1 << focused();
+        }
+        // The home's first row of posters by keyboard: one stop, → walks it, the capture shows
+        // the frame on the second poster.
+        QMetaObject::invokeMethod(page, "select", Q_ARG(QVariant, QString()),
+                                  Q_ARG(QVariant, QString()), Q_ARG(QVariant, false));
+        settle();
+        QQuickItem* row = nullptr;
+        for (auto* object : descendants())
+            if (auto* item = qobject_cast<QQuickItem*>(object);
+                item && item->isVisible() && item->property("orientation").toInt() == 1 &&
+                item->property("activeFocusOnTab").toBool() &&
+                item->property("count").toInt() > 1) {
+                row = item;
+                break;
+            }
+        if (!check(row != nullptr, "the home has a row of posters"))
+            return false;
+        row->forceActiveFocus(Qt::TabFocusReason);
+        key(Qt::Key_Right);
+        settle();
+        qInfo() << "Flow poster row:" << focused();
+        if (!check(row->property("currentIndex").toInt() == 1 &&
+                       row->isAncestorOf(window->activeFocusItem()),
+                   "→ walks the row of posters"))
+            return false;
     } else
         return false;
     settle();

@@ -4,12 +4,15 @@ import QtQuick.Layouts
 import AnimeHub
 
 // A franchise laid out as an anime's page: the same header and bar, the main button going on
-// with the work under way, then its works as posters.
+// with the work under way, then its works as posters, one stop for the keyboard.
 Item {
     id: root
     required property LibraryModel model
+    // The places above the page, for the breadcrumb over the title: [{text, go}].
+    property var steps: []
+    readonly property Item actionBar: bar
     signal activated(string slug)
-    // Unused: the window has its own back and forward.
+    // Esc goes back as the window's ← does.
     signal back()
     signal removeRequested(var slugs, string title)
     signal actionFailed(string text)
@@ -31,6 +34,11 @@ Item {
         positioningOnOpen = true
         Qt.callLater(positionBeginningWhenReady)
     }
+    function focusTitle(reason) {
+        if (works.headerItem)
+            works.headerItem.focusTitle(reason)
+    }
+    Keys.onEscapePressed: root.back()
     // Plays the episode a work goes on with, or downloads it when it is not on disk.
     function continueWith(slug) {
         ApplicationWindow.window.app.continueWatching(slug)
@@ -52,18 +60,25 @@ Item {
         anchors.leftMargin: Theme.section
         anchors.rightMargin: Theme.pad
         model: root.workList
-        currentIndex: -1
+        activeFocusOnTab: true
+        // A card reached by keyboard brings itself into view; the header stays on opening.
+        highlightFollowsCurrentItem: false
         readonly property real span: width - Theme.pad
         cellWidth: (span + Theme.posterGap) / Theme.posterColumns(span)
-        // The card and the line under it with the work's state.
+        // The card and its second line, with the work's state.
         cellHeight: Theme.posterCardHeight(cellWidth - Theme.posterGap) + 40
         ScrollBar.vertical: ScrollBar {}
         keyNavigationEnabled: true
         Accessible.name: "Obras de la franquicia"
         header: Column {
             readonly property real barY: barSlot.y
+            function focusTitle(reason) { franchiseHeader.focusTitle(reason) }
+            readonly property Item titleItem: franchiseHeader.titleItem
             width: works.span
             AnimeHeader {
+                id: franchiseHeader
+                steps: root.steps
+                bar: root.actionBar
                 x: -Theme.section
                 width: root.width
                 title: root.franchise.title || "Franquicia"
@@ -96,9 +111,11 @@ Item {
                 Item { Layout.fillWidth: true }
             }
         }
-        delegate: Item {
+        // A scope, so the card inside takes the keyboard when the grid makes it current.
+        delegate: FocusScope {
             id: work
             required property var modelData
+            required property int index
             // "24 episodios en disco · 5,8 GB": the size is only in the tooltip.
             readonly property string disk: modelData.bytesText !== ""
                                            ? modelData.diskText + " · " + modelData.bytesText : ""
@@ -106,32 +123,30 @@ Item {
             height: works.cellHeight
             PosterCard {
                 id: card
+                focus: true
+                // The grid is the keyboard's stop, not each card.
+                focusPolicy: Qt.ClickFocus
                 width: parent.width - Theme.posterGap
                 text: work.modelData.shortTitle
                 posterUrl: work.modelData.posterUrl
                 caption: work.modelData.facts
+                // Where the user is with the work.
+                detail: work.modelData.state
                 progress: work.modelData.progress
                 fresh: work.modelData.fresh
                 quickAction: work.modelData.action
                 // The whole title and what it takes on disk, whether or not the title is cut.
                 ToolTip.visible: hovered
                 ToolTip.text: work.modelData.title + (work.disk !== "" ? "\n" + work.disk : "")
-                onClicked: root.activated(work.modelData.slug)
+                onClicked: {
+                    works.currentIndex = work.index
+                    root.activated(work.modelData.slug)
+                }
                 onAct: root.continueWith(work.modelData.slug)
                 Accessible.name: work.modelData.title + ", " + work.modelData.facts + ", "
                                  + work.modelData.state + (work.disk !== "" ? ", " + work.disk : "")
                 Keys.onMenuPressed: workMenu.show(card)
                 TapHandler { acceptedButtons: Qt.RightButton; onTapped: workMenu.showAtPointer() }
-            }
-            // The card's second caption: where the user is with the work.
-            Label {
-                anchors.top: card.bottom
-                anchors.topMargin: -2
-                width: card.width
-                text: work.modelData.state
-                color: Theme.muted
-                font.pixelSize: Theme.caption
-                elide: Text.ElideRight
             }
             ActionMenu {
                 id: workMenu
@@ -175,6 +190,7 @@ Item {
         pinned: slotY < 0
         visible: works.headerItem !== null
         title: root.franchise.title || ""
+        titleItem: works.headerItem ? works.headerItem.titleItem : null
         posterUrl: root.franchise.posterUrl || ""
         figures: root.franchise.figures || []
         // Goes on with the work under way ("Ver ep. 6", "Descargar ep. 6"), named beside it; with

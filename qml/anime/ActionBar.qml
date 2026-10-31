@@ -3,9 +3,10 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// The band under a page's header, as Steam's under a game: the main action on the left, the
-// figures beside it and the page's own buttons on the right. The page scrolls it with the header
-// until it reaches the top, where it stays, led there by the poster and title it stands for.
+// The band under a page's header, as Steam's under a game: the main action on the left with the
+// page's own buttons beside it (favourite, alerts, more), then the figures. The page scrolls it
+// with the header until it reaches the top, where it stays, led there by the poster and title it
+// stands for.
 Rectangle {
     id: root
 
@@ -21,8 +22,20 @@ Rectangle {
     property real contentWidth: width - 2 * Theme.section
     // The main action and what goes with it.
     default property alias actions: leading.data
-    // The page's own buttons.
+    // The page's own buttons, next to the main action.
     property alias trailing: trailingRow.data
+    // The page's title. The bar floats over the page, after its content in the item tree: Tab
+    // goes from the title into the bar (`enter`) and from the bar on to what follows the title;
+    // Mayús+Tab from the bar goes back to the title.
+    property Item titleItem: null
+
+    function enter() {
+        const first = head.nextItemInFocusChain(true)
+        if (!root.visible || first === tail)
+            return false
+        first.forceActiveFocus(Qt.TabFocusReason)
+        return true
+    }
 
     implicitHeight: 72
     color: Theme.pane
@@ -59,6 +72,15 @@ Rectangle {
             visible: figure.modelData.progress >= 0
             value: figure.modelData.progress
         }
+    }
+
+    // The bar's ends in the Tab order, which hand the keyboard on: before its first control, back
+    // to the title; after its last one, on to what follows the title.
+    Item {
+        id: head
+        activeFocusOnTab: root.titleItem !== null
+        Accessible.ignored: true
+        onActiveFocusChanged: if (activeFocus) root.titleItem.forceActiveFocus(Qt.BacktabFocusReason)
     }
 
     // The bar covers the page: presses on its empty parts must not reach what is under it.
@@ -126,10 +148,17 @@ Rectangle {
             spacing: 8
         }
 
+        RowLayout {
+            id: trailingRow
+            Layout.fillWidth: false
+            Layout.leftMargin: leading.implicitWidth > 0 ? 8 : 0
+            spacing: 4
+        }
+
         Item {
             id: figureArea
             // Apart from the actions, or on the edge where there are none.
-            Layout.leftMargin: leading.implicitWidth > 0 ? 28 : 0
+            Layout.leftMargin: leading.implicitWidth + trailingRow.implicitWidth > 0 ? 28 : 0
             Layout.rightMargin: 16
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -184,11 +213,15 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
         }
+    }
 
-        RowLayout {
-            id: trailingRow
-            Layout.fillWidth: false
-            spacing: 4
+    Item {
+        id: tail
+        activeFocusOnTab: root.titleItem !== null
+        Accessible.ignored: true
+        onActiveFocusChanged: {
+            if (activeFocus)
+                root.titleItem.nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocusReason)
         }
     }
 }

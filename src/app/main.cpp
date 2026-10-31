@@ -165,7 +165,8 @@ int main(int argc, char* argv[]) {
         QStringLiteral("smoke-hidden-native"),
         QStringLiteral("Capturar con una ventana nativa creada siempre oculta; requiere smoke."));
     const QCommandLineOption smoke_flow(QStringLiteral("smoke-flow"),
-                                        QStringLiteral("Recorrido Qt: create, archive o settings."),
+                                        QStringLiteral("Recorrido Qt: create, archive, settings o "
+                                                       "navigate."),
                                         QStringLiteral("caso"));
     parser.addOption(smoke_flow);
     parser.addOptions({api_base, smoke_image, smoke_size, smoke_page, smoke_settings,
@@ -180,7 +181,7 @@ int main(int argc, char* argv[]) {
     const bool smokeHidden = parser.isSet(smoke_hidden_native);
     if (parser.isSet(smoke_flow) &&
         (!smokeHidden || !QStringList{QStringLiteral("create"), QStringLiteral("archive"),
-                                      QStringLiteral("settings")}
+                                      QStringLiteral("settings"), QStringLiteral("navigate")}
                               .contains(parser.value(smoke_flow))))
         return 2;
     if (smokeHidden &&
@@ -332,8 +333,9 @@ int main(int argc, char* argv[]) {
             } else if (parser.isSet(smoke_anime)) {
                 if (!controller.library()->contains(parser.value(smoke_anime)))
                     return 5;
-                QMetaObject::invokeMethod(page, "select",
-                                          Q_ARG(QVariant, parser.value(smoke_anime)));
+                QMetaObject::invokeMethod(
+                    page, "select", Q_ARG(QVariant, parser.value(smoke_anime)),
+                    Q_ARG(QVariant, QStringLiteral("library")), Q_ARG(QVariant, false));
             }
         }
         // Ajustes on one of its categories; linked-devices is Ajustes on that category.
@@ -356,12 +358,6 @@ int main(int argc, char* argv[]) {
                 !opened.toBool())
                 return 5;
         }
-        if (parser.isSet(smoke_flow)) {
-            QTimer::singleShot(650, &app, [window, &controller, flow = parser.value(smoke_flow)] {
-                if (!animehub::app::runSmokeFlow(window, controller.library(), flow))
-                    QCoreApplication::exit(8);
-            });
-        }
         // A hidden window has no regular render loop. Render a few frames so asynchronous
         // images and the product's own fade-in transitions settle before the evidence frame.
         auto* warmup = new QTimer(&app);
@@ -374,33 +370,42 @@ int main(int argc, char* argv[]) {
             window->grabWindow();
         });
         warmup->start();
-        QTimer::singleShot(
-            2500, &app, [window, warmup, smokeHidden, file = parser.value(smoke_image)] {
-                warmup->stop();
-                if (auto* grid = window->findChild<QObject*>(QStringLiteral("franchiseWorks"))) {
-                    qInfo("Smoke franchise grid: height=%.1f contentY=%.1f originY=%.1f",
-                          grid->property("height").toDouble(),
-                          grid->property("contentY").toDouble(),
-                          grid->property("originY").toDouble());
-                    if (auto* header = grid->property("headerItem").value<QObject*>())
-                        qInfo("Smoke franchise header: y=%.1f height=%.1f",
-                              header->property("y").toDouble(),
-                              header->property("height").toDouble());
-                }
-                if (smokeHidden && window->isVisible()) {
-                    QCoreApplication::exit(7);
-                    return;
-                }
-                QDir().mkpath(QFileInfo(file).absolutePath());
-                const auto image = window->grabWindow();
-                if (image.isNull() || !image.save(file)) {
-                    qCritical("Smoke: captura vacía o no guardada");
-                    QCoreApplication::exit(3);
-                    return;
-                }
-                qInfo("Smoke: %dx%d guardada", image.width(), image.height());
-                QCoreApplication::exit(0);
-            });
+        const auto capture = [window, warmup, smokeHidden, file = parser.value(smoke_image)] {
+            warmup->stop();
+            if (auto* grid = window->findChild<QObject*>(QStringLiteral("franchiseWorks"))) {
+                qInfo("Smoke franchise grid: height=%.1f contentY=%.1f originY=%.1f",
+                      grid->property("height").toDouble(), grid->property("contentY").toDouble(),
+                      grid->property("originY").toDouble());
+                if (auto* header = grid->property("headerItem").value<QObject*>())
+                    qInfo("Smoke franchise header: y=%.1f height=%.1f",
+                          header->property("y").toDouble(), header->property("height").toDouble());
+            }
+            if (smokeHidden && window->isVisible()) {
+                QCoreApplication::exit(7);
+                return;
+            }
+            QDir().mkpath(QFileInfo(file).absolutePath());
+            const auto image = window->grabWindow();
+            if (image.isNull() || !image.save(file)) {
+                qCritical("Smoke: captura vacía o no guardada");
+                QCoreApplication::exit(3);
+                return;
+            }
+            qInfo("Smoke: %dx%d guardada", image.width(), image.height());
+            QCoreApplication::exit(0);
+        };
+        // A flow runs while frames keep rendering, and the capture shows where it ended.
+        if (parser.isSet(smoke_flow)) {
+            QTimer::singleShot(
+                650, &app, [window, &controller, capture, flow = parser.value(smoke_flow)] {
+                    if (animehub::app::runSmokeFlow(window, controller.library(), flow))
+                        capture();
+                    else
+                        QCoreApplication::exit(8);
+                });
+        } else {
+            QTimer::singleShot(2500, &app, capture);
+        }
         QTimer::singleShot(15000, &app, [] { QCoreApplication::exit(4); });
     }
     return QApplication::exec();

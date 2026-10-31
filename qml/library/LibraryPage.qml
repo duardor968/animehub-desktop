@@ -13,13 +13,31 @@ Item {
     property var selectedGroup: 0
     // The right pane shows the list as posters.
     property bool showGrid: false
+    // Where the anime on view was opened from: "library", or "downloads" for the Downloads tab.
+    property string from: "library"
 
     signal browseCatalog()
     signal searchCatalog(string text)
     signal actionFailed(string text)
+    // Esc on a page: the window goes back as its ← does.
+    signal back()
+    signal showDownloads()
+
+    // The breadcrumb over an anime: the place it was opened from, and its franchise in the
+    // library. Read again when the library changes.
+    readonly property var animeSteps: {
+        if (from === "downloads")
+            return [{ text: "Descargas", go: () => page.showDownloads() }]
+        const steps = [{ text: "Biblioteca", go: () => page.select("") }]
+        const franchise = app.library.total >= 0 ? app.library.franchiseOf(selected) : ({})
+        if (franchise.id)
+            steps.push({ text: franchise.title, go: () => page.openFranchise(franchise.id) })
+        return steps
+    }
 
     // Why the list filter leaves nothing, by filter.
     readonly property string emptyText: app.library.archivedOnly ? "El Archivo está vacío" : ({
+        [LibraryModel.ToWatch]: "Nada sin ver en disco",
         [LibraryModel.Watching]: "No estás viendo ningún anime",
         [LibraryModel.Airing]: "Ningún anime en emisión",
         [LibraryModel.NotStarted]: "Ningún anime sin empezar",
@@ -43,32 +61,52 @@ Item {
         }
     }
 
-    function select(slug) {
+    // An anime's page, opened from `origin` ("library" unless said). Unless `quiet` (the list's
+    // arrows, ← and →), the keyboard goes to its title, framed when the keyboard opened it.
+    function select(slug, origin, quiet) {
+        const reason = ApplicationWindow.window ? ApplicationWindow.window.openingReason()
+                                                : Qt.OtherFocusReason
         selectedGroup = 0
         showGrid = false
+        from = origin || "library"
         selected = slug
-        if (slug)
-            app.openLibraryAnime(slug)
+        if (!slug)
+            return
+        app.openLibraryAnime(slug)
+        if (!quiet)
+            animePage.focusTitle(reason)
     }
 
-    function openFranchise(id) {
+    function openFranchise(id, quiet) {
+        const reason = ApplicationWindow.window ? ApplicationWindow.window.openingReason()
+                                                : Qt.OtherFocusReason
         selected = ""
         showGrid = false
         selectedGroup = id
         app.library.openFranchise(id)
+        if (!quiet)
+            franchisePage.focusTitle(reason)
+    }
+
+    // The title of the page on view, if it has one: where → takes the keyboard.
+    function focusTitle(reason) {
+        if (selectedGroup)
+            franchisePage.focusTitle(reason)
+        else if (selected)
+            animePage.focusTitle(reason)
     }
 
     function focusSearch() { list.focusSearch() }
 
     // Where it is, for the window's back and forward: an anime, a franchise, the grid or home.
     function location() {
-        return { slug: selected, group: selectedGroup, grid: showGrid }
+        return { slug: selected, group: selectedGroup, grid: showGrid, from: from }
     }
     function restore(place) {
         if (place.group)
-            openFranchise(place.group)
+            openFranchise(place.group, true)
         else
-            select(place.slug)
+            select(place.slug, place.from, true)
         showGrid = place.grid
     }
 
@@ -106,8 +144,8 @@ Item {
                 page.select("")
                 page.showGrid = open
             }
-            onActivated: slug => page.select(slug)
-            onFranchiseActivated: id => page.openFranchise(id)
+            onActivated: (slug, quiet) => page.select(slug, "library", quiet)
+            onFranchiseActivated: (id, quiet) => page.openFranchise(id, quiet)
             onActionFailed: text => page.actionFailed(text)
             onRemoveRequested: (slug, title) => removal.show([slug], title, page.app.library.archivedOnly)
             onCreateFranchiseRequested: (slug, title) => {
@@ -133,15 +171,19 @@ Item {
             }
 
             AnimePage {
+                id: animePage
                 view: page.app.libraryAnime
-                onBack: page.select("")
+                steps: page.animeSteps
+                onBack: page.back()
             }
 
             FranchisePage {
+                id: franchisePage
                 model: page.app.library
+                steps: [{ text: "Biblioteca", go: () => page.select("") }]
                 onActionFailed: text => page.actionFailed(text)
                 onActivated: slug => page.select(slug)
-                onBack: page.select("")
+                onBack: page.back()
                 onRemoveRequested: (slugs, title) => removal.show(slugs, title, page.app.library.archivedOnly)
             }
 

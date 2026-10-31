@@ -20,6 +20,11 @@ Item {
     property string genres
     property url posterUrl
     property url backdropUrl
+    // The places above the page, for the breadcrumb over the title: [{text, go}].
+    property var steps: []
+    // Where Tab goes from the title: the page's ActionBar.
+    property Item bar: null
+    readonly property Item titleItem: titleLabel
     // The art spans the page; the poster and titles keep to the page's column.
     property real contentWidth: width - 2 * Theme.section
 
@@ -29,6 +34,13 @@ Item {
     readonly property int smallerTitle: 24
     // The titles' column: what the poster leaves, not the label's own width, which its size moves.
     readonly property real titleWidth: contentWidth - Theme.posterWidth - block.spacing
+
+    // A page that opens takes the keyboard on its title, as a screen reader expects.
+    // A Label keeps no focus reason: a mouse-led opening shows no frame, as Fluent's controls.
+    function focusTitle(reason) {
+        titleLabel.focusedBy = reason
+        titleLabel.forceActiveFocus(reason)
+    }
 
     // About 4:1 (300 px on a 1300 px page), never above 340 nor below the poster and its margins.
     implicitHeight: hasBackdrop ? Math.min(340, Math.max(Math.round(width / 4.3), block.implicitHeight + 44))
@@ -135,8 +147,17 @@ Item {
             Layout.alignment: Qt.AlignBottom
             spacing: 6
 
+            Breadcrumb {
+                Layout.fillWidth: true
+                Layout.bottomMargin: 2
+                visible: root.steps.length > 0
+                steps: root.steps
+                current: root.title
+            }
+
             Label {
                 id: titleLabel
+                objectName: "pageTitle"
                 readonly property var fit: root.fitTitle(root.title, root.titleWidth)
                 Layout.fillWidth: true
                 text: fit.text
@@ -148,6 +169,21 @@ Item {
                 elide: Text.ElideRight
                 Accessible.role: Accessible.Heading
                 Accessible.name: root.title
+                activeFocusOnTab: true
+                Keys.onTabPressed: event => event.accepted = root.bar !== null && root.bar.enter()
+                property int focusedBy: Qt.TabFocusReason
+                onActiveFocusChanged: if (!activeFocus) focusedBy = Qt.TabFocusReason
+
+                // Around the words, not the column they sit in.
+                FocusFrame {
+                    anchors.fill: undefined
+                    x: -3
+                    y: -3
+                    width: titleLabel.contentWidth + 6
+                    height: titleLabel.contentHeight + 6
+                    visible: titleLabel.activeFocus && titleLabel.focusedBy !== Qt.MouseFocusReason
+                    radiusInside: 2
+                }
             }
 
             Label {

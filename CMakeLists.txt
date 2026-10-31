@@ -129,6 +129,8 @@ qt_add_qml_module(animehub-desktop
     qml/anime/SelectionBar.qml
     qml/catalog/CatalogPage.qml
     qml/components/ActionMenu.qml
+    qml/components/Breadcrumb.qml
+    qml/components/FocusFrame.qml
     qml/components/Glyph.qml
     qml/components/MenuEntry.qml
     qml/components/ModalDialog.qml
@@ -148,7 +150,6 @@ qt_add_qml_module(animehub-desktop
     qml/downloads/SpeedGraph.qml
     qml/library/FranchisePage.qml
     qml/library/LibraryRemovalDialog.qml
-    qml/library/FeaturedCard.qml
     qml/library/LibraryGrid.qml
     qml/library/LibraryHome.qml
     qml/library/LibraryList.qml

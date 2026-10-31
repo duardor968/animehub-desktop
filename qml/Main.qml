@@ -18,9 +18,15 @@ ApplicationWindow {
     property var history: []
     property int historyIndex: -1
     property bool travelling: false
+    // What had the keyboard in each place when it was left, to give it back on returning:
+    // {item, reason} by history index.
+    property var focusAt: ({})
+    // What had it when something opened a new place, until that place is recorded.
+    property var leaving: null
     function here() {
         return { page: tabs.currentIndex, library: libraryPage.location(),
-                 catalog: catalogPage.depth > 1 ? app.catalogAnime.slug : "" }
+                 catalog: catalogPage.depth > 1 ? app.catalogAnime.slug : "",
+                 catalogFrom: catalogPage.from }
     }
     function remember() {
         if (travelling)
@@ -28,6 +34,9 @@ ApplicationWindow {
         const now = here()
         if (historyIndex >= 0 && JSON.stringify(history[historyIndex]) === JSON.stringify(now))
             return
+        if (leaving && historyIndex >= 0)
+            focusAt[historyIndex] = leaving
+        leaving = null
         history = history.slice(0, historyIndex + 1).concat([now])
         historyIndex = history.length - 1
     }
@@ -35,16 +44,54 @@ ApplicationWindow {
         const index = historyIndex + step
         if (index < 0 || index >= history.length)
             return
+        const reason = openingReason()
+        focusAt[historyIndex] = { item: activeFocusItem, reason: reason }
         travelling = true
         const place = history[index]
         tabs.currentIndex = place.page
         libraryPage.restore(place.library)
         if (place.catalog)
-            catalogPage.openAnime(place.catalog)
+            catalogPage.openAnime(place.catalog, place.catalogFrom, true)
         else
             catalogPage.home()
         historyIndex = index
         travelling = false
+        arrive(index, reason)
+    }
+    // The keyboard back where it was in that place; else on the title of the page there.
+    function arrive(index, reason) {
+        const last = focusAt[index]
+        try {
+            if (last && last.item && last.item.visible) {
+                last.item.forceActiveFocus(last.reason)
+                return
+            }
+        } catch (gone) {
+            // The item went with its page.
+        }
+        if (tabs.currentIndex === 0)
+            libraryPage.focusTitle(reason)
+        else if (tabs.currentIndex === 1)
+            catalogPage.focusTitle(reason)
+    }
+    // Esc: back where the user was; at the first place, up to the tab's start.
+    function goBack() {
+        if (historyIndex > 0)
+            travel(-1)
+        else if (tabs.currentIndex === 0)
+            libraryPage.select("")
+        else if (tabs.currentIndex === 1)
+            catalogPage.home()
+    }
+    // How a place is being opened, and what had the keyboard: a mouse-led opening shows no focus
+    // frame on the new page, as Fluent's controls show none for a click.
+    function openingReason() {
+        const item = activeFocusItem
+        const reason = item && item.focusReason === Qt.MouseFocusReason ? Qt.MouseFocusReason
+                                                                         : Qt.OtherFocusReason
+        if (!travelling && item)
+            leaving = { item: item, reason: item.focusReason ?? Qt.OtherFocusReason }
+        return reason
     }
     // Places change after the click that changes them: one record per move, not per property.
     Timer {
@@ -53,14 +100,16 @@ ApplicationWindow {
         onTriggered: window.remember()
     }
 
-    // An anime's page: in the library if it is there, otherwise in the catalog.
-    function openAnime(slug) {
+    // An anime's page: in the library if it is there, otherwise in the catalog. Opened from the
+    // Downloads tab, its breadcrumb leads back there.
+    function openAnime(slug, from) {
+        const downloads = from === "downloads"
         if (app.library.contains(slug)) {
             showPage(0)
-            libraryPage.select(slug)
+            libraryPage.select(slug, downloads ? "downloads" : "library")
         } else {
             showPage(1)
-            catalogPage.openAnime(slug)
+            catalogPage.openAnime(slug, downloads ? "downloads" : "catalog")
         }
     }
 
@@ -235,6 +284,8 @@ ApplicationWindow {
             onActionFailed: text => toast.show(text, true)
             onBrowseCatalog: window.showPage(1)
             onSearchCatalog: text => window.searchCatalog(text)
+            onBack: window.goBack()
+            onShowDownloads: window.showPage(2)
             onSelectedChanged: rememberLater.restart()
             onSelectedGroupChanged: rememberLater.restart()
             onShowGridChanged: rememberLater.restart()
@@ -245,12 +296,14 @@ ApplicationWindow {
             app: window.app
             active: StackLayout.isCurrentItem
             onDepthChanged: rememberLater.restart()
+            onBack: window.goBack()
+            onShowDownloads: window.showPage(2)
         }
 
         DownloadsPage {
             app: window.app
             onBrowseCatalog: window.showPage(1)
-            onOpenAnime: slug => window.openAnime(slug)
+            onOpenAnime: slug => window.openAnime(slug, "downloads")
         }
     }
 
@@ -296,6 +349,19 @@ ApplicationWindow {
     Connections {
         target: window.app.catalogAnime
         function onUndoable(text) { toast.show(text, false, "Deshacer", () => window.app.catalogAnime.undo()) }
+    }
+    // Whatever adds an anime (watching it, downloading it, a star) says so, with the way to it.
+    Connections {
+        target: window.app.libraryAnime
+        function onAddedToLibrary(slug, title) {
+            toast.show("Añadido a la biblioteca", false, "Ver", () => window.openAnime(slug))
+        }
+    }
+    Connections {
+        target: window.app.catalogAnime
+        function onAddedToLibrary(slug, title) {
+            toast.show("Añadido a la biblioteca", false, "Ver", () => window.openAnime(slug))
+        }
     }
     Connections {
         target: window.app.downloads
