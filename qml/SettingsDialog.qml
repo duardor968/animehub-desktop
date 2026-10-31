@@ -33,8 +33,8 @@ ModalDialog {
     // Linux has no bundled mpv (the system's is used) and its desktops name things otherwise.
     readonly property bool windows: Qt.platform.os === "windows"
     readonly property var categories: [
-        { key: "downloads", name: "Descargas" },
         { key: "general", name: "General" },
+        { key: "downloads", name: "Descargas" },
         { key: "linked-devices", name: "Dispositivos vinculados" },
         { key: "about", name: "Acerca de" }
     ]
@@ -81,45 +81,26 @@ ModalDialog {
         }
     }
 
-    // Lists and text fields share one width, against the rows' right edge.
+    // Lists and text fields share one width, against the rows' right edge; a list whose longest
+    // option needs more takes it, so no option is ever cut.
     component Choice: ComboBox {
+        implicitContentWidthPolicy: ComboBox.WidestText
         Layout.fillWidth: true
-        Layout.preferredWidth: dialog.controlWidth
-        Layout.maximumWidth: dialog.controlWidth
+        Layout.preferredWidth: Math.max(dialog.controlWidth, implicitWidth)
+        Layout.maximumWidth: Math.max(dialog.controlWidth, implicitWidth)
     }
     component Field: TextField {
         Layout.fillWidth: true
         Layout.preferredWidth: dialog.controlWidth
         Layout.maximumWidth: dialog.controlWidth
     }
-    // A switch as Windows' settings show one: its text, then the knob against the right edge.
-    component Toggle: RowLayout {
-        id: toggle
-
-        property alias text: caption.text
-        property alias checked: knob.checked
-        signal toggled
-
-        spacing: 12
-
-        Label {
-            id: caption
-            Accessible.ignored: true
-            // As a switch's own text, it switches it too.
-            TapHandler {
-                onTapped: {
-                    knob.toggle()
-                    knob.toggled()
-                }
-            }
-        }
-        Switch {
-            id: knob
-            // Without a text, as wide as its knob: flush with the edge.
-            Layout.preferredWidth: implicitIndicatorWidth
-            Accessible.name: caption.text
-            onToggled: toggle.toggled()
-        }
+    // A switch as Windows' settings show one: the row's name says what it does, the knob sits
+    // against the right edge with no text of its own. `name` is that row's name, for a reader.
+    component Toggle: Switch {
+        property string name
+        // Without a text, as wide as its knob: flush with the edge.
+        Layout.preferredWidth: implicitIndicatorWidth
+        Accessible.name: name
     }
 
     RowLayout {
@@ -204,6 +185,71 @@ ModalDialog {
 
                 SettingsPage {
                     SettingRow {
+                        label: "Reproductor"
+                        info: dialog.windows
+                              ? "El reproductor incluido y PotPlayer guardan el minuto en el que te "
+                                + "quedas, y PotPlayer sigue con los siguientes episodios descargados. "
+                                + "Con otra aplicación de Windows, abrir un episodio lo marca como visto."
+                              : "mpv guarda el minuto en el que te quedas. Con la aplicación "
+                                + "predeterminada, abrir un episodio lo marca como visto."
+
+                        // PotPlayer only while it is installed.
+                        Choice {
+                            readonly property var keys: dialog.settings.potPlayerFound
+                                                        ? ["mpv", "potplayer", "system"]
+                                                        : ["mpv", "system"]
+                            model: dialog.windows
+                                   ? (dialog.settings.potPlayerFound
+                                      ? ["Incluido (mpv)", "PotPlayer", "Aplicación predeterminada de Windows"]
+                                      : ["Incluido (mpv)", "Aplicación predeterminada de Windows"])
+                                   : ["mpv", "Aplicación predeterminada"]
+                            currentIndex: Math.max(0, keys.indexOf(dialog.settings.player))
+                            onActivated: index => dialog.settings.player = keys[index]
+                            Accessible.name: "Reproductor"
+                        }
+                    }
+
+                    SettingRow {
+                        id: notifyRow
+                        label: "Avisar de episodios nuevos"
+
+                        Toggle {
+                            name: notifyRow.label
+                            checked: dialog.settings.notifications
+                            onToggled: dialog.settings.notifications = checked
+                        }
+                    }
+
+                    SettingRow {
+                        id: startRow
+                        // A desktop without a tray (GNOME without its extension) shows the window.
+                        label: (dialog.app.tray ? "Abrir en la bandeja al iniciar " : "Abrir al iniciar ")
+                               + (dialog.windows ? "Windows" : "sesión")
+                        unavailable: dialog.isolatedReason
+
+                        Toggle {
+                            name: startRow.label
+                            checked: dialog.settings.startWithWindows
+                            onToggled: dialog.settings.startWithWindows = checked
+                        }
+                    }
+
+                    // Without a tray, closing the window quits.
+                    SettingRow {
+                        visible: dialog.app.tray
+                        label: "Al cerrar la ventana"
+
+                        Choice {
+                            model: ["Preguntar", "Seguir en la bandeja", "Salir"]
+                            currentIndex: dialog.settings.closeAction
+                            onActivated: index => dialog.settings.closeAction = index
+                            Accessible.name: "Al cerrar la ventana"
+                        }
+                    }
+                }
+
+                SettingsPage {
+                    SettingRow {
                         label: "Descargar con"
                         info: "AnimeHub descarga de MEGA y Pixeldrain. JDownloader descarga también de "
                               + "MP4Upload y 1Fichier, y su progreso se ve igual en Descargas."
@@ -219,16 +265,16 @@ ModalDialog {
                     // Only while AnimeHub downloads: JDownloader, as the engine, takes them all.
                     SettingRow {
                         visible: !dialog.jdEngine
-                        label: "Servidores que AnimeHub no descarga (MP4Upload, 1Fichier)"
-                        info: "Si un episodio no está en MEGA ni en Pixeldrain, JDownloader lo descarga "
-                              + "en la carpeta de AnimeHub y su progreso se ve igual en Descargas."
+                        label: "MP4Upload y 1Fichier"
+                        info: "AnimeHub no descarga de estos servidores. Si un episodio solo está en "
+                              + "ellos, JDownloader puede descargarlo en la carpeta de AnimeHub, y su "
+                              + "progreso se ve igual en Descargas."
 
                         Choice {
-                            model: ["No descargar", "Con JDownloader en este PC",
-                                    "Con JDownloader por MyJDownloader"]
+                            model: ["Omitir", "JDownloader en este PC", "JDownloader por MyJDownloader"]
                             currentIndex: dialog.settings.jdownloader
                             onActivated: index => dialog.settings.jdownloader = index
-                            Accessible.name: "Servidores que AnimeHub no descarga"
+                            Accessible.name: "MP4Upload y 1Fichier"
                         }
                     }
 
@@ -351,10 +397,11 @@ ModalDialog {
                         wrapMode: Text.Wrap
                     }
 
+                    // The path under the name: it has the row's width, and the button keeps its column.
                     SettingRow {
                         label: "Carpeta"
-                        value: dialog.windows ? dialog.settings.downloadDirectory.replace(/\//g, "\\")
-                                              : dialog.settings.downloadDirectory
+                        detail: dialog.windows ? dialog.settings.downloadDirectory.replace(/\//g, "\\")
+                                               : dialog.settings.downloadDirectory
                         unavailable: dialog.isolatedReason
 
                         Button {
@@ -450,68 +497,7 @@ ModalDialog {
                 }
 
                 SettingsPage {
-                    SettingRow {
-                        label: "Reproductor"
-                        info: dialog.windows
-                              ? "El reproductor incluido y PotPlayer guardan el minuto en el que te "
-                                + "quedas, y PotPlayer sigue con los siguientes episodios descargados. "
-                                + "Con otra aplicación de Windows, abrir un episodio lo marca como visto."
-                              : "mpv guarda el minuto en el que te quedas. Con la aplicación "
-                                + "predeterminada, abrir un episodio lo marca como visto."
-
-                        // PotPlayer only while it is installed.
-                        Choice {
-                            readonly property var keys: dialog.settings.potPlayerFound
-                                                        ? ["mpv", "potplayer", "system"]
-                                                        : ["mpv", "system"]
-                            model: dialog.windows
-                                   ? (dialog.settings.potPlayerFound
-                                      ? ["Incluido (mpv)", "PotPlayer", "Aplicación predeterminada de Windows"]
-                                      : ["Incluido (mpv)", "Aplicación predeterminada de Windows"])
-                                   : ["mpv", "Aplicación predeterminada"]
-                            currentIndex: Math.max(0, keys.indexOf(dialog.settings.player))
-                            onActivated: index => dialog.settings.player = keys[index]
-                            Accessible.name: "Reproductor"
-                        }
-                    }
-
-                    SettingRow {
-                        label: "Avisos"
-
-                        Toggle {
-                            text: "Episodios nuevos de la biblioteca"
-                            checked: dialog.settings.notifications
-                            onToggled: dialog.settings.notifications = checked
-                        }
-                    }
-
-                    SettingRow {
-                        label: dialog.windows ? "Al iniciar Windows" : "Al iniciar sesión"
-
-                        unavailable: dialog.isolatedReason
-                        Toggle {
-                            // A desktop without a tray (GNOME without its extension) shows the window.
-                            text: dialog.app.tray ? "Abrir AnimeHub en la bandeja" : "Abrir AnimeHub"
-                            checked: dialog.settings.startWithWindows
-                            onToggled: dialog.settings.startWithWindows = checked
-                        }
-                    }
-
-                    // Without a tray, closing the window quits.
-                    SettingRow {
-                        visible: dialog.app.tray
-                        label: "Al cerrar la ventana"
-
-                        Choice {
-                            model: ["Preguntar", "Seguir en la bandeja", "Salir"]
-                            currentIndex: dialog.settings.closeAction
-                            onActivated: index => dialog.settings.closeAction = index
-                            Accessible.name: "Al cerrar la ventana"
-                        }
-                    }
-                }
-
-                SettingsPage {
+                    id: linkedDevicesPage
                     // The browsers linked to this PC change elsewhere: read again on each visit.
                     readonly property bool showing: StackLayout.isCurrentItem && dialog.visible
                     onShowingChanged: if (showing) linkedDevices.refresh()
@@ -519,6 +505,7 @@ ModalDialog {
                     LinkedDevicesPage {
                         id: linkedDevices
                         Layout.fillWidth: true
+                        active: linkedDevicesPage.showing
                         remote: dialog.app.remote
                         controlWidth: dialog.controlWidth
                     }

@@ -13,6 +13,8 @@ Item {
     property string info
     // The current value as text, before the controls that change it.
     property string value
+    // A long value (a folder) under the name instead, muted, with the row's width.
+    property string detail
     property color valueColor: Theme.ink
     // Why its controls cannot be used now, told over them on hover; empty while they can.
     property string unavailable
@@ -22,7 +24,7 @@ Item {
     readonly property int nameWidth: 180
     readonly property bool stacked: width < 520
     // Rows taller than one control line keep the name level with their first line.
-    readonly property bool tall: end.implicitHeight > 40
+    readonly property bool tall: end.implicitHeight > 40 && detail === ""
     readonly property real nameLine: title.height / Math.max(1, title.lineCount)
 
     Layout.fillWidth: true
@@ -33,7 +35,7 @@ Item {
         id: name
 
         width: row.stacked ? row.width : row.width - end.width - 24
-        height: title.height
+        height: title.height + (detailLabel.visible ? detailLabel.height + 2 : 0)
         y: row.stacked ? 12 : row.tall ? 10 + (32 - row.nameLine) / 2 : (row.height - height) / 2
 
         Label {
@@ -55,6 +57,19 @@ Item {
             HoverHandler { id: hover }
             ToolTip.visible: hover.hovered
             ToolTip.text: row.info
+        }
+        Label {
+            id: detailLabel
+            y: title.height + 2
+            width: name.width
+            visible: row.detail !== ""
+            text: row.detail
+            color: Theme.muted
+            font.pixelSize: Theme.caption
+            elide: Text.ElideMiddle
+            ToolTip.visible: detailHover.hovered && truncated
+            ToolTip.text: text
+            HoverHandler { id: detailHover }
         }
     }
 

@@ -18,14 +18,14 @@ ModalDialog {
     // Three buttons of equal width that fit "Seguir en la bandeja".
     width: Math.min(580, parent.width - 48)
     title: "¿Seguir en la bandeja?"
-    focus: true
     onAboutToShow: remember.checked = false
+    // The main button has the keyboard, as in a Windows dialog: Enter takes it, Tab moves on.
+    onOpened: stay.forceActiveFocus()
 
     ColumnLayout {
         width: dialog.availableWidth
         spacing: 16
-        // Enter takes the main button, as in a Windows dialog.
-        focus: true
+        // Enter on the check box takes the main button too.
         Keys.onReturnPressed: dialog.choose(AppSettings.Tray)
         Keys.onEnterPressed: dialog.choose(AppSettings.Tray)
 
@@ -45,21 +45,28 @@ ModalDialog {
     // Windows order: the main action, the other one, then Cancelar.
     footer: DialogButtonBox {
         Button {
+            id: stay
             text: "Seguir en la bandeja"
             // The button box clears `highlighted` while it lays its buttons out; a binding that
             // changes on opening sets it again.
             highlighted: dialog.visible
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
             onClicked: dialog.choose(AppSettings.Tray)
+            Keys.onReturnPressed: clicked()
+            Keys.onEnterPressed: clicked()
         }
         Button {
             text: "Salir"
             DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
             onClicked: dialog.choose(AppSettings.Quit)
+            Keys.onReturnPressed: clicked()
+            Keys.onEnterPressed: clicked()
         }
         Button {
             text: "Cancelar"
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            Keys.onReturnPressed: dialog.reject()
+            Keys.onEnterPressed: dialog.reject()
         }
     }
 }
