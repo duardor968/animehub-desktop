@@ -48,6 +48,13 @@ struct DownloadSeriesRow {
     QString diskText;    // "26 episodios · 9,1 GB"
     QString watchText;   // "Ver ep. 5", "Continuar · Ep. 13"; empty when nothing to watch
     bool hasFolder = false;
+    // Why it does not go as it should, beyond failures: "MEGA llegó a su límite · se libera a las
+    // 15:20 · sigue con Pixeldrain". Empty when nothing to say.
+    QString notice;
+    bool running = false;   // an episode looks for its file, transfers or is checked
+    int cancelCount = 0;    // episodes cancelling stops
+    bool filesGone = false; // completed, and none of its files is on disk anymore
+    int goneCount = 0;      // completed episodes whose file is gone
     QList<DownloadEpisodeRow> episodes;
 
     bool operator==(const DownloadSeriesRow&) const = default;
@@ -116,6 +123,10 @@ public:
         DiskTextRole,
         WatchTextRole,
         HasFolderRole,
+        NoticeRole,
+        RunningRole,
+        CancelCountRole,
+        FilesGoneRole,
         EpisodesRole,
     };
 

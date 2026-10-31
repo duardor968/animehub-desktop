@@ -19,7 +19,9 @@ AbstractButton {
     bottomPadding: 6
     Accessible.role: Accessible.Heading
     Accessible.name: text + " (" + count + ")"
-    Accessible.description: folded ? "Plegada" : "Desplegada"
+    // QML has no expanded state: a toggle reads as one.
+    Accessible.checkable: true
+    Accessible.checked: !folded
     Accessible.onPressAction: clicked()
 
     // As the rows': past the content by the same margin on both sides.

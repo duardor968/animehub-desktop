@@ -21,6 +21,7 @@ AbstractButton {
     Accessible.name: "Descargas: " + downloads.barText
                      + (downloads.barPercent !== "" ? ", " + downloads.barPercent : "")
                      + (downloads.barProblem !== "" ? ", " + downloads.barProblem : "")
+                     + (downloads.barNotice !== "" ? ", " + downloads.barNotice : "")
 
     background: Rectangle {
         color: root.hovered ? Theme.hover : Theme.pane
@@ -85,6 +86,16 @@ AbstractButton {
                         font.pixelSize: Theme.caption
                     }
 
+                    // MEGA's quota and where the episode went meanwhile.
+                    Label {
+                        Layout.maximumWidth: 360
+                        visible: text !== ""
+                        text: root.downloads.barNotice
+                        color: Theme.warning
+                        font.pixelSize: Theme.caption
+                        elide: Text.ElideRight
+                    }
+
                     Label {
                         visible: text !== ""
                         text: root.downloads.barPercent
@@ -115,7 +126,7 @@ AbstractButton {
                   : root.downloads.canPauseAll ? "Pausar todo" : "Reanudar todo"
             icon.source: Theme.source(root.mode === DownloadsView.Failed ? Theme.icon.retry
                                       : root.downloads.canPauseAll ? Theme.icon.pause
-                                                                   : Theme.icon.download)
+                                                                   : Theme.icon.play)
             icon.width: 16
             icon.height: 16
             onClicked: {

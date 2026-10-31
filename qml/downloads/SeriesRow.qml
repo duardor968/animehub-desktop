@@ -5,7 +5,9 @@ import AnimeHub
 
 // A series on the Downloads page: its poster, how far its episodes are and its actions. The
 // whole row unfolds it into its episodes, its chevron on the right as in WinUI's Expander; in
-// "A continuación" it can be dragged to another place in line.
+// "A continuación" it can be dragged to another place in line. Its button is what fits where it
+// is: pause what transfers, resume what is paused, start now what waits in line; completed,
+// open its folder, or, with its files gone, take it out of the list.
 Item {
     id: root
 
@@ -27,11 +29,17 @@ Item {
     required property string diskText
     required property string watchText
     required property bool hasFolder
+    required property string notice
+    required property bool running
+    required property int cancelCount
+    required property bool filesGone
     required property var episodes
 
     required property DownloadsView downloads
-    // In "A continuación"; otherwise in "Completadas".
+    // In line ("Descargando" or "A continuación"); otherwise in "Completadas".
     property bool queued: true
+    // Only "A continuación" sorts by dragging.
+    property bool draggable: queued
     property bool expanded
     property int barWidth: 200
     // How far it steps aside while another row is dragged over it.
@@ -83,13 +91,16 @@ Item {
         hoverEnabled: true
         focusPolicy: Qt.StrongFocus
         Accessible.name: root.title + ", " + root.summary + (root.failed > 0 ? ", " + root.failedText : "")
+                         + (root.notice !== "" ? ", " + root.notice : "")
                          + (root.engineLine !== "" ? ", " + root.engineLine : "")
-        Accessible.description: root.expanded ? "Desplegada" : "Plegada"
+        // QML has no expanded state: a toggle reads as one.
+        Accessible.checkable: true
+        Accessible.checked: root.expanded
         Accessible.onPressAction: root.toggled()
         onClicked: root.toggled()
 
         Keys.onPressed: event => {
-            if (!root.queued || !(event.modifiers & Qt.AltModifier))
+            if (!root.draggable || !(event.modifiers & Qt.AltModifier))
                 return
             if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
                 root.moveRequested(event.key === Qt.Key_Up ? -1 : 1)
@@ -99,7 +110,7 @@ Item {
 
         DragHandler {
             id: drag
-            enabled: root.queued
+            enabled: root.draggable
             target: null
             xAxis.enabled: false
             grabPermissions: PointerHandler.CanTakeOverFromAnything | PointerHandler.TakeOverForbidden
@@ -219,6 +230,17 @@ Item {
                         }
                     }
                 }
+                Label {
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    text: root.notice
+                    color: Theme.warning
+                    font.pixelSize: Theme.caption
+                    elide: Text.ElideRight
+                    ToolTip.visible: noticeHover.hovered && truncated
+                    ToolTip.text: text
+                    HoverHandler { id: noticeHover }
+                }
                 // Who downloads it and where, only when JDownloader takes part.
                 Label {
                     Layout.fillWidth: true
@@ -248,25 +270,28 @@ Item {
                     value: root.progress
                 }
 
+                // Completed: watch the next episode, or, its files gone, download them again.
                 Button {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    visible: !root.queued && root.watchText !== "" && !root.compact
-                    text: root.watchText
-                    icon.source: Theme.source(Theme.icon.play)
-                    onClicked: root.downloads.watchNext(root.slug)
+                    visible: !root.queued && (root.filesGone || root.watchText !== "") && !root.compact
+                    text: root.filesGone ? "Volver a descargar" : root.watchText
+                    icon.source: Theme.source(root.filesGone ? Theme.icon.download : Theme.icon.play)
+                    onClicked: root.filesGone ? root.downloads.downloadAgain(root.slug)
+                                              : root.downloads.watchNext(root.slug)
                 }
 
                 ToolButton {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    visible: !root.queued && root.watchText !== "" && root.compact
+                    visible: !root.queued && (root.filesGone || root.watchText !== "") && root.compact
                     display: AbstractButton.IconOnly
-                    text: root.watchText
-                    icon.source: Theme.source(Theme.icon.play)
+                    text: root.filesGone ? "Volver a descargar" : root.watchText
+                    icon.source: Theme.source(root.filesGone ? Theme.icon.download : Theme.icon.play)
                     ToolTip.visible: hovered
                     ToolTip.text: text
-                    onClicked: root.downloads.watchNext(root.slug)
+                    onClicked: root.filesGone ? root.downloads.downloadAgain(root.slug)
+                                              : root.downloads.watchNext(root.slug)
                 }
             }
 
@@ -288,20 +313,36 @@ Item {
                 }
 
                 ToolButton {
-                    visible: root.queued ? root.canPause || root.canResume : true
-                    icon.source: Theme.source(!root.queued ? Theme.icon.folder
-                                              : root.canPause ? Theme.icon.pause : Theme.icon.download)
+                    id: action
+                    // What the button does here: "pause", "resume", "now", "folder", "forget".
+                    readonly property string kind: !root.queued
+                                                   ? (root.filesGone ? "forget" : root.hasFolder ? "folder" : "")
+                                                   : root.running && root.canPause ? "pause"
+                                                   : root.canResume ? "resume"
+                                                   : !root.first ? "now" : ""
+                    visible: kind !== ""
+                    icon.source: Theme.source(kind === "pause" ? Theme.icon.pause
+                                              : kind === "resume" ? Theme.icon.play
+                                              : kind === "now" ? Theme.icon.download
+                                              : kind === "forget" ? Theme.icon.cancel
+                                              : Theme.icon.folder)
                     display: AbstractButton.IconOnly
-                    text: !root.queued ? "Abrir la carpeta" : root.canPause ? "Pausar" : "Reanudar"
+                    text: kind === "pause" ? "Pausar" : kind === "resume" ? "Reanudar"
+                          : kind === "now" ? "Descargar ahora" : kind === "forget" ? "Quitar de la lista"
+                          : "Abrir la carpeta"
                     ToolTip.visible: hovered
                     ToolTip.text: text
                     onClicked: {
-                        if (!root.queued)
-                            root.downloads.openSeriesFolder(root.slug)
-                        else if (root.canPause)
+                        if (kind === "pause")
                             root.downloads.pauseSeries(root.slug)
-                        else
+                        else if (kind === "resume")
                             root.downloads.resumeSeries(root.slug)
+                        else if (kind === "now")
+                            root.downloads.prioritize(root.slug)
+                        else if (kind === "forget")
+                            root.downloads.forgetSeries(root.slug)
+                        else
+                            root.downloads.openSeriesFolder(root.slug)
                     }
                 }
             }

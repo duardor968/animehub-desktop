@@ -22,6 +22,8 @@ class DownloadsView final : public QObject {
     Q_PROPERTY(DownloadSeriesModel* completed READ completed CONSTANT)
     // The series on view at the top of the page (none or one), out of the queue, as in Steam.
     Q_PROPERTY(DownloadSeriesModel* current READ current CONSTANT)
+    // Other series transferring at the same time, under it: they are not "next".
+    Q_PROPERTY(DownloadSeriesModel* active READ active CONSTANT)
 
     // Whether pausing or resuming everything, or retrying the failures, has anything to act on.
     // What JDownloader already transfers is not AnimeHub's to pause.
@@ -35,6 +37,8 @@ class DownloadsView final : public QObject {
     Q_PROPERTY(QString headerTitle READ headerTitle NOTIFY summaryChanged)
     Q_PROPERTY(QString headerEpisode READ headerEpisode NOTIFY summaryChanged)
     Q_PROPERTY(QString headerDetail READ headerDetail NOTIFY summaryChanged)
+    // What holds it back beyond a failure (MEGA's quota); empty when nothing.
+    Q_PROPERTY(QString headerNotice READ headerNotice NOTIFY summaryChanged)
     Q_PROPERTY(double headerProgress READ headerProgress NOTIFY summaryChanged)
     Q_PROPERTY(QUrl headerArt READ headerArt NOTIFY summaryChanged)
 
@@ -44,6 +48,7 @@ class DownloadsView final : public QObject {
     Q_PROPERTY(Mode barMode READ barMode NOTIFY summaryChanged)
     Q_PROPERTY(QString barText READ barText NOTIFY summaryChanged)
     Q_PROPERTY(QString barProblem READ barProblem NOTIFY summaryChanged)
+    Q_PROPERTY(QString barNotice READ barNotice NOTIFY summaryChanged)
     Q_PROPERTY(double barProgress READ barProgress NOTIFY summaryChanged)
     Q_PROPERTY(QString barPercent READ barPercent NOTIFY summaryChanged) // "45 %"; empty when none
     Q_PROPERTY(QUrl barPoster READ barPoster NOTIFY summaryChanged)
@@ -76,6 +81,9 @@ public:
     [[nodiscard]] DownloadSeriesModel* current() {
         return &current_;
     }
+    [[nodiscard]] DownloadSeriesModel* active() {
+        return &active_;
+    }
 
     [[nodiscard]] bool canPauseAll() const {
         return can_pause_all_;
@@ -102,6 +110,9 @@ public:
     [[nodiscard]] QString headerDetail() const {
         return header_.detail;
     }
+    [[nodiscard]] QString headerNotice() const {
+        return header_.notice;
+    }
     [[nodiscard]] double headerProgress() const {
         return header_.progress;
     }
@@ -120,6 +131,9 @@ public:
     }
     [[nodiscard]] QString barProblem() const {
         return bar_.problem;
+    }
+    [[nodiscard]] QString barNotice() const {
+        return bar_.notice;
     }
     [[nodiscard]] double barProgress() const {
         return bar_.progress;
@@ -158,6 +172,8 @@ public:
     Q_INVOKABLE void trashSeries(const QString& slug);
     // Every completed series leaves the list; the files stay.
     Q_INVOKABLE void clearCompleted();
+    // The series' completed episodes whose files are gone go in line again.
+    Q_INVOKABLE void downloadAgain(const QString& slug);
     Q_INVOKABLE void openSeriesFolder(const QString& slug);
     // Plays the series' next episode to watch among the downloaded ones.
     Q_INVOKABLE void watchNext(const QString& slug);
@@ -189,6 +205,7 @@ private:
         QString title;
         QString episode;
         QString detail;
+        QString notice;
         double progress = 0;
         QUrl art;
 
@@ -198,6 +215,7 @@ private:
         Mode mode = Mode::Idle;
         QString text;
         QString problem;
+        QString notice;
         double progress = 0;
         QString percent;
         QUrl poster;
@@ -227,7 +245,8 @@ private:
     DownloadSeriesModel queue_;
     DownloadSeriesModel completed_;
     DownloadSeriesModel current_;
-    qsizetype current_place_ = 0; // where the current series is in line
+    DownloadSeriesModel active_;
+    QStringList line_order_; // every series in line, in order
     QHash<QString, SeriesInfo> infos_;
     QTimer rebuild_timer_;
 
@@ -239,7 +258,8 @@ private:
 
     QTimer sample_timer_;
     QList<qreal> samples_;
-    qint64 speed_ = 0;
+    qint64 speed_ = 0;       // total now, read at each rebuild
+    qint64 shown_speed_ = 0; // the last sample's: what "Actual" says
     qint64 peak_ = 0;
     qint64 session_bytes_ = 0;
     QHash<qint64, Seen> seen_;

@@ -134,16 +134,17 @@ Item {
                 }
             }
 
+            // Pause only what moves: an episode waiting its turn has nothing to pause yet.
             ToolButton {
-                visible: root.canPause || root.canResume || root.canRetry
+                visible: (root.canPause && root.running) || root.canResume || root.canRetry
                          || (root.completed && root.hasFile)
-                icon.source: Theme.source(root.completed ? Theme.icon.play
+                icon.source: Theme.source(root.completed || root.canResume ? Theme.icon.play
                                           : root.failed ? Theme.icon.retry
-                                          : root.canPause ? Theme.icon.pause : Theme.icon.download)
+                                          : Theme.icon.pause)
                 display: AbstractButton.IconOnly
                 text: root.completed ? "Ver"
                       : root.failed ? "Reintentar"
-                      : root.canPause ? "Pausar" : "Reanudar"
+                      : root.canResume ? "Reanudar" : "Pausar"
                 ToolTip.visible: hovered
                 ToolTip.text: text
                 onClicked: {
@@ -151,10 +152,10 @@ Item {
                         root.downloads.play(root.taskId)
                     else if (root.failed)
                         root.downloads.retry(root.taskId)
-                    else if (root.canPause)
-                        root.downloads.pause(root.taskId)
-                    else
+                    else if (root.canResume)
                         root.downloads.resume(root.taskId)
+                    else
+                        root.downloads.pause(root.taskId)
                 }
             }
         }

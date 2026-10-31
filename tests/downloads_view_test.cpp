@@ -1,5 +1,7 @@
+#include "app/display.h"
 #include "app/downloads_view.h"
 #include <QDir>
+#include <QFile>
 #include <QLocale>
 #include <QNetworkAccessManager>
 #include <QTemporaryDir>
@@ -50,6 +52,26 @@ struct Fixture {
         anime.slug = QStringLiteral("a");
         anime.title = QStringLiteral("A");
         return static_cast<bool>(repo->saveSnapshot(anime));
+    }
+
+    // A completed episode whose video is on disk, as the library records it.
+    std::optional<downloads::Task> addOnDisk(double number, qint64 bytes) {
+        auto task = add(number, downloads::TaskState::Completed);
+        if (!task || !QDir().mkpath(QFileInfo(task->targetPath).absolutePath())) {
+            return std::nullopt;
+        }
+        task->targetPath += QStringLiteral(".mp4");
+        QFile file(task->targetPath);
+        if (!file.open(QIODevice::WriteOnly) || file.write("video") != 5) {
+            return std::nullopt;
+        }
+        file.close();
+        task->bytesDone = task->bytesTotal = bytes;
+        task->finishedAt = QDateTime::currentDateTime();
+        if (!queue->save(*task) || !repo->setEpisodeFile(anime.slug, number, task->targetPath, 5)) {
+            return std::nullopt;
+        }
+        return task;
     }
 
     std::optional<downloads::Task>
@@ -212,23 +234,70 @@ private slots:
         f.anime.posterUrl = QUrl(QStringLiteral("https://img.test/poster.webp"));
         f.anime.backdropUrl = QUrl(QStringLiteral("https://img.test/backdrop.webp"));
         QVERIFY(f.open());
-        const auto finished = QDateTime::currentDateTime();
-        for (const auto& [number, bytes] : {std::pair{1.0, 100'000'000LL}, {2.0, 186'000'000LL}}) {
-            auto task = f.add(number, downloads::TaskState::Completed);
-            QVERIFY(task);
-            task->bytesDone = task->bytesTotal = bytes;
-            task->finishedAt = finished.addSecs(number == 1.0 ? -60 : 0);
-            QVERIFY(f.queue->save(*task));
-        }
+        QVERIFY(f.addOnDisk(1, 100'000'000));
+        QVERIFY(f.addOnDisk(2, 186'000'000));
         f.manager->start(false);
         app::DownloadsView view(*f.manager, *f.library, *f.player);
         QCOMPARE(view.completed()->rows().size(), 1);
         const auto& series = view.completed()->rows().first();
-        QCOMPARE(series.summary, QStringLiteral("2 episodios · 286 MB · hoy ") +
+        // One date format on the page: "31 oct", as every date it shows.
+        QCOMPARE(series.summary, QStringLiteral("2 episodios · 286 MB · ") +
                                      QLocale(QLocale::Spanish, QLocale::Spain)
-                                         .toString(finished.time(), QStringLiteral("HH:mm")));
+                                         .toString(QDate::currentDate(), QStringLiteral("d MMM")));
         QCOMPARE(series.poster, f.anime.posterUrl);
+        QVERIFY(series.hasFolder);
+        QVERIFY(!series.filesGone);
+        QVERIFY(series.episodes.first().hasFile);
         QVERIFY(!view.barVisible());
+    }
+
+    // Dark Summoner's case: its videos were deleted and its folder is empty. The row says so,
+    // offers to download them again, and has nothing to watch nor a folder to open.
+    void completedSeriesWithoutItsFilesSaysTheyAreGone() {
+        Fixture f;
+        QVERIFY(f.open());
+        const auto first = f.addOnDisk(1, 100'000'000);
+        const auto second = f.addOnDisk(2, 100'000'000);
+        QVERIFY(first && second);
+        QVERIFY(QFile::remove(first->targetPath) && QFile::remove(second->targetPath));
+        QVERIFY(QDir(QFileInfo(first->targetPath).absolutePath()).isEmpty());
+        f.manager->start(false);
+        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        QCOMPARE(view.completed()->rows().size(), 1);
+        const auto& series = view.completed()->rows().first();
+        QVERIFY(series.filesGone);
+        QVERIFY(series.summary.startsWith(QStringLiteral("Archivos eliminados · 2 episodios")));
+        QCOMPARE(series.watchText, QString());
+        QVERIFY(!series.hasFolder);
+        QCOMPARE(series.filesOnDisk, 0);
+        QCOMPARE(series.episodes.first().detail, QStringLiteral("Archivo eliminado"));
+        QVERIFY(!series.episodes.first().hasFile);
+    }
+
+    // MEGA's quota, kept across a restart by the episode waiting for it, is said where the
+    // download shows: the top of the page, its row and the bar.
+    void megaQuotaIsSaidWhereTheDownloadShows() {
+        Fixture f;
+        QVERIFY(f.open());
+        auto waiting = f.add(1, downloads::TaskState::Waiting);
+        QVERIFY(waiting);
+        waiting->issue = downloads::TaskIssue::Quota;
+        waiting->issueDetail = downloads::kMegaStatedTime;
+        waiting->retryAt = QDateTime::currentDateTimeUtc().addSecs(3600);
+        QVERIFY(f.queue->save(*waiting));
+        f.manager->start(false);
+        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        const auto quota = f.manager->megaQuota();
+        QVERIFY(quota && quota->known);
+        const auto said = QStringLiteral("MEGA llegó a su límite · se libera a las ") +
+                          app::display::time(waiting->retryAt);
+        QCOMPARE(view.headerNotice(), said);
+        QCOMPARE(view.barNotice(), said);
+        QCOMPARE(view.current()->rows().first().notice, said);
+        QCOMPARE(view.current()->rows().first().episodes.first().detail, said);
+        QCOMPARE(
+            app::display::megaQuota(quota->until, false, QStringLiteral("sigue con Pixeldrain")),
+            QStringLiteral("MEGA llegó a su límite · sigue con Pixeldrain"));
     }
 
     // The bar counts the episode on view among the whole line, finished ones of series still
@@ -253,6 +322,9 @@ private slots:
         QCOMPARE(view.barMode(), app::DownloadsView::Mode::Active);
         QCOMPARE(view.barText(), QStringLiteral("Descargando 2 de 3 · A ep. 2"));
         QCOMPARE(view.barPercent(), QStringLiteral("45 %"));
+        // The top of the page names the series' count once, and the episode's bytes once.
+        QCOMPARE(view.headerEpisode(), QStringLiteral("Episodio 2 · 1 de 3 descargados"));
+        QCOMPARE(view.headerDetail(), QStringLiteral("0 KB de 0 KB"));
         QCOMPARE(view.barProblem(), QStringLiteral("1 con error"));
         QCOMPARE(view.barPoster(), f.anime.posterUrl);
     }

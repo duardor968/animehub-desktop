@@ -6,8 +6,8 @@ import AnimeHub
 // The top of the Downloads page, as in Steam: the series on view over its art, with its
 // episode, progress and failures as wide as the room left of the speed; the speed of the last
 // minutes on the right; in the corner what acts on the series and on every download. At rest it
-// is one line. The series is not repeated in the line below: it unfolds into its episodes from
-// here.
+// is one line. The series is not repeated in the line below: its title and episode line are its
+// row, and unfold into its episodes as the rows below do.
 Rectangle {
     id: root
 
@@ -126,26 +126,71 @@ Rectangle {
         visible: !root.idle
         spacing: 4
 
-        // Cut in the middle, so the season at the end stays.
-        Label {
+        // The series on view as the rows below are: pressed, it unfolds into its episodes, the
+        // chevron after its line saying which way it goes.
+        AbstractButton {
+            id: unfold
             Layout.fillWidth: true
-            text: root.downloads.headerTitle
-            color: Theme.ink
-            font.pixelSize: Theme.title
-            font.weight: Font.DemiBold
-            elide: Text.ElideMiddle
-            Accessible.role: Accessible.Heading
-            ToolTip.visible: titleHover.hovered && truncated
-            ToolTip.text: text
-            HoverHandler { id: titleHover }
-        }
+            hoverEnabled: true
+            focusPolicy: Qt.StrongFocus
+            padding: 0
+            Accessible.role: Accessible.Button
+            Accessible.name: root.downloads.headerTitle + ", " + root.downloads.headerEpisode
+                             + ", episodios"
+            // QML has no expanded state: a toggle reads as one.
+            Accessible.checkable: true
+            Accessible.checked: root.expanded
+            Accessible.onPressAction: clicked()
+            onClicked: root.toggled(root.downloads.headerSlug)
 
-        Label {
-            Layout.fillWidth: true
-            text: root.downloads.headerEpisode
-            color: Theme.muted
-            font.pixelSize: Theme.body
-            elide: Text.ElideRight
+            background: Rectangle {
+                x: -12
+                y: -4
+                width: parent.width + 24
+                height: parent.height + 8
+                radius: Theme.radius
+                color: unfold.hovered ? Qt.rgba(Theme.hover.r, Theme.hover.g, Theme.hover.b, 0.6)
+                                      : "transparent"
+                border.width: unfold.visualFocus ? 2 : 0
+                border.color: Theme.accent
+            }
+
+            contentItem: ColumnLayout {
+                spacing: 4
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.downloads.headerTitle
+                    color: Theme.ink
+                    font.pixelSize: Theme.title
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                    Accessible.ignored: true
+                    ToolTip.visible: unfold.hovered && truncated
+                    ToolTip.text: text
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    Label {
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: implicitWidth
+                        text: root.downloads.headerEpisode
+                        color: Theme.muted
+                        font.pixelSize: Theme.body
+                        elide: Text.ElideRight
+                        Accessible.ignored: true
+                    }
+                    Glyph {
+                        glyph: root.expanded ? "e70e" : "e70d"
+                        size: 12
+                        color: Theme.muted
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+            }
         }
 
         // Who downloads the series and where, only when JDownloader takes part.
@@ -191,6 +236,19 @@ Rectangle {
             }
         }
 
+        // What holds it back and what it does meanwhile (MEGA's quota).
+        Label {
+            Layout.fillWidth: true
+            visible: text !== ""
+            text: root.downloads.headerNotice
+            color: Theme.warning
+            font.pixelSize: Theme.body
+            elide: Text.ElideRight
+            ToolTip.visible: noticeHover.hovered && truncated
+            ToolTip.text: text
+            HoverHandler { id: noticeHover }
+        }
+
         ProgressLine {
             Layout.fillWidth: true
             Layout.topMargin: 12
@@ -223,7 +281,7 @@ Rectangle {
             visible: root.downloads.canPauseAll || root.downloads.canResumeAll
             text: root.downloads.canPauseAll ? "Pausar todo" : "Reanudar todo"
             icon.source: Theme.source(root.downloads.canPauseAll ? Theme.icon.pause
-                                                                 : Theme.icon.download)
+                                                                 : Theme.icon.play)
             onClicked: root.downloads.canPauseAll ? root.downloads.pauseAll()
                                                   : root.downloads.resumeAll()
         }
@@ -241,17 +299,10 @@ Rectangle {
                 required property bool first
                 required property bool hasFolder
                 required property string cancelText
+                required property int cancelCount
 
                 spacing: 4
 
-                // One label for both states, so nothing beside it moves; the chevron turns.
-                ToolButton {
-                    text: "Episodios"
-                    font.pixelSize: Theme.body
-                    icon.source: Theme.source(root.expanded ? "e70e" : "e70d")
-                    Accessible.description: root.expanded ? "Desplegados" : "Plegados"
-                    onClicked: root.toggled(actions.slug)
-                }
                 ToolButton {
                     id: more
                     icon.source: Theme.source(Theme.icon.more)
@@ -294,7 +345,7 @@ Rectangle {
         anchors.rightMargin: 32
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 28
-        width: root.wide ? 312 : 252
+        width: root.wide ? 312 : 288
         visible: !root.idle
         spacing: 10
 
@@ -308,11 +359,11 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 0
+            spacing: 12
 
             Figure { value: root.downloads.speedText; label: "Actual" }
             Figure { value: root.downloads.peakText; label: "Máximo" }
-            Figure { value: root.downloads.totalText; label: "Total" }
+            Figure { value: root.downloads.totalText; label: "En esta sesión" }
         }
     }
 

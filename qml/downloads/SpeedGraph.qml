@@ -2,8 +2,8 @@ import QtQuick
 import AnimeHub
 
 // Total download speed of the last minutes as bars, newest on the right, scaled to the highest
-// one on view. As Steam's, its area and its axis stay while something is in line: the bars rise
-// inside them.
+// one on view. As Steam's, the bars stand on the header's own backdrop, over a faint axis: no
+// plot area of its own, so at rest only the axis is left.
 Item {
     id: root
 
@@ -17,28 +17,10 @@ Item {
             found = Math.max(found, samples[i])
         return found
     }
-    // Room over the highest bar, under the top of the area.
-    readonly property real span: height - 8
 
     implicitWidth: 240
     implicitHeight: 88
     Accessible.ignored: true
-
-    // The plot area, as in Task Manager's graphs.
-    Rectangle {
-        anchors.fill: parent
-        color: Theme.canvas
-    }
-
-    // Half the highest speed on view.
-    Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        y: root.height - 1 - Math.round(root.span / 2)
-        height: 1
-        color: Theme.stroke
-        opacity: 0.5
-    }
 
     Repeater {
         model: root.bars
@@ -48,21 +30,25 @@ Item {
             readonly property real value: root.samples[root.samples.length - root.bars + index]
 
             x: root.width - (root.bars - index) * root.pitch + 1
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: 1
+            anchors.bottom: axis.top
             width: root.pitch - 1
             visible: value > 0
-            height: root.highest > 0 ? Math.max(3, Math.round(value / root.highest * root.span)) : 0
-            color: Theme.accent
+            height: root.highest > 0 ? Math.max(2, Math.round(value / root.highest * (root.height - 1))) : 0
+            // Lighter towards the top, so the bars melt into the art behind them.
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55) }
+                GradientStop { position: 1.0; color: Theme.accent }
+            }
         }
     }
 
-    // The axis, lighter than the guide so the empty graph still reads as one.
     Rectangle {
+        id: axis
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         height: 1
-        color: Theme.faint
+        color: Theme.stroke
+        opacity: 0.6
     }
 }

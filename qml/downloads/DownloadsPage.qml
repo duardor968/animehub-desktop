@@ -3,17 +3,17 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// Downloads, by series as in Steam: the series on view and the speed at the top, then the
-// other series in line and the completed ones, each section folded as it was left. With nothing
-// in line, what the library has to download is one click away.
+// Downloads, by series as in Steam: the series on view and the speed at the top, then the other
+// series transferring with it, the series in line and the completed ones, each section folded as
+// it was left. With nothing in line, what the library has to download is one click away.
 Item {
     id: page
 
     required property AppController app
     readonly property DownloadsView downloads: app.downloads
     readonly property LibraryModel library: app.library
-    readonly property bool empty: downloads.current.count === 0 && downloads.queue.count === 0
-                                  && downloads.completed.count === 0
+    readonly property bool empty: downloads.current.count === 0 && downloads.active.count === 0
+                                  && downloads.queue.count === 0 && downloads.completed.count === 0
 
     signal browseCatalog()
     signal openAnime(string slug)
@@ -21,6 +21,8 @@ Item {
     // INI settings come back as text.
     property bool queueFolded: String(app.settings.value("downloads/queueFolded", false)) === "true"
     property bool completedFolded: String(app.settings.value("downloads/completedFolded", false)) === "true"
+    property bool activeFolded: String(app.settings.value("downloads/activeFolded", false)) === "true"
+    onActiveFoldedChanged: app.settings.setValue("downloads/activeFolded", activeFolded)
     onQueueFoldedChanged: app.settings.setValue("downloads/queueFolded", queueFolded)
     onCompletedFoldedChanged: app.settings.setValue("downloads/completedFolded", completedFolded)
 
@@ -117,14 +119,21 @@ Item {
         return 0
     }
 
-    function askCancel(slug, title, consequence) {
+    // "Cancelar 7 episodios", "Cancelar el episodio 3": what a cancel reaches, said the same way
+    // for a series and for one of its episodes.
+    function cancelScope(count) {
+        return count === 1 ? "Cancelar 1 episodio" : "Cancelar " + count + " episodios"
+    }
+    // Both cancel at once when nothing on disk goes, and ask first when bytes would.
+    function askCancel(slug, title, consequence, count) {
         if (consequence === "") {
             downloads.cancelSeries(slug)
             return
         }
         cancelDialog.slug = slug
         cancelDialog.taskId = -1
-        cancelDialog.title = "¿Cancelar la descarga de " + title + "?"
+        cancelDialog.title = "¿" + cancelScope(count) + " de " + title + "?"
+        cancelDialog.action = cancelScope(count)
         cancelDialog.consequence = consequence
         cancelDialog.open()
     }
@@ -134,7 +143,8 @@ Item {
             return
         }
         cancelDialog.taskId = taskId
-        cancelDialog.title = "¿Cancelar la descarga del " + label.toLowerCase() + " de " + title + "?"
+        cancelDialog.title = "¿Cancelar el " + label.toLowerCase() + " de " + title + "?"
+        cancelDialog.action = "Cancelar el " + label.toLowerCase()
         cancelDialog.consequence = "Se borrarán los " + partial + " descargados."
         cancelDialog.open()
     }
@@ -230,6 +240,49 @@ Item {
                                     page.askCancelEpisode(taskId, label, unfolded.title, partial)
                             }
                         }
+                    }
+                }
+            }
+
+            // Other series transferring at the same time: they already run, so they are not next.
+            SectionHeading {
+                Layout.fillWidth: true
+                Layout.topMargin: 16
+                Layout.leftMargin: 32
+                Layout.rightMargin: 32
+                Layout.bottomMargin: 8
+                visible: page.downloads.active.count > 0
+                text: "Descargando"
+                count: page.downloads.active.count
+                folded: page.activeFolded
+                onClicked: page.activeFolded = !page.activeFolded
+            }
+
+            Fold {
+                open: !page.activeFolded && page.downloads.active.count > 0
+
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: contentHeight
+                    interactive: false
+                    model: page.downloads.active
+                    Accessible.name: "Descargando"
+
+                    displaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                    add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 } }
+                    remove: Transition { NumberAnimation { property: "opacity"; to: 0; duration: 150 } }
+
+                    delegate: SeriesRow {
+                        id: activeRow
+                        downloads: page.downloads
+                        queued: true
+                        draggable: false
+                        expanded: page.expanded[slug] === true
+                        barWidth: page.barWidth
+                        onToggled: page.toggle(slug)
+                        onMenuRequested: anchor => queueMenu.showFor(activeRow, anchor)
+                        onEpisodeCancelRequested: (taskId, label, partial) =>
+                            page.askCancelEpisode(taskId, label, title, partial)
                     }
                 }
             }
@@ -372,6 +425,7 @@ Item {
         property bool first
         property bool hasFolder
         property string consequence
+        property int cancelCount
         property bool withPage
 
         entries: [nowEntry, folderEntry, animeEntry, cancelSeparator, cancelEntry, pageSeparator,
@@ -383,6 +437,7 @@ Item {
             first = row.first
             hasFolder = row.hasFolder
             consequence = row.cancelText
+            cancelCount = row.cancelCount
             withPage = fromHeader === true
             queueMenu.show(anchor, true)
         }
@@ -413,9 +468,10 @@ Item {
         }
         MenuEntry {
             id: cancelEntry
-            text: queueMenu.consequence !== "" ? "Cancelar la descarga…" : "Cancelar la descarga"
+            text: page.cancelScope(queueMenu.cancelCount) + (queueMenu.consequence !== "" ? "…" : "")
             glyph: Theme.icon.cancel
-            onTriggered: page.askCancel(queueMenu.slug, queueMenu.name, queueMenu.consequence)
+            onTriggered: page.askCancel(queueMenu.slug, queueMenu.name, queueMenu.consequence,
+                                        queueMenu.cancelCount)
         }
         MenuSeparator {
             id: pageSeparator
@@ -438,21 +494,34 @@ Item {
         property string name
         property int files
         property string diskText
+        property bool filesGone
+
+        entries: [againEntry, completedAnimeEntry, completedRemoveEntry]
 
         function showFor(row, anchor) {
             slug = row.slug
             name = row.title
             files = row.filesOnDisk
             diskText = row.diskText
+            filesGone = row.filesGone
             completedMenu.show(anchor, true)
         }
 
         MenuEntry {
+            id: againEntry
+            property bool wanted: completedMenu.filesGone
+            text: "Volver a descargar"
+            glyph: Theme.icon.download
+            onTriggered: page.downloads.downloadAgain(completedMenu.slug)
+        }
+        MenuEntry {
+            id: completedAnimeEntry
             text: "Ir al anime"
             glyph: Theme.icon.library
             onTriggered: page.openAnime(completedMenu.slug)
         }
         MenuEntry {
+            id: completedRemoveEntry
             text: completedMenu.files > 0 ? "Quitar…" : "Quitar de la lista"
             glyph: Theme.icon.remove
             onTriggered: page.askRemove(completedMenu.slug, completedMenu.name, completedMenu.files,
@@ -468,6 +537,7 @@ Item {
         property string slug
         property var taskId: -1
         property string consequence
+        property string action: "Cancelar la descarga"
 
         // Wide enough for the title, which names the series.
         width: Math.min(Math.max(460, implicitHeaderWidth), parent.width - 48)
@@ -481,7 +551,7 @@ Item {
 
         footer: DialogButtonBox {
             Button {
-                text: "Cancelar la descarga"
+                text: cancelDialog.action
                 // DialogButtonBox clears a `highlighted` set at creation; a binding comes back.
                 highlighted: cancelDialog.visible
                 DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole

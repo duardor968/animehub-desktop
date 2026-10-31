@@ -5,7 +5,6 @@
 
 #include <QDir>
 #include <QFileInfo>
-#include <QLocale>
 #include <QSet>
 
 #include <algorithm>
@@ -64,6 +63,8 @@ QString phaseName(const Task& task) {
         return QStringLiteral("Preparando descarga");
     if (task.enginePhase == u"cancelling" || task.enginePhase == u"cancel_requested")
         return QStringLiteral("Cancelación pendiente");
+    if (task.enginePhase == u"launching")
+        return QStringLiteral("Abriendo JDownloader");
     return QStringLiteral("Descargando");
 }
 
@@ -84,7 +85,7 @@ QString taskDetail(const Task& task) {
     // No source reads the same on both engines; JDownloader's own failures carry their reason,
     // and the network and the API keep theirs.
     if (task.state == TaskState::Failed && task.issue == TaskIssue::NoSource)
-        return display::issue(task.issue);
+        return display::issue(task);
     if (task.state == TaskState::Failed && task.issue != TaskIssue::Network &&
         !task.issueDetail.isEmpty())
         return task.issueDetail;
@@ -120,21 +121,48 @@ QString count(qsizetype n, const QString& one, const QString& many) {
     return n == 1 ? one : many.arg(n);
 }
 
-// When a series finished: "hoy 13:04", "ayer 21:40", "15 oct", "15 oct 2025".
-QString finishedWhen(const QDateTime& at, const QDateTime& now) {
-    const QLocale spanish(QLocale::Spanish, QLocale::Spain);
-    const auto local = at.toLocalTime();
-    const auto today = now.toLocalTime().date();
-    const auto days = local.date().daysTo(today);
-    if (days == 0) {
-        return QStringLiteral("hoy ") + spanish.toString(local.time(), QStringLiteral("HH:mm"));
+// Why an episode does not go as it should while MEGA's quota lasts, and what it does meanwhile.
+QString noticeFor(const Task& task,
+                  const std::optional<downloads::DownloadManager::MegaQuota>& quota) {
+    using downloads::TaskIssue;
+    if (!quota || !task.active()) {
+        return {};
     }
-    if (days == 1) {
-        return QStringLiteral("ayer ") + spanish.toString(local.time(), QStringLiteral("HH:mm"));
+    QStringList meanwhile;
+    if (task.jdUnreachable) {
+        meanwhile.append(QStringLiteral("JDownloader no responde"));
     }
-    return spanish.toString(local.date(), local.date().year() == today.year()
-                                              ? QStringLiteral("d MMM")
-                                              : QStringLiteral("d MMM yyyy"));
+    if (task.state == TaskState::Waiting && task.issue == TaskIssue::Quota) {
+        if (!quota->known) {
+            meanwhile.append(QStringLiteral("se reintenta a las ") + display::time(task.retryAt));
+        }
+    } else if (task.detour != TaskIssue::Quota) {
+        return {};
+    } else if (!native(task)) {
+        meanwhile.append(QStringLiteral("enviado a JDownloader"));
+    } else if (task.provider && *task.provider != api::Provider::Mega) {
+        meanwhile.append(QStringLiteral("sigue con ") + display::provider(*task.provider));
+    }
+    return display::megaQuota(quota->until, quota->known, meanwhile.join(QStringLiteral(" · ")));
+}
+
+// What the top of the page says under its progress: where the episode is, without the speed,
+// which the graph's "Actual" gives for every download at once.
+QString headerDetailOf(const Task& task) {
+    if (!native(task) || task.state != TaskState::Downloading) {
+        return task.state == TaskState::Waiting && native(task) ? display::retry(task.retryAt)
+                                                                : taskDetail(task);
+    }
+    QStringList parts;
+    if (task.bytesTotal > 0) {
+        parts.append(display::bytes(task.bytesDone) + QStringLiteral(" de ") +
+                     display::bytes(task.bytesTotal));
+    }
+    if (task.bytesPerSecond > 0 && task.bytesTotal > task.bytesDone) {
+        parts.append(QStringLiteral("quedan ") +
+                     display::remaining((task.bytesTotal - task.bytesDone) / task.bytesPerSecond));
+    }
+    return parts.isEmpty() ? display::download(task) : parts.join(QStringLiteral(" · "));
 }
 
 // Where the series' episodes end up, whoever downloads them: JDownloader's own folder goes once
@@ -165,6 +193,7 @@ DownloadsView::DownloadsView(downloads::DownloadManager& manager, library::Libra
         later();
     });
     connect(&manager_, &downloads::DownloadManager::taskChanged, this, &DownloadsView::taskChanged);
+    connect(&manager_, &downloads::DownloadManager::megaQuotaChanged, this, later);
     connect(&library_, &library::LibraryService::animeChanged, this,
             [this, later](const QString& slug) {
                 infos_.remove(slug);
@@ -238,6 +267,7 @@ void DownloadsView::rebuild() {
     // Queue order first, then the finished ones, newest first: a series takes the place of its
     // first task in that order.
     const auto tasks = manager_.tasks();
+    const auto quota = manager_.megaQuota();
     QList<Group> groups;
     QHash<QString, qsizetype> places;
     for (const auto& task : tasks) {
@@ -254,11 +284,10 @@ void DownloadsView::rebuild() {
         group.inLine = group.inLine || inLine(task.state);
     }
 
-    const auto now = QDateTime::currentDateTime();
     QList<DownloadSeriesRow> queue;
     QList<DownloadSeriesRow> completed;
     QSet<QString> line_slugs;        // series with something still in line
-    QHash<QString, QString> amounts; // "3 de 12 descargados · 1,1 GB de 4,2 GB", for the header
+    QHash<QString, QString> amounts; // "3 de 12 descargados", for the header
     for (auto& group : groups) {
         std::ranges::sort(group.tasks, {}, &Task::number);
         const auto& series = info(group.slug);
@@ -318,6 +347,12 @@ void DownloadsView::rebuild() {
                 ++active;
                 break;
             }
+            if (inLine(task.state)) {
+                ++row.cancelCount;
+            }
+            if (row.notice.isEmpty()) {
+                row.notice = noticeFor(task, quota);
+            }
             bytes += bytesOf(task);
             total += task.bytesTotal;
             totals_known = totals_known && task.bytesTotal > 0;
@@ -344,7 +379,9 @@ void DownloadsView::rebuild() {
                  .image = episode != series.episodes.cend() ? episode->imageUrl : QUrl(),
                  .state = downloads::stateKey(task.state),
                  .progress = fractionOf(task),
-                 .detail = taskDetail(task),
+                 .detail = task.state == TaskState::Completed && !on_disk
+                               ? QStringLiteral("Archivo eliminado")
+                               : taskDetail(task),
                  .problem = task.state == TaskState::Failed,
                  .hasFile = on_disk,
                  .engineLine = folder.isEmpty() ? QString() : engineLine({folder}),
@@ -356,19 +393,22 @@ void DownloadsView::rebuild() {
                                 : QString()});
         }
         row.engineLine = engineLine(jd_folders);
+        row.running = active > 0;
+        row.goneCount = done - files;
+        row.filesGone = !group.inLine && done > 0 && files == 0;
 
         const auto episodes = group.tasks.size();
         QStringList summary;
+        if (row.filesGone) {
+            summary.append(QStringLiteral("Archivos eliminados"));
+        }
         if (group.inLine && active == 0) {
             if (disconnected > 0) {
                 summary.append(QStringLiteral("JDownloader sin conexión"));
             } else if (paused > 0 && queued + waiting == 0) {
                 summary.append(QStringLiteral("En pausa"));
-            } else if (waiting > 0 && queued == 0) {
-                summary.append(
-                    QStringLiteral("Se reintenta a las ") +
-                    QLocale(QLocale::Spanish, QLocale::Spain)
-                        .toString(retry_at.toLocalTime().time(), QStringLiteral("HH:mm")));
+            } else if (waiting > 0 && queued == 0 && row.notice.isEmpty()) {
+                summary.append(display::retry(retry_at));
             } else if (queued > 0) {
                 summary.append(QStringLiteral("En cola"));
             }
@@ -389,11 +429,10 @@ void DownloadsView::rebuild() {
             summary.append(size);
         }
         if (!group.inLine && finished_at.isValid()) {
-            summary.append(finishedWhen(finished_at, now));
+            summary.append(display::date(finished_at));
         }
         row.summary = summary.join(QStringLiteral(" · "));
-        amounts.insert(group.slug, QStringLiteral("%1 de %2 descargados").arg(done).arg(episodes) +
-                                       (size.isEmpty() ? QString() : QStringLiteral(" · ") + size));
+        amounts.insert(group.slug, QStringLiteral("%1 de %2 descargados").arg(done).arg(episodes));
         row.progress = episodes > 0 ? fraction / static_cast<double>(episodes) : 0.0;
         row.failed = failed;
         row.failedText = failed > 0 ? QStringLiteral("%1 con error").arg(failed) : QString();
@@ -417,13 +456,14 @@ void DownloadsView::rebuild() {
             files > 0 ? count(files, QStringLiteral("1 episodio"), QStringLiteral("%1 episodios")) +
                             QStringLiteral(" · ") + display::bytes(file_bytes)
                       : QString();
-        if (const auto next = nextToWatch(group.slug, group.tasks)) {
+        // Without its files there is nothing to watch.
+        if (const auto next = row.filesGone ? std::nullopt : nextToWatch(group.slug, group.tasks)) {
             const auto episode = series.episodes.value(*next);
             row.watchText = episode.state == library::WatchState::Watching && episode.positionMs > 0
                                 ? QStringLiteral("Continuar · Ep. ") + display::episodeNumber(*next)
                                 : QStringLiteral("Ver ep. ") + display::episodeNumber(*next);
         }
-        row.hasFolder = QFileInfo(folderOf(group.tasks)).isDir();
+        row.hasFolder = files > 0 && QFileInfo(folderOf(group.tasks)).isDir();
         if (group.inLine) {
             line_slugs.insert(group.slug);
         }
@@ -431,6 +471,10 @@ void DownloadsView::rebuild() {
     }
     if (!queue.isEmpty()) {
         queue.first().first = true;
+    }
+    line_order_.clear();
+    for (const auto& row : queue) {
+        line_order_.append(row.slug);
     }
 
     // What the top of the page and the bar show: something running, else what will start by
@@ -440,6 +484,7 @@ void DownloadsView::rebuild() {
     qint64 speed = 0;
     bool can_pause = false;
     bool can_retry = false;
+    QString notice; // the first episode's held back by MEGA's quota, for the bar
     const Task* shown = nullptr;
     const Task* next = nullptr;
     const Task* held = nullptr;
@@ -447,6 +492,9 @@ void DownloadsView::rebuild() {
     for (const auto& task : tasks) {
         can_pause = can_pause || pausable(task);
         can_retry = can_retry || retryable(task);
+        if (notice.isEmpty()) {
+            notice = noticeFor(task, quota);
+        }
         if (running(task.state)) {
             if (!shown) {
                 shown = &task;
@@ -481,30 +529,35 @@ void DownloadsView::rebuild() {
                   .title = subject->animeTitle,
                   .episode = display::episode(subject->number) + QStringLiteral(" · ") +
                              amounts.value(subject->slug),
-                  // The reason is on the episode's line; a single line here says when.
-                  .detail = subject->state == TaskState::Waiting && native(*subject)
-                                ? display::retry(subject->retryAt)
-                                : taskDetail(*subject),
+                  .detail = headerDetailOf(*subject),
+                  // Its own reason, else the first one on the page: the top speaks for it.
+                  .notice =
+                      noticeFor(*subject, quota).isEmpty() ? notice : noticeFor(*subject, quota),
                   .progress = fractionOf(*subject),
                   .art = info(subject->slug).art};
     } else {
         header.title = QStringLiteral("Nada descargando");
     }
 
-    // The series on view leaves the line under it.
+    // The series on view leaves the line under it, and so do the others transferring: what
+    // runs is not "next".
     QList<DownloadSeriesRow> current;
-    current_place_ = 0;
-    if (subject) {
-        const auto place = std::ranges::find(queue, subject->slug, &DownloadSeriesRow::slug);
-        if (place != queue.end()) {
-            current_place_ = std::distance(queue.begin(), place);
-            current.append(std::move(*place));
-            queue.erase(place);
+    QList<DownloadSeriesRow> active;
+    for (auto it = queue.begin(); it != queue.end();) {
+        if (subject && it->slug == subject->slug) {
+            current.append(std::move(*it));
+        } else if (it->running) {
+            active.append(std::move(*it));
+        } else {
+            ++it;
+            continue;
         }
+        it = queue.erase(it);
     }
     queue_.setRows(std::move(queue));
     completed_.setRows(std::move(completed));
     current_.setRows(std::move(current));
+    active_.setRows(std::move(active));
     if (shown || next) {
         // As Steam counts its line: the episode on view among every episode of the series in
         // line, the ones already finished included.
@@ -528,11 +581,16 @@ void DownloadsView::rebuild() {
         } else {
             text = QStringLiteral("En cola %1 de %2 · ").arg(finished + 1).arg(items) + what;
         }
+        // A percentage only while bytes move: an episode being checked, extracted or moved
+        // into place has no share left to show, and 100 % stays for what is done.
+        const bool moving = shown && shown->state == TaskState::Downloading &&
+                            (native(*shown) || shown->enginePhase == u"transferring");
         bar = {.mode = header.mode,
                .text = text,
                .progress = header.progress,
-               .percent =
-                   shown ? QStringLiteral("%1 %").arg(qRound(header.progress * 100)) : QString(),
+               .percent = moving ? QStringLiteral("%1 %").arg(
+                                       std::min(99, static_cast<int>(header.progress * 100)))
+                                 : QString(),
                .poster = info(subject->slug).poster};
     } else if (held) {
         bar = {.mode = Mode::Paused,
@@ -545,6 +603,7 @@ void DownloadsView::rebuild() {
     if (bar.mode != Mode::Failed && failed > 0) {
         bar.problem = QStringLiteral("%1 con error").arg(failed);
     }
+    bar.notice = notice;
 
     const bool changed = header != header_ || bar != bar_ || can_pause_all_ != can_pause ||
                          can_resume_all_ != (paused > 0) || can_retry_failed_ != can_retry;
@@ -557,13 +616,10 @@ void DownloadsView::rebuild() {
         emit summaryChanged();
     }
 
-    if (speed != speed_ || speed > peak_) {
-        speed_ = speed;
-        peak_ = std::max(peak_, speed);
-        emit speedChanged();
-    }
+    speed_ = speed;
     if (speed_ > 0 && !sample_timer_.isActive()) {
         sample_timer_.start();
+        sample(); // the graph and "Actual" start together
     }
 }
 
@@ -591,9 +647,12 @@ void DownloadsView::taskChanged(qint64 id) {
     seen_.insert(id, {.state = task->state, .bytes = task->bytesDone});
 }
 
+// The graph's newest bar, "Actual" and "Máximo" are one reading of the total speed.
 void DownloadsView::sample() {
     samples_.removeFirst();
     samples_.append(static_cast<qreal>(speed_));
+    shown_speed_ = speed_;
+    peak_ = std::max(peak_, speed_);
     if (speed_ == 0 && std::ranges::all_of(samples_, [](qreal value) { return value == 0; })) {
         sample_timer_.stop();
     }
@@ -601,7 +660,7 @@ void DownloadsView::sample() {
 }
 
 QString DownloadsView::speedText() const {
-    return display::speed(speed_);
+    return display::speed(shown_speed_);
 }
 
 QString DownloadsView::peakText() const {
@@ -662,17 +721,21 @@ void DownloadsView::prioritize(const QString& slug) {
 }
 
 void DownloadsView::moveSeries(int from, int to) {
-    QStringList order;
+    QStringList shown;
     for (const auto& row : queue_.rows()) {
-        order.append(row.slug);
+        shown.append(row.slug);
     }
-    if (from < 0 || to < 0 || from >= order.size() || to >= order.size() || from == to) {
+    if (from < 0 || to < 0 || from >= shown.size() || to >= shown.size() || from == to) {
         return;
     }
-    order.move(from, to);
-    // The series on view keeps its place in line.
-    if (!current_.rows().isEmpty()) {
-        order.insert(current_place_, current_.rows().first().slug);
+    shown.move(from, to);
+    // The series on view and the ones transferring keep their places in line.
+    auto order = line_order_;
+    qsizetype next = 0;
+    for (auto& slug : order) {
+        if (shown.contains(slug)) {
+            slug = shown[next++];
+        }
     }
     manager_.reorder(order);
     reorderNow();
@@ -719,6 +782,33 @@ void DownloadsView::trashSeries(const QString& slug) {
     emit message(count(trashed->count, QStringLiteral("1 episodio movido a la Papelera"),
                        QStringLiteral("%1 episodios movidos a la Papelera")) +
                      QStringLiteral(" · ") + display::bytes(trashed->bytes),
+                 false);
+}
+
+void DownloadsView::downloadAgain(const QString& slug) {
+    const auto& series = info(slug);
+    QList<double> numbers;
+    QString title;
+    for (const auto& task : tasksOf(slug)) {
+        const auto episode = series.episodes.constFind(task.number);
+        const bool on_disk = episode != series.episodes.cend() && !episode->filePath.isEmpty() &&
+                             QFileInfo(episode->filePath).isFile();
+        if (task.state == TaskState::Completed && !on_disk) {
+            numbers.append(task.number);
+            title = task.animeTitle;
+            manager_.forget(task.id); // its new download takes the row
+        }
+    }
+    if (numbers.isEmpty()) {
+        return;
+    }
+    const auto queued = manager_.enqueueMany(slug, numbers, title, downloads::TaskOrigin::Manual);
+    if (!queued) {
+        emit message(queued.error(), true);
+        return;
+    }
+    emit message(count(numbers.size(), QStringLiteral("1 episodio en cola"),
+                       QStringLiteral("%1 episodios en cola")),
                  false);
 }
 

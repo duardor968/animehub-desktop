@@ -220,6 +220,14 @@ QVariant DownloadSeriesModel::data(const QModelIndex& index, int role) const {
         return row.watchText;
     case HasFolderRole:
         return row.hasFolder;
+    case NoticeRole:
+        return row.notice;
+    case RunningRole:
+        return row.running;
+    case CancelCountRole:
+        return row.cancelCount;
+    case FilesGoneRole:
+        return row.filesGone;
     case EpisodesRole:
         return QVariant::fromValue(episodes_.value(row.slug));
     default:
@@ -245,6 +253,10 @@ QHash<int, QByteArray> DownloadSeriesModel::roleNames() const {
             {DiskTextRole, "diskText"},
             {WatchTextRole, "watchText"},
             {HasFolderRole, "hasFolder"},
+            {NoticeRole, "notice"},
+            {RunningRole, "running"},
+            {CancelCountRole, "cancelCount"},
+            {FilesGoneRole, "filesGone"},
             {EpisodesRole, "episodes"}};
 }
 
