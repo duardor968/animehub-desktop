@@ -9,6 +9,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -62,7 +63,13 @@ struct ApiFailure {
     Kind kind = Kind::Protocol;
     int code = 0;
     QString message;
+    // OverQuota: when the transfer quota frees, if MEGA said so (`tl` in the answer).
+    std::optional<std::chrono::seconds> timeLeft;
 };
+
+// Seconds until the transfer quota frees, as MEGA's storage servers state it on a 509 answer
+// (`X-MEGA-Time-Left`; read the same way by MEGA's own SDK). None when absent or not positive.
+[[nodiscard]] std::optional<std::chrono::seconds> quotaTimeLeft(QByteArrayView header);
 
 // Client for the `g` command of MEGA's public API.
 class Api final : public QObject {
@@ -74,6 +81,10 @@ public:
 
     using Callback = std::function<void(const std::expected<RemoteFile, ApiFailure>&)>;
     void file(const FileLink& link, QObject* context, Callback done);
+    // Asks a temporary download URL for one byte and reads how long its 509 says the quota
+    // lasts: aria2 reports the status but not the headers.
+    void quotaTimeLeft(const QUrl& url, QObject* context,
+                       std::function<void(std::optional<std::chrono::seconds>)> done);
 
 private:
     void request(const FileLink& link, QObject* context, Callback done, int attempt);

@@ -82,7 +82,18 @@ ApiFailure failureFor(int code) {
     }
 }
 
+std::optional<std::chrono::seconds> timeLeftFrom(const QJsonValue& value) {
+    const auto seconds = value.toInteger(0);
+    return seconds > 0 ? std::optional(std::chrono::seconds(seconds)) : std::nullopt;
+}
+
 } // namespace
+
+std::optional<std::chrono::seconds> quotaTimeLeft(QByteArrayView header) {
+    bool ok = false;
+    const auto seconds = header.trimmed().toLongLong(&ok);
+    return ok && seconds > 0 ? std::optional(std::chrono::seconds(seconds)) : std::nullopt;
+}
 
 std::optional<FileLink> parseFileLink(const QUrl& url) {
     const auto host = url.host().toLower();
@@ -299,6 +310,19 @@ void Api::request(const FileLink& link, QObject* context, Callback done, int att
                 return;
             }
             const auto object = answer.toObject();
+            // A file the IP may not download now comes as {"e": -17, "tl": seconds, ...}.
+            if (const auto error = object.value(QLatin1StringView("e")); error.isDouble()) {
+                auto failure = failureFor(error.toInt());
+                if (failure.kind == ApiFailure::Kind::OverQuota) {
+                    failure.timeLeft = timeLeftFrom(object.value(QLatin1StringView("tl")));
+                }
+                if (failure.kind == ApiFailure::Kind::Unavailable) {
+                    retry(std::move(failure));
+                } else {
+                    done(std::unexpected(std::move(failure)));
+                }
+                return;
+            }
             const QUrl download(object.value(QLatin1StringView("g")).toString(), QUrl::StrictMode);
             const auto size = object.value(QLatin1StringView("s")).toInteger(-1);
             // The bytes are encrypted and MAC-checked, so plain HTTP mirrors are acceptable.
@@ -314,6 +338,20 @@ void Api::request(const FileLink& link, QObject* context, Callback done, int att
                                         link.key),
             });
         });
+}
+
+void Api::quotaTimeLeft(const QUrl& url, QObject* context,
+                        std::function<void(std::optional<std::chrono::seconds>)> done) {
+    QNetworkRequest http(url);
+    http.setRawHeader("Range", "bytes=0-0");
+    http.setTransferTimeout(15'000);
+    auto* reply = network_.get(http);
+    connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
+    connect(reply, &QNetworkReply::finished, context, [reply, done = std::move(done)] {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        done(status == 509 ? mega::quotaTimeLeft(reply->rawHeader("X-MEGA-Time-Left"))
+                           : std::nullopt);
+    });
 }
 
 } // namespace animehub::downloads::mega

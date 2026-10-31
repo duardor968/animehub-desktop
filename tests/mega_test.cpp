@@ -196,6 +196,50 @@ private slots:
         QVERIFY(!*result);
         QCOMPARE(result->error().kind, mega::ApiFailure::Kind::NotFound);
     }
+
+    // Over its quota, MEGA says when it frees: `tl` in the API's answer, `X-MEGA-Time-Left` on
+    // the storage server's 509 (as MEGA's SDK reads them).
+    void readsWhenTheQuotaFrees() {
+        HttpTestServer server;
+        QVERIFY(server.listen());
+        server.route("POST", "/cs", [](const HttpTestServer::Request&) {
+            return HttpTestServer::Response{.body = "[{\"e\":-17,\"tl\":1234,\"s\":10}]"};
+        });
+        server.route("GET", "/dl/over", [](const HttpTestServer::Request& request) {
+            return HttpTestServer::Response{
+                .status = request.headers.value("range") == "bytes=0-0" ? 509 : 400,
+                .headers = {{"X-MEGA-Time-Left", "  610 "}}};
+        });
+        server.route("GET", "/dl/plain", [](const HttpTestServer::Request&) {
+            return HttpTestServer::Response{.status = 509};
+        });
+        QNetworkAccessManager network;
+        mega::Api api(network, nullptr, server.url(QStringLiteral("/cs")));
+
+        std::optional<std::expected<mega::RemoteFile, mega::ApiFailure>> result;
+        api.file(*mega::parseFileLink(linkUrl()), this,
+                 [&](const auto& answer) { result = answer; });
+        QTRY_VERIFY_WITH_TIMEOUT(result.has_value(), 5000);
+        QVERIFY(!*result);
+        QCOMPARE(result->error().kind, mega::ApiFailure::Kind::OverQuota);
+        QCOMPARE(result->error().timeLeft, std::optional(std::chrono::seconds(1234)));
+
+        std::optional<std::optional<std::chrono::seconds>> left;
+        api.quotaTimeLeft(server.url(QStringLiteral("/dl/over")), this,
+                          [&](auto seconds) { left = seconds; });
+        QTRY_VERIFY_WITH_TIMEOUT(left.has_value(), 5000);
+        QCOMPARE(*left, std::optional(std::chrono::seconds(610)));
+
+        left.reset();
+        api.quotaTimeLeft(server.url(QStringLiteral("/dl/plain")), this,
+                          [&](auto seconds) { left = seconds; });
+        QTRY_VERIFY_WITH_TIMEOUT(left.has_value(), 5000);
+        QCOMPARE(*left, std::nullopt); // no time stated: none made up
+
+        QCOMPARE(mega::quotaTimeLeft("0"), std::nullopt);
+        QCOMPARE(mega::quotaTimeLeft("-5"), std::nullopt);
+        QCOMPARE(mega::quotaTimeLeft("abc"), std::nullopt);
+    }
 };
 
 QTEST_GUILESS_MAIN(MegaTest)
