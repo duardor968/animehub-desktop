@@ -34,6 +34,7 @@ qt_add_library(animehub-core STATIC
   platform/aes.h
   platform/autostart.h
   platform/credentials.h
+  platform/installed_apps.h
   platform/process_job.h
   platform/trash.h
   remote/remote_service.cpp
@@ -47,8 +48,9 @@ qt_add_library(animehub-core STATIC
 if(WIN32)
   target_sources(animehub-core PRIVATE
     platform/aes_win.cpp platform/autostart_win.cpp platform/credentials_win.cpp
+    platform/installed_apps_win.cpp
     platform/process_job_win.cpp platform/trash_win.cpp)
-  target_link_libraries(animehub-core PRIVATE bcrypt advapi32)
+  target_link_libraries(animehub-core PRIVATE bcrypt advapi32 shlwapi)
 elseif(LINUX)
   # AES from OpenSSL's libcrypto and secrets in the desktop's keyring (Secret Service).
   find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
@@ -56,6 +58,7 @@ elseif(LINUX)
   pkg_check_modules(LIBSECRET REQUIRED IMPORTED_TARGET libsecret-1)
   target_sources(animehub-core PRIVATE
     platform/aes_linux.cpp platform/autostart_linux.cpp platform/credentials_linux.cpp
+    platform/installed_apps_linux.cpp
     platform/process_job_linux.cpp platform/trash_linux.cpp)
   target_link_libraries(animehub-core PRIVATE OpenSSL::Crypto PkgConfig::LIBSECRET)
   # The desktop entry, icon and autostart entry share this name.
