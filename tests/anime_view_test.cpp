@@ -1,6 +1,10 @@
 #include "app/anime_view.h"
 
+#include "api/response_cache.h"
+
+#include <QFile>
 #include <QNetworkAccessManager>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -30,6 +34,8 @@ struct Fixture {
     std::unique_ptr<playback::Player> player;
     std::unique_ptr<app::AppSettings> settings;
     std::unique_ptr<AnimeView> view;
+    // Where downloads go once transfers are on.
+    QString downloads;
 
     bool open(api::AnimeStatus status) {
         auto opened = storage::Database::open(root.filePath(QStringLiteral("library.sqlite3")));
@@ -49,7 +55,7 @@ struct Fixture {
         pixeldrain = std::make_unique<downloads::pixeldrain::Api>(network);
         manager = std::make_unique<downloads::DownloadManager>(
             downloads::DownloadManager::Services{*api, *aria, *mega, *pixeldrain, *queue, *repo},
-            [] { return downloads::DownloadSettings{}; });
+            [this] { return downloads::DownloadSettings{.directory = downloads}; });
         player = std::make_unique<playback::Player>(
             *repo, [] { return playback::PlayerSettings{}; }, [](const QString&) { return false; });
         settings = std::make_unique<app::AppSettings>(root.filePath(QStringLiteral("settings.ini")),
@@ -102,11 +108,14 @@ struct Fixture {
         return static_cast<bool>(queue->save(*task));
     }
 
-    void show() {
-        manager->start(false); // no aria2, API or JDownloader traffic
+    // Without transfers there is no aria2, API or JDownloader traffic, and the queue refuses
+    // new downloads as a test profile does. With them, aria2 is missing and the API a closed
+    // port: a download is queued and then fails, without leaving the machine.
+    void show(const QString& slug = QStringLiteral("a"), bool transfers = false) {
+        manager->start(transfers);
         view = std::make_unique<AnimeView>(
             app::Services{*api, *library, *manager, *player, *settings});
-        view->open(QStringLiteral("a"));
+        view->open(slug);
     }
 
     ~Fixture() {
@@ -146,9 +155,10 @@ private slots:
 
         const int airing = int(api::AnimeStatus::Airing);
         const int finished = int(api::AnimeStatus::Finished);
+        // Not begun, nothing on disk or on its way: the whole series.
         QTest::newRow("nothing yet")
-            << finished << QList<double>{} << QList<double>{} << -1 << int(Action::Download)
-            << QStringLiteral("Descargar ep. 1") << QString() << QString();
+            << finished << QList<double>{} << QList<double>{} << -1 << int(Action::DownloadAll)
+            << QStringLiteral("Descargar todo (3)") << QString() << QString();
         QTest::newRow("on disk") << finished << QList<double>{} << QList<double>{1} << -1
                                  << int(Action::Play) << QStringLiteral("Ver ep. 1") << QString()
                                  << QString();
@@ -177,9 +187,9 @@ private slots:
         QTest::newRow("all seen") << finished << QList<double>{1, 2, 3} << QList<double>{1} << -1
                                   << int(Action::Rewatch) << QStringLiteral("Ver de nuevo")
                                   << QString() << QString();
-        QTest::newRow("up to date")
-            << airing << QList<double>{1, 2, 3} << QList<double>{} << -1 << int(Action::Upcoming)
-            << QStringLiteral("Al día") << QString() << QString();
+        // Up to date with an airing series: no button; a figure says when the next one comes.
+        QTest::newRow("up to date") << airing << QList<double>{1, 2, 3} << QList<double>{} << -1
+                                    << int(Action::Upcoming) << QString() << QString() << QString();
     }
     void mainButtonFollowsTheNextEpisode() {
         QFETCH(int, status);
@@ -226,6 +236,90 @@ private slots:
         QCOMPARE(value(f.view->figures(), QStringLiteral("Descarga")),
                  QStringLiteral("En cola (2.º)"));
         QCOMPARE(f.view->facts(), QStringLiteral("TV · Finalizado · 3 episodios"));
+    }
+
+    // Several episodes on their way are one download: the button pauses or resumes all of them,
+    // never one episode, and one figure counts them.
+    void mainButtonActsOnTheBatch() {
+        Fixture f;
+        QVERIFY(f.open(api::AnimeStatus::Finished));
+        for (int number = 1; number <= 3; ++number) {
+            QVERIFY(f.add(number, TaskState::Paused));
+        }
+        f.show();
+        QCOMPARE(f.view->primaryAction(), Action::ResumeAll);
+        QCOMPARE(f.view->primaryText(), QStringLiteral("Reanudar la descarga (3)"));
+        QCOMPARE(f.view->primaryHint(), QStringLiteral("Reanudar la descarga de 3 episodios"));
+        const auto figures = f.view->figures();
+        QCOMPARE(figures.size(), 1);
+        QCOMPARE(value(figures, QStringLiteral("Descarga")), QStringLiteral("En pausa · 0/3"));
+
+        Fixture queued;
+        QVERIFY(queued.open(api::AnimeStatus::Finished));
+        QVERIFY(queued.add(1, TaskState::Queued));
+        QVERIFY(queued.add(2, TaskState::Paused));
+        queued.show();
+        QCOMPARE(queued.view->primaryAction(), Action::PauseAll);
+        QCOMPARE(queued.view->primaryText(), QStringLiteral("Pausar la descarga (2)"));
+        QCOMPARE(value(queued.view->figures(), QStringLiteral("Descarga")),
+                 QStringLiteral("En cola · 0/2"));
+    }
+
+    // A refused download leaves the anime out of the library; a queued one brings it in, once.
+    void onlyAQueuedDownloadJoinsTheLibrary() {
+        Fixture f;
+        QVERIFY(f.open(api::AnimeStatus::Finished));
+        QVERIFY(f.repo->setInLibrary(QStringLiteral("a"), false));
+        f.show();
+        QVERIFY(!f.view->inLibrary());
+        QSignalSpy messages(f.view.get(), &AnimeView::message);
+        QSignalSpy added(f.view.get(), &AnimeView::addedToLibrary);
+        f.view->download(1); // "Las descargas están desactivadas en este perfil."
+        QCOMPARE(messages.size(), 1);
+        QVERIFY(messages.first().at(1).toBool());
+        QVERIFY(!f.view->inLibrary());
+        QCOMPARE(added.size(), 0);
+
+        Fixture g;
+        QVERIFY(g.open(api::AnimeStatus::Finished));
+        QVERIFY(g.repo->setInLibrary(QStringLiteral("a"), false));
+        g.downloads = g.root.filePath(QStringLiteral("Anime"));
+        g.show(QStringLiteral("a"), true);
+        QSignalSpy joined(g.view.get(), &AnimeView::addedToLibrary);
+        g.view->download(1);
+        QVERIFY(g.view->inLibrary());
+        QCOMPARE(joined.size(), 1);
+        QCOMPARE(joined.first().at(0).toString(), QStringLiteral("a"));
+        g.view->download(2); // already there: nothing more to say
+        QCOMPARE(joined.size(), 1);
+    }
+
+    // Opened with neither a saved record nor a card, the page still adds what the API told it.
+    void addsFromTheLoadedDetail() {
+        Fixture f;
+        QVERIFY(f.open(api::AnimeStatus::Finished));
+        QFile fixture(QStringLiteral(ANIMEHUB_FIXTURES_DIR "/api/anime.json"));
+        QVERIFY(fixture.open(QIODevice::ReadOnly));
+        api::ResponseCache(f.root.path())
+            .write(QUrl(QStringLiteral("http://127.0.0.1:1/anime/sousou-no-frieren")),
+                   fixture.readAll());
+        f.show(QStringLiteral("sousou-no-frieren"));
+        QVERIFY(!f.view->loaded()); // no record: only the API's answer, from its saved copy
+        QCOMPARE(f.view->title(), QString());
+        QSignalSpy added(f.view.get(), &AnimeView::addedToLibrary);
+        f.view->setInLibrary(true);
+        QVERIFY(f.view->inLibrary());
+        QCOMPARE(added.size(), 1);
+        QCOMPARE(f.view->title(), QStringLiteral("Sousou no Frieren"));
+    }
+
+    // Downloads go to the anime's own folder, named by its slug as the queue names it.
+    void folderIsTheSlugs() {
+        Fixture f;
+        QVERIFY(f.open(api::AnimeStatus::Finished));
+        f.show();
+        QCOMPARE(f.view->downloadFolder(),
+                 QDir::toNativeSeparators(f.root.filePath(QStringLiteral("Anime/a"))));
     }
 
     // One episode is named, several are counted; the bar's figures say only what applies.

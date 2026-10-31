@@ -158,13 +158,36 @@ private slots:
 
         LibraryModel model(service, downloads, api);
         QCOMPARE(model.readyCount(), 1);
-        QCOMPARE(model.featured().value(QStringLiteral("slug")).toString(),
-                 QStringLiteral("ready"));
+        // Every card of "Para ver" reads the same: the episode, then how far the series is.
+        QCOMPARE(model.readyShelf()->cards().size(), 1);
+        QCOMPARE(model.readyShelf()->cards().first().slug, QStringLiteral("ready"));
+        QCOMPARE(model.readyShelf()->cards().first().caption, QStringLiteral("Ep. 2 · 1/3 vistos"));
         QCOMPARE(model.downloadCount(), 2);
         QCOMPARE(model.pendingCount(), 2); // ready's 3 and hole's 2
+        for (const auto& card : model.downloadShelf()->cards()) {
+            QCOMPARE(card.caption, card.slug == u"ready" ? QStringLiteral("Ep. 3 · 1/3 vistos")
+                                                         : QStringLiteral("Ep. 2 · 2/3 vistos"));
+        }
+
+        // "Para ver" as a filter lets through what the home's shelf holds, and counts the same.
+        model.setFilter(LibraryModel::Filter::ToWatch);
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(model.slugAt(0), QStringLiteral("ready"));
+        QCOMPARE(model.filterCounts().at(static_cast<int>(LibraryModel::Filter::ToWatch)),
+                 model.readyCount());
+        QCOMPARE(model.shownCount(), 1);
 
         model.setFilter(LibraryModel::Filter::Watched);
         QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(model.slugAt(0), QStringLiteral("done"));
+        // Under "Vistos" a card says what the work is, not "Visto" again.
+        QCOMPARE(model.overview().first().toMap().value(QStringLiteral("caption")).toString(),
+                 QStringLiteral("2 ep."));
+        // A search looks through the whole library, whatever the filter.
+        model.setSearch(QStringLiteral("rea"));
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(model.slugAt(0), QStringLiteral("ready"));
+        model.setSearch(QString());
         QCOMPARE(model.slugAt(0), QStringLiteral("done"));
         model.setFilter(LibraryModel::Filter::All);
         model.setOnDiskOnly(true);
@@ -224,6 +247,10 @@ private slots:
         QVERIFY(repo.setFranchiseMember(*group, QStringLiteral("second"), true));
 
         LibraryModel model(service, downloads, api);
+        // The breadcrumb's middle step: the franchise of a work.
+        QCOMPARE(model.franchiseOf(QStringLiteral("second")).value(QStringLiteral("title")),
+                 QVariant(QStringLiteral("Series")));
+        QVERIFY(model.franchiseOf(QStringLiteral("missing")).isEmpty());
         model.openFranchise(*group);
         const auto franchise = model.franchise();
         const auto works = franchise.value(QStringLiteral("works")).toList();
@@ -247,8 +274,11 @@ private slots:
         QCOMPARE(figures.size(), 3);
         QCOMPARE(figures.at(0).toMap().value(QStringLiteral("value")).toString(),
                  QStringLiteral("Part 2"));
+        // Episodes, as an anime's page counts them: 2 of the first and 1 of the second.
+        QCOMPARE(figures.at(1).toMap().value(QStringLiteral("caption")).toString(),
+                 QStringLiteral("Vistos"));
         QCOMPARE(figures.at(1).toMap().value(QStringLiteral("value")).toString(),
-                 QStringLiteral("1/2"));
+                 QStringLiteral("3/5"));
         QCOMPARE(figures.at(2).toMap().value(QStringLiteral("caption")).toString(),
                  QStringLiteral("En disco"));
         QCOMPARE(figures.at(2).toMap().value(QStringLiteral("value")).toString(),

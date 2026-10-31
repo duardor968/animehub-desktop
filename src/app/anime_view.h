@@ -57,10 +57,12 @@ class AnimeView final : public QObject {
     Q_PROPERTY(bool notify READ notify NOTIFY changed)
     Q_PROPERTY(bool autoDownload READ autoDownload NOTIFY changed)
 
-    // The main button follows the episode to watch next and says what a press does with it
-    // ("Ver ep. 9", "Pausar · 45 %", "Reanudar ep. 9"); where its download is goes in the
-    // figures. Disabled while there is nothing to do but wait (the next airing, a file being
-    // checked).
+    // The main button says what a press does: a series not begun, with nothing on disk or on
+    // its way, is downloaded whole ("Descargar todo (13)"); one whose batch is on its way is
+    // paused or resumed whole ("Pausar la descarga (13)"); otherwise it follows the episode to
+    // watch next ("Ver ep. 9", "Pausar · 45 %", "Reanudar ep. 9"). Where a download is goes in
+    // the figures. Hidden while there is nothing to do but wait for the next airing (a figure
+    // says when); disabled while a file is checked.
     Q_PROPERTY(PrimaryAction primaryAction READ primaryAction NOTIFY changed)
     Q_PROPERTY(QString primaryText READ primaryText NOTIFY changed)
     Q_PROPERTY(bool primaryEnabled READ primaryEnabled NOTIFY changed)
@@ -101,7 +103,8 @@ class AnimeView final : public QObject {
 public:
     // What the main button does with the episode to watch next: watch it, download it, or
     // follow its download (queued or waiting to retry, transferring, paused, failed). With
-    // everything watched: wait for the next one of an airing series, or watch it again.
+    // everything watched: wait for the next one of an airing series, or watch it again. For the
+    // whole series: download what is missing, pause or resume its batch.
     enum class PrimaryAction {
         None,
         Play,
@@ -111,7 +114,10 @@ public:
         Queued,
         Failed,
         Upcoming,
-        Rewatch
+        Rewatch,
+        DownloadAll,
+        PauseAll,
+        ResumeAll
     };
     Q_ENUM(PrimaryAction)
 
@@ -254,6 +260,9 @@ signals:
     void message(const QString& text, bool problem);
     // A change that did not ask first; `undo()` reverts it.
     void undoable(const QString& text);
+    // Something done here (a download, watching, a mark, the button) brought the anime into the
+    // library.
+    void addedToLibrary(const QString& slug, const QString& title);
     // `selection`: the numbers come from the selection, which empties once they are queued.
     void downloadConfirmationNeeded(const QList<double>& numbers, const QString& question,
                                     const QString& detail, bool selection);
@@ -275,7 +284,9 @@ private:
         bool watching = false;
         bool running = false;
         bool paused = false;
-        QDateTime retryAt; // valid when what runs only waits to try again
+        bool transferring = false; // a file is found, transferred or checked
+        int active = 0;            // unfinished downloads that are not failed
+        QDateTime retryAt;         // valid when what runs only waits to try again
         int batchDone = 0;
         int batchTotal = 0;
         double batchProgress = 0;
@@ -297,14 +308,15 @@ private:
     void update();
     void report(const storage::Stored<void>& result);
     void request(const QList<double>& numbers, bool selection = false);
-    void joinLibrary();
     [[nodiscard]] const library::AnimeRecord& source() const;
     [[nodiscard]] QString folderPath() const;
     [[nodiscard]] Summary summarize() const;
     // Before the first episode, when it premieres.
     [[nodiscard]] QDateTime premiere() const;
-    // The main button of a series watched up to date: when the next episode airs.
-    [[nodiscard]] QString upcomingText() const;
+    // The series' downloads, not one episode's: several of them are on their way.
+    [[nodiscard]] bool batch() const;
+    // Joins the library when it is not there yet, saying so.
+    void joinLibrary();
     void rememberRelated();
     [[nodiscard]] QList<SavedState>
     saveStates(const std::function<bool(const library::EpisodeRecord&)>& chosen) const;

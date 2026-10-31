@@ -163,16 +163,15 @@ AppController::AppController(AppPaths paths, QObject* parent)
             fixed.jdDeviceId = submission.profile.device;
             // The request was accepted once its anime was saved (rememberAnime): its title
             // names the files, and the library can record them. Sent from the web, it joins the
-            // library, as "Descargar" on its page does.
+            // library once queued, as "Descargar" on its page does; a refused one leaves it out.
             const auto anime = library_repository_->anime(submission.animeSlug);
             if (!anime || !*anime)
                 return false;
-            if (!(*anime)->inLibrary && !library_->add(**anime))
+            if (!downloads_->enqueueMany(submission.animeSlug, submission.episodes, (*anime)->title,
+                                         downloads::TaskOrigin::Manual, submission.requestId,
+                                         fixed))
                 return false;
-            return downloads_
-                ->enqueueMany(submission.animeSlug, submission.episodes, (*anime)->title,
-                              downloads::TaskOrigin::Manual, submission.requestId, fixed)
-                .has_value();
+            return (*anime)->inLibrary || library_->add(**anime).has_value();
         });
     remote_view_ = std::make_unique<RemoteView>(*remote_service_);
     publishRemoteProfiles();
