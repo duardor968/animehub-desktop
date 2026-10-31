@@ -4,6 +4,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QPointer>
 
 namespace animehub::library {
 namespace {
@@ -265,27 +266,46 @@ void LibraryService::refresh(const QString& slug, bool flag_new) {
                 emit refreshFailed(slug, detail.error().message);
                 return;
             }
-            store(detail->value, flag_new, true);
+            store(detail->value, flag_new);
         },
         api::CachePolicy::NetworkOnly);
 }
 
-void LibraryService::refresh(const api::AnimeDetail& detail, bool flag_new) {
-    if (refreshing_.contains(detail.slug)) {
-        return;
+void LibraryService::refreshShown(const QString& slug, QObject* context,
+                                  api::ApiClient::Callback<api::AnimeDetail> shown) {
+    ++shown_details_[slug];
+    api_.anime(
+        slug, this,
+        [this, slug, receiver = QPointer<QObject>(context),
+         shown = std::move(shown)](const api::Result<api::AnimeDetail>& detail) {
+            const bool fresh = detail && detail->origin == api::Origin::Network;
+            if (fresh) {
+                if (auto saved = repository_.saveSnapshot(snapshotOf(detail->value)); !saved) {
+                    qWarning("library: %s", qPrintable(saved.error().message));
+                }
+                emit animeChanged(slug);
+            }
+            // A saved copy comes first; the network's answer, or its failure, is the last one.
+            if (fresh || !detail) {
+                if (--shown_details_[slug] == 0) {
+                    shown_details_.remove(slug);
+                }
+                storeHeld(slug);
+            }
+            if (receiver) {
+                shown(detail);
+            }
+        },
+        api::CachePolicy::CacheThenNetwork);
+    if (!refreshing_.contains(slug)) {
+        refreshing_.insert(slug);
+        fetchEpisodes(slug, episodesStart(slug).page, false, {});
     }
-    refreshing_.insert(detail.slug);
-    store(detail, flag_new, false);
 }
 
-void LibraryService::store(const api::AnimeDetail& detail, bool flag_new, bool discover) {
+void LibraryService::store(const api::AnimeDetail& detail, bool flag_new) {
     const auto& slug = detail.slug;
-    if (!discover) {
-        if (auto saved = repository_.saveSnapshot(snapshotOf(detail)); !saved) {
-            qWarning("library: %s", qPrintable(saved.error().message));
-        }
-    } else if (const auto discovered = repository_.discoverFranchiseRelations(detail);
-               !discovered) {
+    if (const auto discovered = repository_.discoverFranchiseRelations(detail); !discovered) {
         qWarning("library: %s", qPrintable(discovered.error().message));
     } else {
         QStringList notify;
@@ -302,13 +322,19 @@ void LibraryService::store(const api::AnimeDetail& detail, bool flag_new, bool d
         emit listChanged(); // franchises may have changed
     }
     emit animeChanged(slug);
-    // Episodes arrive in ascending pages of fifty; a known list only needs its tail.
+    const auto start = episodesStart(slug);
+    fetchEpisodes(slug, start.page, flag_new && start.synced, {});
+}
+
+LibraryService::EpisodesStart LibraryService::episodesStart(const QString& slug) const {
+    // Episodes arrive in ascending pages of fifty.
     const auto record = repository_.anime(slug);
     const bool synced = record && *record && (*record)->episodesSyncedAt.isValid();
     const auto known = repository_.episodes(slug);
-    const int first_page =
-        synced && known ? std::max(1, static_cast<int>(known->size()) / kEpisodesPerPage) : 1;
-    fetchEpisodes(slug, first_page, flag_new && synced, {});
+    return {.page = synced && known
+                        ? std::max(1, static_cast<int>(known->size()) / kEpisodesPerPage)
+                        : 1,
+            .synced = synced};
 }
 
 void LibraryService::fetchEpisodes(const QString& slug, int page, bool flag_new,
@@ -317,20 +343,34 @@ void LibraryService::fetchEpisodes(const QString& slug, int page, bool flag_new,
         slug, page, this,
         [this, slug, page, flag_new, added](const api::Result<api::EpisodePage>& result) mutable {
             if (!result) {
+                held_.remove(slug);
                 refreshing_.remove(slug);
                 emit animeChanged(slug);
                 emit refreshFailed(slug, result.error().message);
                 return;
             }
-            auto stored = repository_.syncEpisodes(slug, result->value.items, flag_new);
+            const bool last = page >= result->value.totalPages;
+            if (const auto anime = repository_.anime(slug); anime && !*anime) {
+                // Not saved yet: they wait for the detail of its page.
+                auto& held = held_[slug];
+                held.episodes += result->value.items;
+                held.complete = last;
+                if (last) {
+                    storeHeld(slug);
+                } else {
+                    fetchEpisodes(slug, page + 1, flag_new, added);
+                }
+                return;
+            }
+            auto stored = repository_.syncEpisodes(
+                slug, held_.take(slug).episodes + result->value.items, flag_new);
             if (!stored) {
                 refreshing_.remove(slug);
                 emit refreshFailed(slug, stored.error().message);
                 return;
             }
             added += *stored;
-            const int total = result->value.totalPages;
-            if (page < total) {
+            if (!last) {
                 emit animeChanged(slug); // the first pages show while the rest arrive
                 fetchEpisodes(slug, page + 1, flag_new, added);
                 return;
@@ -338,6 +378,29 @@ void LibraryService::fetchEpisodes(const QString& slug, int page, bool flag_new,
             finishRefresh(slug, flag_new, added);
         },
         api::CachePolicy::NetworkOnly);
+}
+
+void LibraryService::storeHeld(const QString& slug) {
+    const auto held = held_.constFind(slug);
+    if (held == held_.cend() || !held->complete) {
+        return; // the pages on their way find the anime saved, or not
+    }
+    if (const auto anime = repository_.anime(slug); anime && !*anime) {
+        if (!shown_details_.contains(slug)) { // nothing left to save it
+            held_.remove(slug);
+            refreshing_.remove(slug);
+            emit animeChanged(slug);
+        }
+        return;
+    }
+    // Only a page's refresh holds episodes, and it flags none as new.
+    auto stored = repository_.syncEpisodes(slug, held_.take(slug).episodes, false);
+    if (!stored) {
+        refreshing_.remove(slug);
+        emit refreshFailed(slug, stored.error().message);
+        return;
+    }
+    finishRefresh(slug, false, *stored);
 }
 
 void LibraryService::finishRefresh(const QString& slug, bool flag_new, const QList<double>& added) {

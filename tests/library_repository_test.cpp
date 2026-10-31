@@ -937,6 +937,7 @@ private slots:
     void openingAnAnimePageAddsNothing() {
         testing::HttpTestServer server;
         QVERIFY(server.listen());
+        server.json("/api/v1/anime/sousou-no-frieren", fixture("anime.json"));
         server.json("/api/v1/anime/sousou-no-frieren/episodes", kOneEpisode);
         QNetworkAccessManager network;
         api::ApiClient api(network, {.baseUrl = server.url(QStringLiteral("/api/v1/"))});
@@ -951,7 +952,7 @@ private slots:
         QVERIFY(repository_->setInLibrary(sequel.slug, true));
         QVERIFY(repository_->createFranchise(QStringLiteral("Frieren"), sequel.slug));
 
-        service.refresh(*detail, false);
+        service.refreshShown(detail->slug, &service, [](const auto&) {});
         QTRY_VERIFY(!service.isRefreshing(detail->slug));
         QCOMPARE(repository_->episodes(detail->slug)->size(), 1); // its page still gets episodes
         QVERIFY(!inLibrary(detail->slug));
@@ -977,7 +978,7 @@ private slots:
         const auto sequel = detail->relations.first().anime.slug;
 
         // Its page does not add the sequel either; the library's own refresh does.
-        service.refresh(*detail, false);
+        service.refreshShown(detail->slug, &service, [](const auto&) {});
         QTRY_VERIFY(!service.isRefreshing(slug));
         QVERIFY(!inLibrary(sequel));
         QVERIFY(members.isEmpty());

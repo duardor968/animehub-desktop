@@ -4,6 +4,7 @@
 #include "api/api_client.h"
 #include "library_repository.h"
 
+#include <QHash>
 #include <QObject>
 #include <QSet>
 #include <QTimer>
@@ -72,9 +73,12 @@ public:
     // into. With `flag_new`, episodes unknown so far are new arrivals (the watcher); otherwise
     // they are simply stored (first sync).
     void refresh(const QString& slug, bool flag_new);
-    // The same with the anime's detail already fetched by its page; looking at an anime never
+    // The refresh of the anime a page shows: its detail (`shown` gets it, the saved copy first)
+    // and its episodes are requested at once. Episodes that arrive first wait for the detail to
+    // save the anime they belong to, and are dropped when it fails. Looking at an anime never
     // adds it, or anything related to it, to the library.
-    void refresh(const api::AnimeDetail& detail, bool flag_new);
+    void refreshShown(const QString& slug, QObject* context,
+                      api::ApiClient::Callback<api::AnimeDetail> shown);
     [[nodiscard]] bool isRefreshing(const QString& slug) const {
         return refreshing_.contains(slug);
     }
@@ -96,8 +100,22 @@ signals:
     void newFranchiseMembers(const QStringList& slugs);
 
 private:
-    void store(const api::AnimeDetail& detail, bool flag_new, bool discover);
+    // Episodes of an anime not saved yet: its page's detail saves it.
+    struct Held {
+        QList<api::Episode> episodes;
+        bool complete = false; // every page is in
+    };
+
+    // Where its episodes start: a known list only needs its tail.
+    struct EpisodesStart {
+        int page = 1;
+        bool synced = false;
+    };
+
+    void store(const api::AnimeDetail& detail, bool flag_new);
+    [[nodiscard]] EpisodesStart episodesStart(const QString& slug) const;
     void fetchEpisodes(const QString& slug, int page, bool flag_new, QList<double> added);
+    void storeHeld(const QString& slug);
     void finishRefresh(const QString& slug, bool flag_new, const QList<double>& added);
     void sweep();
     Stored<void> changed(Stored<void> result, const QString& slug, bool list = false);
@@ -110,6 +128,8 @@ private:
     MoveToTrash move_to_trash_;
     RestoreFromTrash restore_from_trash_;
     QSet<QString> refreshing_;
+    QHash<QString, int> shown_details_; // a page's detail requests on their way, by anime
+    QHash<QString, Held> held_;
     QTimer recent_timer_;
     QTimer sweep_timer_;
     qsizetype finished_sweep_offset_ = 0;

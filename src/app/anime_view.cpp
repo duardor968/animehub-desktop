@@ -230,13 +230,12 @@ void AnimeView::reload() {
 }
 
 void AnimeView::fetchDetail() {
-    // One request for both: the library keeps a snapshot and fetches the episodes; score,
+    // The library asks for the detail and the episodes at once and keeps a snapshot; score,
     // trailer, next airing and relations stay here.
     const auto generation = generation_;
     fetching_ = true;
-    services_.api.anime(
-        slug_, this,
-        [this, generation](const api::Result<api::AnimeDetail>& result) {
+    services_.library.refreshShown(
+        slug_, this, [this, generation](const api::Result<api::AnimeDetail>& result) {
             if (generation != generation_) {
                 return;
             }
@@ -262,12 +261,10 @@ void AnimeView::fetchDetail() {
             related_.setCards(std::move(cards));
             if (fresh) {
                 fetching_ = false;
-                services_.library.refresh(*detail_, false);
                 rememberRelated();
             }
             update();
-        },
-        api::CachePolicy::CacheThenNetwork);
+        });
 }
 
 void AnimeView::fetchSchedule() {

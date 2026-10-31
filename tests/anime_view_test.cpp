@@ -1,6 +1,7 @@
 #include "app/anime_view.h"
 
 #include "api/response_cache.h"
+#include "http_test_server.h"
 
 #include <QFile>
 #include <QNetworkAccessManager>
@@ -16,9 +17,33 @@ using Action = app::AnimeView::PrimaryAction;
 namespace {
 
 constexpr qint64 kGigabyte = 1'000'000'000;
+constexpr auto kFrieren = "/api/v1/anime/sousou-no-frieren";
+constexpr auto kFrierenEpisodes = "/api/v1/anime/sousou-no-frieren/episodes";
+constexpr auto kTwoEpisodes =
+    R"({"data":[{"id":"1","number":1,"title":null,"imageUrl":null,"publishedAt":null},)"
+    R"({"id":"2","number":2,"title":null,"imageUrl":null,"publishedAt":null}],)"
+    R"("meta":{"page":1,"perPage":50,"totalPages":1,"totalRecords":2,"firstNumber":1,)"
+    R"("lastNumber":2}})";
+
+QByteArray frierenDetail() {
+    QFile file(QStringLiteral(ANIMEHUB_FIXTURES_DIR "/api/anime.json"));
+    if (!file.open(QIODevice::ReadOnly)) {
+        qFatal("missing fixture anime.json");
+    }
+    return file.readAll();
+}
+
+// `body` after `delay_ms`.
+void serve(testing::HttpTestServer& server, const QByteArray& path, const QByteArray& body,
+           int delay_ms) {
+    server.route("GET", path, [body, delay_ms](const testing::HttpTestServer::Request&) {
+        return testing::HttpTestServer::Response{
+            .body = body, .headers = {{"Content-Type", "application/json"}}, .delayMs = delay_ms};
+    });
+}
 
 // An anime of three episodes and its page, with nothing that reaches the network: the API points
-// at a closed port, aria2 does not exist and no transfer starts.
+// at a closed port (or a local server), aria2 does not exist and no transfer starts.
 struct Fixture {
     QTemporaryDir root;
     std::unique_ptr<storage::Database> db;
@@ -36,6 +61,7 @@ struct Fixture {
     std::unique_ptr<AnimeView> view;
     // Where downloads go once transfers are on.
     QString downloads;
+    QUrl apiUrl{QStringLiteral("http://127.0.0.1:1/")};
 
     // Episodes `first` on, `count` of them; a film is one episode of a "Película".
     bool open(api::AnimeStatus status, int first = 1, int count = 3,
@@ -47,9 +73,8 @@ struct Fixture {
         db = std::move(*opened);
         repo = std::make_unique<library::LibraryRepository>(*db);
         queue = std::make_unique<downloads::DownloadRepository>(*db);
-        const QUrl closed(QStringLiteral("http://127.0.0.1:1/"));
         api = std::make_unique<api::ApiClient>(
-            network, api::ApiClient::Options{.baseUrl = closed, .cacheDirectory = root.path()});
+            network, api::ApiClient::Options{.baseUrl = apiUrl, .cacheDirectory = root.path()});
         library = std::make_unique<library::LibraryService>(*repo, *api);
         aria = std::make_unique<downloads::Aria2>(
             network, root.filePath(QStringLiteral("missing/aria2c.exe")), QByteArray("test"));
@@ -409,6 +434,69 @@ private slots:
         QVERIFY(f.view->inLibrary());
         QCOMPARE(added.size(), 1);
         QCOMPARE(f.view->title(), QStringLiteral("Sousou no Frieren"));
+    }
+
+    // The detail and the episodes are asked for at once and either may answer first: an anime
+    // never seen before shows both, its episodes waiting for the detail that saves it.
+    void loadsTheDetailAndTheEpisodesAtOnce_data() {
+        QTest::addColumn<int>("detailDelay");
+        QTest::addColumn<int>("episodesDelay");
+        QTest::newRow("episodes first") << 600 << 0;
+        QTest::newRow("detail first") << 0 << 600;
+    }
+
+    void loadsTheDetailAndTheEpisodesAtOnce() {
+        QFETCH(int, detailDelay);
+        QFETCH(int, episodesDelay);
+        testing::HttpTestServer server;
+        QVERIFY(server.listen());
+        serve(server, kFrieren, frierenDetail(), detailDelay);
+        serve(server, kFrierenEpisodes, kTwoEpisodes, episodesDelay);
+        Fixture f;
+        f.apiUrl = server.url(QStringLiteral("/api/v1/"));
+        QVERIFY(f.open(api::AnimeStatus::Finished));
+        f.show(QStringLiteral("sousou-no-frieren"));
+        QTRY_COMPARE(server.count(kFrierenEpisodes), 1);
+        QCOMPARE(server.count(kFrieren), 1);
+        if (detailDelay > 0) {
+            // Asked for before the detail answered; they wait for it.
+            QVERIFY(!f.view->loaded());
+            QVERIFY(f.view->refreshing());
+            QCOMPARE(f.view->primaryAction(), Action::None);
+        }
+        QTRY_VERIFY(!f.view->refreshing());
+        QVERIFY(f.view->loaded());
+        QCOMPARE(f.view->title(), QStringLiteral("Sousou no Frieren"));
+        QVERIFY(!f.view->score().isEmpty());
+        QCOMPARE(f.view->episodes()->total(), 2);
+        QCOMPARE(f.view->primaryAction(), Action::DownloadAll);
+        QVERIFY(f.view->problem().isEmpty());
+        QVERIFY(!f.view->inLibrary());
+        QCOMPARE(server.count(kFrierenEpisodes), 1);
+    }
+
+    // Another anime opened while one loads: the page shows only the new one, and the first
+    // one's answers are still saved for when it is opened again.
+    void anotherAnimeOpenedMidLoad() {
+        testing::HttpTestServer server;
+        QVERIFY(server.listen());
+        serve(server, kFrieren, frierenDetail(), 300);
+        serve(server, kFrierenEpisodes, kTwoEpisodes, 300);
+        Fixture f;
+        f.apiUrl = server.url(QStringLiteral("/api/v1/"));
+        QVERIFY(f.open(api::AnimeStatus::Finished));
+        f.show(QStringLiteral("sousou-no-frieren"));
+        QTRY_COMPARE(server.count(kFrierenEpisodes), 1);
+        f.view->open(QStringLiteral("a"));
+        QTRY_VERIFY(!f.library->isRefreshing(QStringLiteral("sousou-no-frieren")));
+        QTRY_COMPARE(f.repo->episodes(QStringLiteral("sousou-no-frieren"))->size(), 2);
+        QTRY_VERIFY(!f.view->refreshing());
+        QCOMPARE(f.view->slug(), QStringLiteral("a"));
+        QCOMPARE(f.view->title(), QStringLiteral("Anime"));
+        QCOMPARE(f.view->episodes()->total(), 3);
+        QVERIFY(f.view->score().isEmpty());
+        QCOMPARE(f.view->related()->rowCount(), 0);
+        QVERIFY(f.view->problem().isEmpty()); // its own detail failed, but its episodes are here
     }
 
     // Downloads go to the anime's own folder, named by its slug as the queue names it.
