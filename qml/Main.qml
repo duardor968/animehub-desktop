@@ -135,7 +135,10 @@ ApplicationWindow {
     visible: false
     title: "AnimeHub"
     color: Theme.canvas
-    palette.accent: Theme.accent
+    // The brand accent where a control can be used; Fluent's own where it cannot.
+    palette.active.accent: Theme.accent
+    palette.inactive.accent: Theme.accent
+    palette.disabled.accent: Theme.accentDisabled
     palette.highlight: Theme.accent
     palette.window: Theme.canvas
 
@@ -293,6 +296,7 @@ ApplicationWindow {
 
         CatalogPage {
             id: catalogPage
+            objectName: "catalogPage"
             app: window.app
             active: StackLayout.isCurrentItem
             onDepthChanged: rememberLater.restart()

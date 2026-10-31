@@ -295,9 +295,54 @@ private slots:
         QCOMPARE(view.barNotice(), said);
         QCOMPARE(view.current()->rows().first().notice, said);
         QCOMPARE(view.current()->rows().first().episodes.first().detail, said);
+        // Under the bar, the episode without a second time: the notice above says it.
+        QCOMPARE(view.headerDetail(), QStringLiteral("Episodio 1 · En espera"));
+        // Waiting, it can try now, from its row and from its episode.
+        QVERIFY(view.current()->rows().first().canRetryNow);
+        QVERIFY(view.current()->rows().first().episodes.first().canRetryNow);
+        QVERIFY(!view.current()->rows().first().canRetry);
         QCOMPARE(
             app::display::megaQuota(quota->until, false, QStringLiteral("sigue con Pixeldrain")),
             QStringLiteral("MEGA llegó a su límite · sigue con Pixeldrain"));
+    }
+
+    // One time for one wait: an episode waiting for its own retry does not borrow another
+    // series' MEGA quota and its time; a wait whose time went by while AnimeHub was closed is
+    // over, and the episode is back in line.
+    void oneTimeForOneWait() {
+        Fixture f;
+        QVERIFY(f.open());
+        const auto wait = [&f](const QString& slug, double number, downloads::TaskIssue issue,
+                               qint64 seconds) -> std::optional<downloads::Task> {
+            auto task = f.queue->create(slug, number, slug.toUpper(), api::Audio::Sub,
+                                        downloads::TaskOrigin::Manual,
+                                        f.root.filePath(slug + QString::number(number)));
+            if (!task)
+                return std::nullopt;
+            task->state = downloads::TaskState::Waiting;
+            task->issue = issue;
+            if (issue == downloads::TaskIssue::Quota)
+                task->issueDetail = downloads::kMegaStatedTime;
+            task->retryAt = QDateTime::currentDateTimeUtc().addSecs(seconds);
+            if (!f.queue->save(*task))
+                return std::nullopt;
+            return *task;
+        };
+        const auto own = wait(QStringLiteral("a"), 1, downloads::TaskIssue::Connection, 600);
+        const auto gone = wait(QStringLiteral("a"), 2, downloads::TaskIssue::Quota, -600);
+        const auto quota = wait(QStringLiteral("b"), 1, downloads::TaskIssue::Quota, 3600);
+        QVERIFY(own && gone && quota);
+        f.manager->start(false);
+        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        QCOMPARE(view.headerSlug(), QStringLiteral("a"));
+        QCOMPARE(view.headerNotice(), QString());
+        QCOMPARE(view.headerDetail(), QStringLiteral("Episodio 1 · Se reintenta a las ") +
+                                          app::display::time(own->retryAt));
+        // The page's bar still says what holds MEGA back.
+        QVERIFY(view.barNotice().startsWith(QStringLiteral("MEGA llegó a su límite")));
+        QCOMPARE(f.manager->task(gone->id)->state, downloads::TaskState::Queued);
+        QCOMPARE(f.manager->task(gone->id)->issue, downloads::TaskIssue::None);
+        QCOMPARE(view.current()->rows().first().episodes.at(1).detail, QStringLiteral("En cola"));
     }
 
     // The bar counts the episode on view among the whole line, finished ones of series still

@@ -65,6 +65,8 @@ QString statusKey(AnimeStatus status) {
         return QStringLiteral("FINISHED");
     case AnimeStatus::Upcoming:
         return QStringLiteral("UPCOMING");
+    case AnimeStatus::Paused:
+        return QStringLiteral("PAUSED");
     case AnimeStatus::Unknown:
         break;
     }
@@ -72,7 +74,8 @@ QString statusKey(AnimeStatus status) {
 }
 
 AnimeStatus statusFromKey(QStringView key) {
-    for (const auto status : {AnimeStatus::Airing, AnimeStatus::Finished, AnimeStatus::Upcoming}) {
+    for (const auto status :
+         {AnimeStatus::Airing, AnimeStatus::Finished, AnimeStatus::Upcoming, AnimeStatus::Paused}) {
         if (key == statusKey(status)) {
             return status;
         }

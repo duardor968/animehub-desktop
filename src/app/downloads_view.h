@@ -161,6 +161,10 @@ public:
     Q_INVOKABLE void pauseSeries(const QString& slug);
     Q_INVOKABLE void resumeSeries(const QString& slug);
     Q_INVOKABLE void retryFailed(const QString& slug);
+    // "Reintentar ahora": what waits tries again at once; what waits for MEGA's quota lifts it
+    // for every episode (DownloadManager::retryWaiting).
+    Q_INVOKABLE void retryWaiting(const QString& slug);
+    Q_INVOKABLE void retryMegaQuota();
     Q_INVOKABLE void prioritize(const QString& slug);
     // Drag and drop in "A continuación": the series at `from` goes to `to`.
     Q_INVOKABLE void moveSeries(int from, int to);

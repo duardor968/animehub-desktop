@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QSettings>
 #include <QUrl>
+#include <QVariantList>
 #include <QtQmlIntegration>
 
 namespace animehub::app {
@@ -20,9 +21,10 @@ class AppSettings final : public QObject {
     Q_PROPERTY(
         QString downloadDirectory READ downloadDirectory WRITE setDownloadDirectory NOTIFY changed)
     Q_PROPERTY(QStringList providerOrder READ providerOrder WRITE setProviderOrder NOTIFY changed)
-    // Servers the user turned off (provider keys): never asked for, never handed to JDownloader.
-    Q_PROPERTY(QStringList disabledProviders READ disabledProviders WRITE setDisabledProviders
-                   NOTIFY changed)
+    // Ajustes' provider switches, MEGA to 1Fichier: [{key, name, checked, enabled, reason}].
+    // MP4Upload and 1Fichier are off and unavailable while JDownloader is not used; the last
+    // usable one on cannot go off. `reason` says why a switch cannot be used.
+    Q_PROPERTY(QVariantList providerSwitches READ providerSwitches NOTIFY changed)
     Q_PROPERTY(bool dubbed READ dubbed WRITE setDubbed NOTIFY changed)
     Q_PROPERTY(int maxConcurrent READ maxConcurrent WRITE setMaxConcurrent NOTIFY changed)
     // "mpv" (bundled), "potplayer" (only while it is installed) or "system".
@@ -31,9 +33,9 @@ class AppSettings final : public QObject {
     Q_PROPERTY(bool notifications READ notifications WRITE setNotifications NOTIFY changed)
     Q_PROPERTY(bool startWithWindows READ startWithWindows WRITE setStartWithWindows NOTIFY changed)
     Q_PROPERTY(bool isolated READ isolated CONSTANT)
+    // JDownloader also downloads MEGA and Pixeldrain; only while it is used.
     Q_PROPERTY(bool preferredJDownloader READ preferredJDownloader WRITE setPreferredJDownloader
                    NOTIFY changed)
-    Q_PROPERTY(bool cloudJDownloader READ cloudJDownloader WRITE setCloudJDownloader NOTIFY changed)
     Q_PROPERTY(QString jdEndpoint READ jdEndpoint WRITE setJdEndpoint NOTIFY changed)
     Q_PROPERTY(QString jdExecutable READ jdExecutable WRITE setJdExecutable NOTIFY changed)
     Q_PROPERTY(CloseAction closeAction READ closeAction WRITE setCloseAction NOTIFY changed)
@@ -44,9 +46,10 @@ class AppSettings final : public QObject {
 public:
     enum class CloseAction { Ask, Tray, Quit };
     Q_ENUM(CloseAction)
-    // While AnimeHub downloads, who takes the episodes only MP4Upload and 1Fichier have: nobody,
-    // the JDownloader of this computer (local API) or one reached through MyJDownloader. The
-    // values the earlier Click'n'Load and MyJDownloader sending saved keep their meaning.
+    // How JDownloader is reached: not used, the one of this computer (local API) or one reached
+    // through MyJDownloader. Only with it are MP4Upload and 1Fichier downloaded. The values the
+    // earlier Click'n'Load and MyJDownloader sending saved keep their meaning, and so does an
+    // earlier "Descargar con JDownloader" with its connection.
     enum class JDownloader { Off, Local, Remote };
     Q_ENUM(JDownloader)
 
@@ -59,8 +62,6 @@ public:
     }
     bool preferredJDownloader() const;
     void setPreferredJDownloader(bool value);
-    bool cloudJDownloader() const;
-    void setCloudJDownloader(bool value);
     QString jdEndpoint() const;
     void setJdEndpoint(const QString& value);
     QString jdExecutable() const;
@@ -72,7 +73,10 @@ public:
     [[nodiscard]] QStringList providerOrder() const;
     void setProviderOrder(const QStringList& order);
     [[nodiscard]] QStringList disabledProviders() const;
+    // Refused when no usable server would stay on.
     void setDisabledProviders(const QStringList& keys);
+    [[nodiscard]] QVariantList providerSwitches() const;
+    Q_INVOKABLE void setProviderEnabled(const QString& key, bool enabled);
     [[nodiscard]] bool dubbed() const;
     void setDubbed(bool dubbed);
     [[nodiscard]] int maxConcurrent() const;
@@ -90,6 +94,7 @@ public:
     [[nodiscard]] CloseAction closeAction() const;
     void setCloseAction(CloseAction action);
     [[nodiscard]] JDownloader jdownloader() const;
+    // Turning it off brings the preferred of MEGA and Pixeldrain back when neither was on.
     void setJdownloader(JDownloader mode);
     [[nodiscard]] QString jdownloaderDevice() const;
     void setJdownloaderDevice(const QString& id);
@@ -99,7 +104,8 @@ public:
     void setTrayNoticeShown();
 
     [[nodiscard]] downloads::DownloadSettings downloads() const;
-    // The enabled servers: MEGA and Pixeldrain in the user's order, then MP4Upload and 1Fichier.
+    // The enabled servers: MEGA and Pixeldrain in the user's order, then MP4Upload and 1Fichier
+    // while JDownloader is used.
     [[nodiscard]] QList<api::Provider> providers() const;
 
     // A file shipped next to the executable (the license notices of an installed copy), or an
@@ -115,6 +121,10 @@ signals:
 
 private:
     void write(const QString& key, const QVariant& value);
+    // MEGA and Pixeldrain always; the others only through JDownloader.
+    [[nodiscard]] bool usable(api::Provider provider) const;
+    // Whether `disabled` leaves a usable server on.
+    [[nodiscard]] bool anyUsable(const QStringList& disabled) const;
     // "C:\…\AnimeHub.exe" --tray, with this library's folder when it is not the default one.
     [[nodiscard]] QString startCommand() const;
 

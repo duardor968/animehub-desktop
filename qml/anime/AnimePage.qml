@@ -234,6 +234,16 @@ Item {
                     Layout.topMargin: -8
                 }
 
+                // Without episodes yet, where their list goes, what is true of them: on their way,
+                // or none to list, in the text's column.
+                Label {
+                    visible: page.view.loaded && page.view.problem === ""
+                             && page.view.episodes.total === 0
+                    text: page.view.refreshing ? "Cargando los episodios…"
+                                               : "Aún no hay episodios disponibles"
+                    color: Theme.muted
+                }
+
                 Item {
                     Layout.preferredHeight: 8
                 }
@@ -275,15 +285,8 @@ Item {
 
             Item {
                 width: parent.width
-                height: bottomPager.visible ? bottomPager.implicitHeight : busy.height
-                visible: bottomPager.visible || busy.running
-
-                BusyIndicator {
-                    id: busy
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    running: page.view.refreshing && page.view.episodes.total === 0
-                    visible: running
-                }
+                height: bottomPager.implicitHeight
+                visible: bottomPager.visible
 
                 Pager {
                     id: bottomPager
@@ -313,6 +316,9 @@ Item {
 
     ActionBar {
         id: actionBar
+
+        // The download figure's only action: "Reintentar ahora".
+        onFigureAction: page.view.retryWaiting()
 
         // Where the header leaves it, until it reaches the top.
         readonly property real slotY: {

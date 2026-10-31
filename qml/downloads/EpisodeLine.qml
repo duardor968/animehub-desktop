@@ -20,6 +20,7 @@ Item {
     required property bool canPause
     required property bool canResume
     required property bool canRetry
+    required property bool canRetryNow
     required property string partial
 
     required property DownloadsView downloads
@@ -134,23 +135,25 @@ Item {
                 }
             }
 
-            // Pause only what moves: an episode waiting its turn has nothing to pause yet.
+            // Pause only what moves: an episode waiting its turn has nothing to pause yet. One
+            // waiting to try again by itself can try now.
             ToolButton {
                 visible: (root.canPause && root.running) || root.canResume || root.canRetry
-                         || (root.completed && root.hasFile)
+                         || root.canRetryNow || (root.completed && root.hasFile)
                 icon.source: Theme.source(root.completed || root.canResume ? Theme.icon.play
-                                          : root.failed ? Theme.icon.retry
+                                          : root.failed || root.canRetryNow ? Theme.icon.retry
                                           : Theme.icon.pause)
                 display: AbstractButton.IconOnly
                 text: root.completed ? "Ver"
                       : root.failed ? "Reintentar"
+                      : root.canRetryNow ? "Reintentar ahora"
                       : root.canResume ? "Reanudar" : "Pausar"
                 ToolTip.visible: hovered
                 ToolTip.text: text
                 onClicked: {
                     if (root.completed)
                         root.downloads.play(root.taskId)
-                    else if (root.failed)
+                    else if (root.failed || root.canRetryNow)
                         root.downloads.retry(root.taskId)
                     else if (root.canResume)
                         root.downloads.resume(root.taskId)

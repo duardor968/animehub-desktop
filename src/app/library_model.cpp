@@ -89,9 +89,11 @@ bool LibraryModel::started(const LibraryEntry& entry) {
     return entry.watchedEpisodes > 0 || entry.resumePositionMs > 0;
 }
 
-// What the user keeps up with: a series begun and not finished, or one still airing.
+// What the user keeps up with: a series begun and not finished, or one still running (airing,
+// or paused between seasons).
 bool LibraryModel::following(const LibraryEntry& entry) {
-    return (started(entry) && !entry.finished()) || entry.status == api::AnimeStatus::Airing;
+    return (started(entry) && !entry.finished()) || entry.status == api::AnimeStatus::Airing ||
+           entry.status == api::AnimeStatus::Paused;
 }
 
 // "Para ver", on the home and as a filter: the episode it goes on with is on disk, so its card
@@ -679,12 +681,24 @@ bool LibraryModel::contains(const QString& slug) const {
     return slugs_.contains(slug);
 }
 
-QVariantMap LibraryModel::franchiseOf(const QString& slug) const {
+QVariantMap LibraryModel::franchiseStep(const QString& slug) const {
     const auto it =
         std::ranges::find_if(franchises_, [&slug](const library::FranchiseRecord& group) {
             return group.members.contains(slug);
         });
-    if (it == franchises_.end())
+    if (it == franchises_.end() || it->members.size() < 2)
+        return {};
+    // Its letters and digits alone: "Ansatsu Kyoushitsu" names the series "Ansatsu Kyoushitsu".
+    const auto letters = [](const QString& text) {
+        QString kept;
+        for (const auto c : text) {
+            if (c.isLetterOrNumber())
+                kept.append(c.toCaseFolded());
+        }
+        return kept;
+    };
+    const auto entry = std::ranges::find(entries_, slug, &library::LibraryEntry::slug);
+    if (entry != entries_.end() && letters(entry->title) == letters(it->title))
         return {};
     return {{QStringLiteral("id"), it->id}, {QStringLiteral("title"), it->title}};
 }

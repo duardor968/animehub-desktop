@@ -195,6 +195,7 @@ int CatalogView::status() const {
     case api::AnimeStatus::Finished:
         return 2;
     case api::AnimeStatus::Upcoming:
+    case api::AnimeStatus::Paused: // the API's "proximamente" filter returns both
         return 3;
     case api::AnimeStatus::Unknown:
         break;

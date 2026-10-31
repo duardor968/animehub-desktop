@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 
+#include <algorithm>
 #include <array>
 
 namespace animehub::app {
@@ -28,6 +29,9 @@ const auto kCloseAction = QStringLiteral("window/closeAction");
 const auto kTrayNoticeShown = QStringLiteral("window/trayNoticeShown");
 const auto kJDownloader = QStringLiteral("jdownloader/mode");
 const auto kJDownloaderDevice = QStringLiteral("jdownloader/device");
+// JDownloader as the engine of every download, and how it was reached then.
+const auto kJDownloaderEngine = QStringLiteral("downloads/jdownloader");
+const auto kJDownloaderCloud = QStringLiteral("jdownloader/cloudEngine");
 
 } // namespace
 
@@ -186,6 +190,11 @@ void AppSettings::setTrayNoticeShown() {
 }
 
 AppSettings::JDownloader AppSettings::jdownloader() const {
+    // As the engine it was reached the way its own setting said.
+    if (settings_.value(kJDownloaderEngine, false).toBool()) {
+        return settings_.value(kJDownloaderCloud, false).toBool() ? JDownloader::Remote
+                                                                  : JDownloader::Local;
+    }
     const auto value = settings_.value(kJDownloader).toString();
     if (value == u"local") {
         return JDownloader::Local;
@@ -200,6 +209,16 @@ void AppSettings::setJdownloader(JDownloader mode) {
     write(kJDownloader, mode == JDownloader::Local    ? QStringLiteral("local")
                         : mode == JDownloader::Remote ? QStringLiteral("remote")
                                                       : QStringLiteral("off"));
+    write(kJDownloaderCloud, mode == JDownloader::Remote);
+    if (mode != JDownloader::Off) {
+        return;
+    }
+    write(kJDownloaderEngine, false);
+    // Without JDownloader only MEGA and Pixeldrain download: one of them stays on.
+    if (auto disabled = disabledProviders(); !anyUsable(disabled)) {
+        disabled.removeAll(providerOrder().first());
+        write(kDisabledProviders, disabled);
+    }
 }
 
 QString AppSettings::jdownloaderDevice() const {
@@ -217,17 +236,56 @@ QStringList AppSettings::disabledProviders() const {
         .toStringList();
 }
 
+bool AppSettings::usable(api::Provider provider) const {
+    return downloads::DownloadManager::isNative(provider) || jdownloader() != JDownloader::Off;
+}
+
+bool AppSettings::anyUsable(const QStringList& disabled) const {
+    return std::ranges::any_of(kAllProviders, [&](api::Provider provider) {
+        return usable(provider) && !disabled.contains(api::providerKey(provider));
+    });
+}
+
 void AppSettings::setDisabledProviders(const QStringList& keys) {
     QStringList known;
     for (const auto& key : keys) {
         if (api::providerFromKey(key) && !known.contains(key))
             known.append(key);
     }
-    // At least one server stays on.
-    if (known.size() >= kAllProviders.size()) {
-        return;
+    if (anyUsable(known)) {
+        write(kDisabledProviders, known);
     }
-    write(kDisabledProviders, known);
+}
+
+QVariantList AppSettings::providerSwitches() const {
+    const auto disabled = disabledProviders();
+    const auto on = [&](api::Provider provider) {
+        return usable(provider) && !disabled.contains(api::providerKey(provider));
+    };
+    const auto count = std::ranges::count_if(kAllProviders, on);
+    QVariantList switches;
+    for (const auto provider : kAllProviders) {
+        const bool checked = on(provider);
+        const bool last = checked && count == 1;
+        switches.append(QVariantMap{
+            {QStringLiteral("key"), api::providerKey(provider)},
+            {QStringLiteral("name"), api::providerLabel(provider)},
+            {QStringLiteral("checked"), checked},
+            {QStringLiteral("enabled"), usable(provider) && !last},
+            {QStringLiteral("reason"), !usable(provider) ? QStringLiteral("Necesita JDownloader")
+                                       : last            ? QStringLiteral("Al menos un proveedor")
+                                                         : QString()}});
+    }
+    return switches;
+}
+
+void AppSettings::setProviderEnabled(const QString& key, bool enabled) {
+    auto disabled = disabledProviders();
+    disabled.removeAll(key);
+    if (!enabled) {
+        disabled.append(key);
+    }
+    setDisabledProviders(disabled);
 }
 
 QList<api::Provider> AppSettings::providers() const {
@@ -240,7 +298,8 @@ QList<api::Provider> AppSettings::providers() const {
     const auto disabled = disabledProviders();
     QList<api::Provider> providers;
     for (const auto& key : order) {
-        if (const auto provider = api::providerFromKey(key); provider && !disabled.contains(key)) {
+        if (const auto provider = api::providerFromKey(key);
+            provider && usable(*provider) && !disabled.contains(key)) {
             providers.append(*provider);
         }
     }
@@ -249,32 +308,31 @@ QList<api::Provider> AppSettings::providers() const {
 
 downloads::DownloadSettings AppSettings::downloads() const {
     using downloads::DownloadEngine;
-    const auto other = jdownloader();
+    const auto reach = jdownloader();
+    const auto jd = reach == JDownloader::Local    ? DownloadEngine::JDownloaderLocal
+                    : reach == JDownloader::Remote ? DownloadEngine::JDownloaderCloud
+                                                   : DownloadEngine::Native;
     return {.directory = downloadDirectory(),
             .providers = providers(),
             .audio = dubbed() ? api::Audio::Dub : api::Audio::Sub,
             .maxConcurrent = maxConcurrent(),
-            .engine = !preferredJDownloader() ? DownloadEngine::Native
-                      : cloudJDownloader()    ? DownloadEngine::JDownloaderCloud
-                                              : DownloadEngine::JDownloaderLocal,
-            .otherServers = other == JDownloader::Local    ? DownloadEngine::JDownloaderLocal
-                            : other == JDownloader::Remote ? DownloadEngine::JDownloaderCloud
-                                                           : DownloadEngine::Native,
+            .engine = preferredJDownloader() ? jd : DownloadEngine::Native,
+            .otherServers = jd,
             .jdEndpoint = QUrl(jdEndpoint()),
             .jdDeviceId = jdownloaderDevice()};
 }
 
 bool AppSettings::preferredJDownloader() const {
-    return settings_.value(QStringLiteral("downloads/jdownloader"), false).toBool();
+    return settings_.value(kJDownloaderEngine, false).toBool();
 }
 void AppSettings::setPreferredJDownloader(bool value) {
-    write(QStringLiteral("downloads/jdownloader"), value);
-}
-bool AppSettings::cloudJDownloader() const {
-    return settings_.value(QStringLiteral("jdownloader/cloudEngine"), false).toBool();
-}
-void AppSettings::setCloudJDownloader(bool value) {
-    write(QStringLiteral("jdownloader/cloudEngine"), value);
+    const auto reach = jdownloader();
+    if (value && reach == JDownloader::Off) {
+        return;
+    }
+    // How it is reached is its own setting, kept when JDownloader stops being the engine.
+    setJdownloader(reach);
+    write(kJDownloaderEngine, value);
 }
 QString AppSettings::jdEndpoint() const {
     return settings_

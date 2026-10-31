@@ -10,8 +10,10 @@ import AnimeHub
 Rectangle {
     id: root
 
-    // [{caption, value, progress (< 0: no bar), problem}], in the order they give way: a figure
-    // shows whole or not at all, and those after one that does not fit go with it.
+    // [{caption, value, progress (< 0: no bar), problem, action}]. Beside the actions while they
+    // all fit there; otherwise on a line of their own under them, wrapping as they need: none is
+    // ever left out. With `action`, the name of what its button next to the value does
+    // (figureAction).
     property var figures: []
     // Stuck to the top: a hairline parts it from what scrolls under it.
     property bool pinned: false
@@ -29,6 +31,8 @@ Rectangle {
     // Mayús+Tab from the bar goes back to the title.
     property Item titleItem: null
 
+    signal figureAction(var figure)
+
     function enter() {
         const first = head.nextItemInFocusChain(true)
         if (!root.visible || first === tail)
@@ -37,7 +41,10 @@ Rectangle {
         return true
     }
 
-    implicitHeight: 72
+    // The figures under the actions: they do not fit beside them.
+    readonly property bool stacked: figures.length > 0 && figureFlow.needed > figureArea.width
+
+    implicitHeight: stacked ? 72 + figureFlow.height + 16 : 72
     color: Theme.pane
     Accessible.role: Accessible.ToolBar
 
@@ -57,11 +64,34 @@ Rectangle {
             font.pixelSize: Theme.caption
         }
 
-        Label {
-            text: figure.modelData.value
-            color: figure.modelData.problem ? Theme.danger : Theme.ink
-            font.pixelSize: Theme.body
-            font.weight: Font.DemiBold
+        RowLayout {
+            spacing: 4
+
+            Label {
+                id: valueLabel
+                text: figure.modelData.value
+                color: figure.modelData.problem ? Theme.danger : Theme.ink
+                font.pixelSize: Theme.body
+                font.weight: Font.DemiBold
+            }
+
+            // Out of the column's height: the value's line stays where every figure's does.
+            Item {
+                visible: (figure.modelData.action ?? "") !== ""
+                implicitWidth: figureButton.implicitWidth
+                implicitHeight: valueLabel.implicitHeight
+
+                ToolButton {
+                    id: figureButton
+                    anchors.verticalCenter: parent.verticalCenter
+                    icon.source: Theme.source(Theme.icon.retry)
+                    display: AbstractButton.IconOnly
+                    text: figure.modelData.action ?? ""
+                    ToolTip.visible: hovered
+                    ToolTip.text: text
+                    onClicked: root.figureAction(figure.modelData)
+                }
+            }
         }
 
         ProgressLine {
@@ -100,9 +130,10 @@ Rectangle {
     }
 
     RowLayout {
+        id: band
         x: Theme.section
         width: root.contentWidth
-        height: parent.height
+        height: 72
         spacing: 0
 
         // Pinned, what the bar acts on; it opens from the left edge, easing the button aside.
@@ -155,6 +186,7 @@ Rectangle {
             spacing: 4
         }
 
+        // Where the figures go while they fit beside the actions.
         Item {
             id: figureArea
             // Apart from the actions, or on the edge where there are none.
@@ -163,56 +195,55 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.minimumWidth: 0
-
-            Row {
-                id: figureRow
-
-                // Whether the figures up to `index` fit side by side; measured from their
-                // texts, so it holds before the figures exist.
-                function fits(index) {
-                    let used = 0
-                    for (let i = 0; i <= index && i < root.figures.length; ++i) {
-                        const figure = root.figures[i]
-                        const width = Math.max(captionMetrics.advanceWidth(figure.caption),
-                                               valueMetrics.advanceWidth(figure.value),
-                                               figure.progress >= 0 ? 96 : 0)
-                        used += (i > 0 ? spacing : 0) + Math.ceil(width) + 2
-                    }
-                    return used <= figureArea.width
-                }
-
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 28
-
-                Repeater {
-                    model: root.figures
-
-                    delegate: Figure {
-                        required property int index
-                        visible: figureRow.fits(index)
-                    }
-                }
-            }
-
-            // The figures' fonts, from a label of the style.
-            Label {
-                id: probe
-                visible: false
-            }
-
-            FontMetrics {
-                id: captionMetrics
-                font.family: probe.font.family
-                font.pixelSize: Theme.caption
-            }
-
-            FontMetrics {
-                id: valueMetrics
-                font.family: probe.font.family
-                font.pixelSize: Theme.body
-                font.weight: Font.DemiBold
-            }
         }
+    }
+
+    Flow {
+        id: figureFlow
+
+        // Their width side by side, measured from their texts, so it holds before they exist.
+        readonly property real needed: {
+            let used = 0
+            for (let i = 0; i < root.figures.length; ++i) {
+                const figure = root.figures[i]
+                const action = (figure.action ?? "") !== "" ? 44 : 0
+                const width = Math.max(captionMetrics.advanceWidth(figure.caption),
+                                       valueMetrics.advanceWidth(figure.value) + action,
+                                       figure.progress >= 0 ? 96 : 0)
+                used += (i > 0 ? spacing : 0) + Math.ceil(width) + 2
+            }
+            return used
+        }
+
+        x: root.stacked ? band.x : band.x + figureArea.x
+        y: root.stacked ? 72 - 8 : (72 - height) / 2
+        width: root.stacked ? root.contentWidth : figureArea.width
+        spacing: 28
+
+        Repeater {
+            model: root.figures
+
+            delegate: Figure {}
+        }
+    }
+
+    // The figures' fonts, from a label of the style.
+    Label {
+        id: probe
+        visible: false
+    }
+
+    FontMetrics {
+        id: captionMetrics
+        font.family: probe.font.family
+        font.pixelSize: Theme.caption
+    }
+
+    FontMetrics {
+        id: valueMetrics
+        font.family: probe.font.family
+        font.pixelSize: Theme.body
+        font.weight: Font.DemiBold
     }
 
     Item {

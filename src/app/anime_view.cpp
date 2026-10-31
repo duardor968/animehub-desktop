@@ -84,44 +84,18 @@ QString relationLabel(api::RelationKind kind) {
     return QStringLiteral("Relacionado");
 }
 
-// The locale's abbreviations without their full stop: "jue", "oct".
-QString abbreviation(QString name) {
-    if (name.endsWith(QLatin1Char('.'))) {
-        name.chop(1);
-    }
-    return name;
-}
-
-// "hoy", "mañana" or, from then on, "jue" within the week and "jue 30 oct" with `dated`.
-QString day(const QDate& date, const QDate& today, bool dated) {
-    const auto days = today.daysTo(date);
-    if (days == 0) {
-        return QStringLiteral("hoy");
-    }
-    if (days == 1) {
-        return QStringLiteral("mañana");
-    }
-    auto text = abbreviation(spanish().dayName(date.dayOfWeek(), QLocale::ShortFormat));
-    if (dated || days >= 7) {
-        text += QLatin1Char(' ') + QString::number(date.day()) + QLatin1Char(' ') +
-                abbreviation(spanish().monthName(date.month(), QLocale::ShortFormat));
-    }
-    return text;
-}
-
-// "vie 13:34" within the week, "jue 6 nov, 13:34" past it; always dated with `dated`.
-QString when(const QDateTime& at, bool dated) {
-    const auto name = day(at.toLocalTime().date(), QDate::currentDate(), dated);
-    return name + (name.contains(QLatin1Char(' ')) ? QStringLiteral(", ") : QStringLiteral(" ")) +
-           display::time(at);
-}
-
 QVariantMap figure(const QString& caption, const QString& value, double progress = -1,
                    bool problem = false) {
     return {{QStringLiteral("caption"), caption},
             {QStringLiteral("value"), value},
             {QStringLiteral("progress"), progress},
             {QStringLiteral("problem"), problem}};
+}
+
+// A download that only waits to try again can try now.
+QVariantMap retryable(QVariantMap figure) {
+    figure.insert(QStringLiteral("action"), QStringLiteral("Reintentar ahora"));
+    return figure;
 }
 
 // A typed position: complete and valid, still incomplete, or wrong (with what is wrong).
@@ -446,9 +420,16 @@ AnimeView::Summary AnimeView::summarize() const {
         summary.primary = PrimaryAction::DownloadAll;
         return summary;
     }
+    // Everything watched of a finished series, with nothing on disk or on its way: it starts again
+    // as one not begun does, whole, never from an episode the user did not choose.
+    const bool caught_up = summary.watched == list.size();
+    if (!single() && caught_up && !airing() && summary.onDisk == 0 &&
+        summary.batchTotal == summary.batchDone) {
+        summary.primary = PrimaryAction::DownloadAll;
+        return summary;
+    }
     // The episode to watch next; with everything watched, none while it airs and the first
     // one to start again otherwise.
-    const bool caught_up = summary.watched == list.size();
     if (record_ && record_->resumeNumber && episodes_.episode(*record_->resumeNumber)) {
         summary.target = *record_->resumeNumber;
     } else if (!caught_up) {
@@ -596,9 +577,11 @@ bool AnimeView::single() const {
     return count == 0 && episodes_.total() == 1 && anime.status == api::AnimeStatus::Finished;
 }
 
+// Still gets new episodes: airing, about to, or between seasons.
 bool AnimeView::airing() const {
     const auto status = source().status;
-    return status == api::AnimeStatus::Airing || status == api::AnimeStatus::Upcoming;
+    return status == api::AnimeStatus::Airing || status == api::AnimeStatus::Upcoming ||
+           status == api::AnimeStatus::Paused;
 }
 
 bool AnimeView::inLibrary() const {
@@ -759,8 +742,9 @@ double AnimeView::watchedProgress() const {
     return static_cast<double>(summary_.watched) / static_cast<double>(list.size());
 }
 
-// "Descarga En cola (2.º) · Vistos 12/13 · En disco 12/13 · 2,3 GB · Próximo episodio vie 13:34
-// · Ep. 5"; what the main button already says stays out. Episodes are counted "x/y" throughout.
+// "Descarga En cola (2.º) · Vistos 12/13 · En disco 12/13 · 2,3 GB · Próximo episodio Viernes
+// 13:34 · Ep. 5"; what the main button already says stays out. Episodes are counted "x/y"
+// throughout.
 QVariantList AnimeView::figures() const {
     QVariantList figures;
     const auto& list = episodes_.episodes();
@@ -775,9 +759,7 @@ QVariantList AnimeView::figures() const {
             state = summary_.place > 0 ? QStringLiteral("En cola (%1.º)").arg(summary_.place)
                                        : QStringLiteral("En cola");
             break;
-        case TaskState::Waiting:
-            state = display::retry(job->retryAt);
-            break;
+        case TaskState::Waiting: // why it waits and until when, as the Downloads row says it
         case TaskState::Resolving:
             state = display::download(*job);
             break;
@@ -785,23 +767,27 @@ QVariantList AnimeView::figures() const {
             state = QStringLiteral("En pausa · ") + percent(primaryProgress());
             break;
         case TaskState::Failed: // why, as the row says it
-            state = display::issue(job->issue);
+            state = display::issue(*job);
             break;
         default: // transferring or checking: the button counts it
             break;
         }
         if (!state.isEmpty()) {
-            figures.append(figure(QStringLiteral("Descarga"), state, -1, own_failed));
+            const auto shown = figure(QStringLiteral("Descarga"), state, -1, own_failed);
+            figures.append(job->state == TaskState::Waiting ? retryable(shown) : shown);
         }
     } else if (summary_.active > 0) {
-        const auto state = summary_.paused              ? QStringLiteral("En pausa")
-                           : summary_.transferring      ? QStringLiteral("Descargando")
-                           : summary_.retryAt.isValid() ? QStringLiteral("En espera")
-                                                        : QStringLiteral("En cola");
-        figures.append(figure(
+        const bool waiting =
+            !summary_.paused && !summary_.transferring && summary_.retryAt.isValid();
+        const auto state = summary_.paused         ? QStringLiteral("En pausa")
+                           : summary_.transferring ? QStringLiteral("Descargando")
+                           : waiting               ? QStringLiteral("En espera")
+                                                   : QStringLiteral("En cola");
+        const auto shown = figure(
             QStringLiteral("Descarga"),
             state + QStringLiteral(" · %1/%2").arg(summary_.batchDone).arg(summary_.batchTotal),
-            summary_.batchProgress));
+            summary_.batchProgress);
+        figures.append(waiting ? retryable(shown) : shown);
     }
     if (single()) {
         if (!list.isEmpty() && list.first().state == WatchState::Watching &&
@@ -835,12 +821,13 @@ QVariantList AnimeView::figures() const {
     }
     // When the next episode comes, once and as text: the header already says it airs.
     if (const auto start = premiere(); start.isValid()) {
-        figures.append(figure(QStringLiteral("Estreno"), when(start, true)));
+        figures.append(
+            figure(QStringLiteral("Estreno"), display::when(start, QDateTime::currentDateTime())));
     } else if (next_airing_ && airing()) {
         const auto now = QDateTime::currentDateTimeUtc();
-        const auto at = next_airing_->late        ? QStringLiteral("retrasado")
-                        : now >= next_airing_->at ? QStringLiteral("ahora")
-                                                  : when(next_airing_->at, false);
+        const auto at = next_airing_->late        ? QStringLiteral("Retrasado")
+                        : now >= next_airing_->at ? QStringLiteral("Ahora")
+                                                  : display::when(next_airing_->at, now);
         figures.append(
             figure(QStringLiteral("Próximo episodio"),
                    at + QStringLiteral(" · ") + display::shortEpisode(next_airing_->number)));
@@ -1046,6 +1033,10 @@ void AnimeView::resumeSeries() {
 
 void AnimeView::retryFailed() {
     services_.downloads.retryFailed(slug_);
+}
+
+void AnimeView::retryWaiting() {
+    services_.downloads.retryWaiting(slug_);
 }
 
 void AnimeView::cancelSeries(bool confirmed) {

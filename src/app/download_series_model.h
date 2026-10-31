@@ -23,7 +23,8 @@ struct DownloadEpisodeRow {
     bool canPause = false;
     bool canResume = false;
     bool canRetry = false;
-    QString partial; // what cancelling deletes ("143 MB"); empty when nothing
+    bool canRetryNow = false; // waits to try again by itself: "Reintentar ahora"
+    QString partial;          // what cancelling deletes ("143 MB"); empty when nothing
 
     bool operator==(const DownloadEpisodeRow&) const = default;
 };
@@ -41,12 +42,13 @@ struct DownloadSeriesRow {
     bool canPause = false;
     bool canResume = false;
     bool canRetry = false;
-    QString engineLine;  // as its episodes', when JDownloader downloads some of them
-    bool first = false;  // first in line
-    QString cancelText;  // what cancelling deletes, said in full; empty when nothing
-    int filesOnDisk = 0; // completed episodes whose file is still there
-    QString diskText;    // "26 episodios · 9,1 GB"
-    QString watchText;   // "Ver ep. 5", "Continuar · Ep. 13"; empty when nothing to watch
+    bool canRetryNow = false; // some episode waits to try again by itself
+    QString engineLine;       // as its episodes', when JDownloader downloads some of them
+    bool first = false;       // first in line
+    QString cancelText;       // what cancelling deletes, said in full; empty when nothing
+    int filesOnDisk = 0;      // completed episodes whose file is still there
+    QString diskText;         // "26 episodios · 9,1 GB"
+    QString watchText;        // "Ver ep. 5", "Continuar · Ep. 13"; empty when nothing to watch
     bool hasFolder = false;
     // Why it does not go as it should, beyond failures: "MEGA llegó a su límite · se libera a las
     // 15:20 · sigue con Pixeldrain". Empty when nothing to say.
@@ -82,6 +84,7 @@ public:
         CanPauseRole,
         CanResumeRole,
         CanRetryRole,
+        CanRetryNowRole,
     };
 
     using QAbstractListModel::QAbstractListModel;
@@ -127,6 +130,7 @@ public:
         RunningRole,
         CancelCountRole,
         FilesGoneRole,
+        CanRetryNowRole,
         EpisodesRole,
     };
 

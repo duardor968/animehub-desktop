@@ -152,7 +152,6 @@ Item {
                 Layout.bottomMargin: 2
                 visible: root.steps.length > 0
                 steps: root.steps
-                current: root.title
             }
 
             Label {

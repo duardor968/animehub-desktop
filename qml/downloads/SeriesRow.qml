@@ -6,7 +6,8 @@ import AnimeHub
 // A series on the Downloads page: its poster, how far its episodes are and its actions. The
 // whole row unfolds it into its episodes, its chevron on the right as in WinUI's Expander; in
 // "A continuación" it can be dragged to another place in line. Its button is what fits where it
-// is: pause what transfers, resume what is paused, start now what waits in line; completed,
+// is: pause what transfers, resume what is paused, retry now what waits to try again, start now
+// what waits in line; completed,
 // open its folder, or, with its files gone, take it out of the list.
 Item {
     id: root
@@ -22,6 +23,7 @@ Item {
     required property bool canPause
     required property bool canResume
     required property bool canRetry
+    required property bool canRetryNow
     required property string engineLine
     required property bool first
     required property string cancelText
@@ -314,20 +316,24 @@ Item {
 
                 ToolButton {
                     id: action
-                    // What the button does here: "pause", "resume", "now", "folder", "forget".
+                    // What the button does here: "pause", "resume", "retry", "now", "folder",
+                    // "forget".
                     readonly property string kind: !root.queued
                                                    ? (root.filesGone ? "forget" : root.hasFolder ? "folder" : "")
                                                    : root.running && root.canPause ? "pause"
                                                    : root.canResume ? "resume"
+                                                   : root.canRetryNow ? "retry"
                                                    : !root.first ? "now" : ""
                     visible: kind !== ""
                     icon.source: Theme.source(kind === "pause" ? Theme.icon.pause
                                               : kind === "resume" ? Theme.icon.play
+                                              : kind === "retry" ? Theme.icon.retry
                                               : kind === "now" ? Theme.icon.download
                                               : kind === "forget" ? Theme.icon.cancel
                                               : Theme.icon.folder)
                     display: AbstractButton.IconOnly
                     text: kind === "pause" ? "Pausar" : kind === "resume" ? "Reanudar"
+                          : kind === "retry" ? "Reintentar ahora"
                           : kind === "now" ? "Descargar ahora" : kind === "forget" ? "Quitar de la lista"
                           : "Abrir la carpeta"
                     ToolTip.visible: hovered
@@ -337,6 +343,8 @@ Item {
                             root.downloads.pauseSeries(root.slug)
                         else if (kind === "resume")
                             root.downloads.resumeSeries(root.slug)
+                        else if (kind === "retry")
+                            root.downloads.retryWaiting(root.slug)
                         else if (kind === "now")
                             root.downloads.prioritize(root.slug)
                         else if (kind === "forget")

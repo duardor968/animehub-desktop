@@ -21,6 +21,7 @@ QString statusQueryValue(AnimeStatus status) {
     case AnimeStatus::Finished:
         return QStringLiteral("finalizado");
     case AnimeStatus::Upcoming:
+    case AnimeStatus::Paused: // the API's "proximamente" returns both
         return QStringLiteral("proximamente");
     case AnimeStatus::Unknown:
         break;

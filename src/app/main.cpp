@@ -165,8 +165,8 @@ int main(int argc, char* argv[]) {
         QStringLiteral("smoke-hidden-native"),
         QStringLiteral("Capturar con una ventana nativa creada siempre oculta; requiere smoke."));
     const QCommandLineOption smoke_flow(QStringLiteral("smoke-flow"),
-                                        QStringLiteral("Recorrido Qt: create, archive, settings o "
-                                                       "navigate."),
+                                        QStringLiteral("Recorrido Qt: create, archive, settings, "
+                                                       "navigate o catalog."),
                                         QStringLiteral("caso"));
     parser.addOption(smoke_flow);
     parser.addOptions({api_base, smoke_image, smoke_size, smoke_page, smoke_settings,
@@ -181,7 +181,8 @@ int main(int argc, char* argv[]) {
     const bool smokeHidden = parser.isSet(smoke_hidden_native);
     if (parser.isSet(smoke_flow) &&
         (!smokeHidden || !QStringList{QStringLiteral("create"), QStringLiteral("archive"),
-                                      QStringLiteral("settings"), QStringLiteral("navigate")}
+                                      QStringLiteral("settings"), QStringLiteral("navigate"),
+                                      QStringLiteral("catalog")}
                               .contains(parser.value(smoke_flow))))
         return 2;
     if (smokeHidden &&

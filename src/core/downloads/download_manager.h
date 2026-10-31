@@ -102,7 +102,13 @@ public:
 
     void pauseSeries(const QString& slug);
     void resumeSeries(const QString& slug);
-    void retryFailed(const QString& slug);  // failed and waiting tasks of the series
+    void retryFailed(const QString& slug); // failed and waiting tasks of the series
+    // "Reintentar ahora": what waits tries again without waiting for its time. A retry of what
+    // waits for MEGA's quota (retry(), retryFailed() as well) lifts it, since the user may have
+    // changed IP: every episode waiting for MEGA goes, and if MEGA still refuses they wait again
+    // until the time it gives.
+    void retryWaiting(const QString& slug);
+    void retryMegaQuota();
     void cancelSeries(const QString& slug); // every task not completed; partial files go
     void forgetSeries(const QString& slug); // completed, cancelled and failed rows leave the list
     // "Descargar ahora": the series goes first, its paused tasks go on, and it takes the running
@@ -184,6 +190,8 @@ private:
     // MEGA said its quota ran out, with the time it frees if it said so.
     void megaOverQuota(std::optional<std::chrono::seconds> time_left);
     [[nodiscard]] bool megaBlocked() const;
+    // MEGA is tried again at once: the episodes waiting for its quota go back in line.
+    void liftMegaQuota();
 
     void wait(qint64 id, TaskIssue issue, const QDateTime& until, const QString& detail = {});
     void retryLater(qint64 id, TaskIssue issue, const QString& detail = {});
@@ -204,6 +212,7 @@ private:
     bool pauseTask(qint64 id, bool with_all = false);
     bool resumeTask(qint64 id);
     bool retryTask(qint64 id);
+    void requeueRetry(Task& task);
     void cancelTask(qint64 id);
     void requeue(qint64 id);
 

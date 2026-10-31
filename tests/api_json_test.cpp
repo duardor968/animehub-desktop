@@ -58,6 +58,17 @@ private slots:
         QVERIFY(schedule->first().basisPublishedAt.isValid());
     }
 
+    // Every status the API sends reads back as itself; PAUSED is a series between seasons.
+    void statusKeysRoundTrip() {
+        for (const auto status : {AnimeStatus::Airing, AnimeStatus::Finished, AnimeStatus::Upcoming,
+                                  AnimeStatus::Paused}) {
+            QCOMPARE(statusFromKey(statusKey(status)), status);
+        }
+        QCOMPARE(statusKey(AnimeStatus::Paused), QStringLiteral("PAUSED"));
+        QCOMPARE(statusFromKey(u"PAUSED"), AnimeStatus::Paused);
+        QCOMPARE(statusFromKey(u"HIATUS"), AnimeStatus::Unknown);
+    }
+
     void decodesAnimeDetail() {
         const auto anime = json::decodeAnime(fixture("anime.json"));
         QVERIFY2(anime, qPrintable(why(anime)));

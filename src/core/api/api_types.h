@@ -12,7 +12,8 @@
 // Value types for the AnimeHub REST contract (`animehub-api/openapi.json`, /api/v1).
 namespace animehub::api {
 
-enum class AnimeStatus { Unknown, Airing, Finished, Upcoming };
+// Paused: a series between seasons, which AnimeAV1 marks "Próximamente" (One Piece).
+enum class AnimeStatus { Unknown, Airing, Finished, Upcoming, Paused };
 enum class Provider { Mega, Pixeldrain, Mp4Upload, OneFichier };
 enum class Audio { Sub, Dub };
 

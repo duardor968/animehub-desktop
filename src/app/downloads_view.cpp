@@ -39,6 +39,11 @@ bool retryable(const Task& task) {
     return task.state == TaskState::Failed && !task.unconfirmed();
 }
 
+// Waiting to try again by itself: "Reintentar ahora" does not wait for its time.
+bool retryableNow(const Task& task) {
+    return task.state == TaskState::Waiting && !task.unconfirmed();
+}
+
 // Where a JDownloader download ends up, said with the engine: native ones go where they
 // always do, so their row says nothing of it.
 QString jdFolder(const Task& task) {
@@ -149,9 +154,13 @@ QString noticeFor(const Task& task,
 // What the top of the page says under its progress: where the episode is, without the speed,
 // which the graph's "Actual" gives for every download at once.
 QString headerDetailOf(const Task& task) {
+    // MEGA's quota and its time are the notice above: one time for one wait.
+    if (task.state == TaskState::Waiting && native(task)) {
+        return task.issue == downloads::TaskIssue::Quota ? QStringLiteral("En espera")
+                                                         : display::retry(task.retryAt);
+    }
     if (!native(task) || task.state != TaskState::Downloading) {
-        return task.state == TaskState::Waiting && native(task) ? display::retry(task.retryAt)
-                                                                : taskDetail(task);
+        return taskDetail(task);
     }
     QStringList parts;
     if (task.bytesTotal > 0) {
@@ -372,6 +381,7 @@ void DownloadsView::rebuild() {
             row.canPause = row.canPause || pausable(task);
             row.canResume = row.canResume || task.state == TaskState::Paused;
             row.canRetry = row.canRetry || retryable(task);
+            row.canRetryNow = row.canRetryNow || retryableNow(task);
             row.episodes.append(
                 {.id = task.id,
                  .number = task.number,
@@ -388,6 +398,7 @@ void DownloadsView::rebuild() {
                  .canPause = pausable(task),
                  .canResume = task.state == TaskState::Paused,
                  .canRetry = retryable(task),
+                 .canRetryNow = retryableNow(task),
                  .partial = native(task) && task.state != TaskState::Completed && bytesOf(task) > 0
                                 ? display::bytes(bytesOf(task))
                                 : QString()});
@@ -523,22 +534,22 @@ void DownloadsView::rebuild() {
     const auto* subject = shown ? shown : next ? next : held ? held : broken;
     if (subject) {
         const auto detail = headerDetailOf(*subject);
-        header = {
-            .mode = shown  ? Mode::Active
-                    : next ? Mode::Waiting
-                    : held ? Mode::Paused
-                           : Mode::Failed,
-            .slug = subject->slug,
-            .title = subject->animeTitle,
-            // The series' line, then the episode's under the bar: each figure named.
-            .episode = amounts.value(subject->slug),
-            .detail = detail.isEmpty()
-                          ? display::episode(subject->number)
-                          : display::episode(subject->number) + QStringLiteral(" · ") + detail,
-            // Its own reason, else the first one on the page: the top speaks for it.
-            .notice = noticeFor(*subject, quota).isEmpty() ? notice : noticeFor(*subject, quota),
-            .progress = fractionOf(*subject),
-            .art = info(subject->slug).art};
+        header = {.mode = shown  ? Mode::Active
+                          : next ? Mode::Waiting
+                          : held ? Mode::Paused
+                                 : Mode::Failed,
+                  .slug = subject->slug,
+                  .title = subject->animeTitle,
+                  // The series' line, then the episode's under the bar: each figure named.
+                  .episode = amounts.value(subject->slug),
+                  .detail = detail.isEmpty() ? display::episode(subject->number)
+                                             : display::episode(subject->number) +
+                                                   QStringLiteral(" · ") + detail,
+                  // Only its own reason: another series' would read as this episode's state. The
+                  // bar and that series' row say theirs.
+                  .notice = noticeFor(*subject, quota),
+                  .progress = fractionOf(*subject),
+                  .art = info(subject->slug).art};
     } else {
         header.title = QStringLiteral("Nada descargando");
     }
@@ -711,6 +722,14 @@ void DownloadsView::resumeSeries(const QString& slug) {
 
 void DownloadsView::retryFailed(const QString& slug) {
     manager_.retryFailed(slug);
+}
+
+void DownloadsView::retryWaiting(const QString& slug) {
+    manager_.retryWaiting(slug);
+}
+
+void DownloadsView::retryMegaQuota() {
+    manager_.retryMegaQuota();
 }
 
 // The page shows the new order at once, so a dropped row lands where it was let go.

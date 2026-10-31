@@ -29,7 +29,7 @@ Item {
         if (from === "downloads")
             return [{ text: "Descargas", go: () => page.showDownloads() }]
         const steps = [{ text: "Biblioteca", go: () => page.select("") }]
-        const franchise = app.library.total >= 0 ? app.library.franchiseOf(selected) : ({})
+        const franchise = app.library.total >= 0 ? app.library.franchiseStep(selected) : ({})
         if (franchise.id)
             steps.push({ text: franchise.title, go: () => page.openFranchise(franchise.id) })
         return steps
@@ -136,9 +136,14 @@ Item {
             selectedSlug: page.selected
             selectedGroup: page.selectedGroup
             homeShown: !page.selected && !page.selectedGroup && !page.showGrid
+                       && !page.app.library.archivedOnly
             gridShown: page.showGrid
             emptyText: page.emptyText
-            onHomeRequested: page.select("")
+            // The home is the library's: the archive is left for it.
+            onHomeRequested: {
+                page.app.library.archivedOnly = false
+                page.select("")
+            }
             onGridRequested: {
                 const open = !page.showGrid
                 page.select("")
@@ -162,7 +167,9 @@ Item {
             SplitView.minimumWidth: 480
             // Not the widest child's implicit width (an unwrapped synopsis): the split decides.
             implicitWidth: 480
-            currentIndex: page.selectedGroup ? 2 : page.selected ? 1 : page.showGrid ? 3 : 0
+            // The archive shows itself beside the list: the home and its agenda are the library's.
+            currentIndex: page.selectedGroup ? 2 : page.selected ? 1
+                          : page.showGrid || page.app.library.archivedOnly ? 3 : 0
 
             LibraryHome {
                 app: page.app
@@ -190,6 +197,12 @@ Item {
             LibraryGrid {
                 library: page.app.library
                 emptyText: page.emptyText
+                emptyDetail: page.app.library.archivedOnly
+                             ? "Al quitar un anime de la biblioteca puedes archivarlo: se guarda aquí "
+                               + "tal como está, avisos incluidos."
+                             : ""
+                emptyAction: page.app.library.archivedOnly ? "Volver a la biblioteca" : ""
+                onEmptyActed: page.app.library.archivedOnly = false
                 onActivated: slug => page.select(slug)
                 onFranchiseActivated: id => page.openFranchise(id)
             }

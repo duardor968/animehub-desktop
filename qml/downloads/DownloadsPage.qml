@@ -425,12 +425,13 @@ Item {
         property bool first
         // Waiting its turn, it can be held: the row's own button is for what transfers.
         property bool holdable
+        property bool canRetryNow
         property bool hasFolder
         property string consequence
         property int cancelCount
         property bool withPage
 
-        entries: [nowEntry, holdEntry, folderEntry, animeEntry, cancelSeparator, cancelEntry, pageSeparator,
+        entries: [retryNowEntry, nowEntry, holdEntry, folderEntry, animeEntry, cancelSeparator, cancelEntry, pageSeparator,
             downloadsFolderEntry]
 
         function showFor(row, anchor, fromHeader) {
@@ -438,6 +439,7 @@ Item {
             name = row.title
             first = row.first
             holdable = row.canPause && !row.running
+            canRetryNow = row.canRetryNow
             hasFolder = row.hasFolder
             consequence = row.cancelText
             cancelCount = row.cancelCount
@@ -445,6 +447,13 @@ Item {
             queueMenu.show(anchor, true)
         }
 
+        MenuEntry {
+            id: retryNowEntry
+            property bool wanted: queueMenu.canRetryNow
+            text: "Reintentar ahora"
+            glyph: Theme.icon.retry
+            onTriggered: page.downloads.retryWaiting(queueMenu.slug)
+        }
         MenuEntry {
             id: nowEntry
             property bool wanted: !queueMenu.first

@@ -10,8 +10,10 @@ Item {
     id: root
 
     required property LibraryModel library
-    // Why the filter leaves nothing.
+    // Why the filter leaves nothing, how it fills, and the way out.
     property string emptyText
+    property string emptyDetail
+    property string emptyAction
 
     readonly property string title: library.archivedOnly ? "Archivo" : ({
         [LibraryModel.ToWatch]: "Para ver",
@@ -24,6 +26,7 @@ Item {
 
     signal activated(string slug)
     signal franchiseActivated(var id)
+    signal emptyActed()
 
     GridView {
         id: grid
@@ -102,15 +105,36 @@ Item {
         }
     }
 
-    Label {
+    ColumnLayout {
         anchors.centerIn: parent
         width: Math.min(parent.width - 2 * Theme.section, 420)
         visible: !grid.visible
-        horizontalAlignment: Text.AlignHCenter
-        wrapMode: Text.Wrap
-        text: root.emptyText || "Nada que mostrar"
-        color: Theme.ink
-        font.pixelSize: Theme.subtitle
-        font.weight: Font.DemiBold
+        spacing: Theme.pad
+
+        Label {
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            text: root.emptyText || "Nada que mostrar"
+            color: Theme.ink
+            font.pixelSize: Theme.subtitle
+            font.weight: Font.DemiBold
+            Accessible.role: Accessible.Heading
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: text !== ""
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            text: root.emptyDetail
+            color: Theme.muted
+            font.pixelSize: Theme.body
+        }
+        Button {
+            Layout.alignment: Qt.AlignHCenter
+            visible: root.emptyAction !== ""
+            text: root.emptyAction
+            onClicked: root.emptyActed()
+        }
     }
 }

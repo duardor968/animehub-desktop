@@ -108,6 +108,8 @@ QVariant DownloadEpisodesModel::data(const QModelIndex& index, int role) const {
         return row.canResume;
     case CanRetryRole:
         return row.canRetry;
+    case CanRetryNowRole:
+        return row.canRetryNow;
     case PartialRole:
         return row.partial;
     default:
@@ -122,7 +124,8 @@ QHash<int, QByteArray> DownloadEpisodesModel::roleNames() const {
             {DetailRole, "detail"},     {ProblemRole, "problem"},
             {HasFileRole, "hasFile"},   {EngineLineRole, "engineLine"},
             {CanPauseRole, "canPause"}, {CanResumeRole, "canResume"},
-            {CanRetryRole, "canRetry"}, {PartialRole, "partial"}};
+            {CanRetryRole, "canRetry"}, {CanRetryNowRole, "canRetryNow"},
+            {PartialRole, "partial"}};
 }
 
 DownloadEpisodesModel* DownloadSeriesModel::episodesOf(const QString& slug) {
@@ -228,6 +231,8 @@ QVariant DownloadSeriesModel::data(const QModelIndex& index, int role) const {
         return row.cancelCount;
     case FilesGoneRole:
         return row.filesGone;
+    case CanRetryNowRole:
+        return row.canRetryNow;
     case EpisodesRole:
         return QVariant::fromValue(episodes_.value(row.slug));
     default:
@@ -257,6 +262,7 @@ QHash<int, QByteArray> DownloadSeriesModel::roleNames() const {
             {RunningRole, "running"},
             {CancelCountRole, "cancelCount"},
             {FilesGoneRole, "filesGone"},
+            {CanRetryNowRole, "canRetryNow"},
             {EpisodesRole, "episodes"}};
 }
 

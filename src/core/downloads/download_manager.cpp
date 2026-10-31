@@ -138,6 +138,17 @@ void DownloadManager::start(bool transfers) {
             if (task.issue == TaskIssue::Network && task.provider) {
                 task.issue = TaskIssue::Connection;
             }
+            // A wait that ended while AnimeHub was closed is over: the task is back in line, and
+            // no page says it tries again at a time already gone.
+            if (task.state == TaskState::Waiting && task.retryAt.isValid() && task.retryAt <= now) {
+                // What it waited for is over: no text may still say it.
+                task.state = TaskState::Queued;
+                task.issue = TaskIssue::None;
+                task.issueDetail.clear();
+                task.issueProvider.reset();
+                if (transfers_enabled_)
+                    store(task, false);
+            }
             tasks_.insert(task.id, task);
             // MEGA's quota outlives a restart: what waits for it says until when MEGA is out.
             if (task.state == TaskState::Waiting && task.issue == TaskIssue::Quota &&
@@ -453,8 +464,10 @@ void DownloadManager::pump() {
             next_wake = it->retryAt;
         }
     }
+    // At least once a minute: a timer may stop with the computer asleep, the wall clock does
+    // not, and a wait must not outlast its time.
     if (next_wake.isValid()) {
-        wake_timer_.start(std::clamp<qint64>(now.msecsTo(next_wake) + 50, 50, 3'600'000));
+        wake_timer_.start(std::clamp<qint64>(now.msecsTo(next_wake) + 50, 50, 60'000));
     }
 
     {
@@ -1253,14 +1266,54 @@ bool DownloadManager::retryTask(qint64 id) {
         it->unconfirmed()) {
         return false;
     }
-    it->attempts = 0;
-    it->issue = TaskIssue::None;
-    it->issueDetail.clear();
-    it->jdUnreachable = false;
-    it->retryAt = {};
-    it->finishedAt = {};
-    setState(id, TaskState::Queued);
+    if (it->state == TaskState::Waiting && it->issue == TaskIssue::Quota) {
+        liftMegaQuota(); // it goes with every other episode waiting for MEGA
+        return true;
+    }
+    requeueRetry(*it);
     return true;
+}
+
+void DownloadManager::requeueRetry(Task& task) {
+    task.attempts = 0;
+    task.issue = TaskIssue::None;
+    task.issueDetail.clear();
+    task.jdUnreachable = false;
+    task.retryAt = {};
+    task.finishedAt = {};
+    setState(task.id, TaskState::Queued);
+}
+
+void DownloadManager::liftMegaQuota() {
+    if (!transfers_enabled_)
+        return;
+    const bool blocked = mega_until_.isValid();
+    mega_until_ = {};
+    mega_until_known_ = false;
+    for (auto& task : tasks_) {
+        // As when the quota frees by itself: JDownloader gets another chance.
+        task.jdUnreachable = false;
+        if (task.state == TaskState::Waiting && task.issue == TaskIssue::Quota) {
+            requeueRetry(task);
+        }
+    }
+    if (blocked) {
+        emit megaQuotaChanged();
+    }
+}
+
+void DownloadManager::retryWaiting(const QString& slug) {
+    for (const auto id : idsOf(slug)) {
+        if (tasks_.value(id).state == TaskState::Waiting) {
+            retryTask(id);
+        }
+    }
+    pump();
+}
+
+void DownloadManager::retryMegaQuota() {
+    liftMegaQuota();
+    pump();
 }
 
 // The task gives up its slot. aria2 keeps the partial file and its control file, so the

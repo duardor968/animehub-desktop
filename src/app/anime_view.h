@@ -222,6 +222,8 @@ public:
     Q_INVOKABLE void pauseSeries();
     Q_INVOKABLE void resumeSeries();
     Q_INVOKABLE void retryFailed();
+    // "Reintentar ahora": the series' waiting downloads try again without waiting for their time.
+    Q_INVOKABLE void retryWaiting();
     // Asks first when downloaded bytes would be lost (cancelConfirmationNeeded).
     Q_INVOKABLE void cancelSeries(bool confirmed = false);
     Q_INVOKABLE void pauseDownload(double number);

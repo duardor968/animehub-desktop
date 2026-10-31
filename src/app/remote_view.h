@@ -1,6 +1,7 @@
 #pragma once
 #include "remote/remote_service.h"
 #include <QSet>
+#include <QSysInfo>
 #include <QVariantList>
 #include <QtQmlIntegration>
 namespace animehub::app {
@@ -11,6 +12,8 @@ class RemoteView final : public QObject {
     QML_UNCREATABLE("Provided by the application")
     Q_PROPERTY(bool registered READ registered NOTIFY changed)
     Q_PROPERTY(QString deviceName READ deviceName NOTIFY changed)
+    // What linking offers to call this PC until the user names it: the computer's own name.
+    Q_PROPERTY(QString suggestedName READ suggestedName CONSTANT)
     Q_PROPERTY(QString code READ code NOTIFY changed)
     // When the code stops working, "12:26".
     Q_PROPERTY(QString expiresText READ expiresText NOTIFY changed)
@@ -25,6 +28,9 @@ public:
     }
     QString deviceName() const {
         return service_.deviceName();
+    }
+    static QString suggestedName() {
+        return QSysInfo::machineHostName();
     }
     QString code() const {
         return service_.code() == used_code_ ? QString() : service_.code();

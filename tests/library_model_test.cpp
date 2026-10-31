@@ -251,10 +251,12 @@ private slots:
         QVERIFY(repo.setFranchiseMember(*group, QStringLiteral("second"), true));
 
         LibraryModel model(service, downloads, api);
-        // The breadcrumb's middle step: the franchise of a work.
-        QCOMPARE(model.franchiseOf(QStringLiteral("second")).value(QStringLiteral("title")),
+        // The breadcrumb's middle step: the franchise of a work, unless it carries the work's own
+        // name, which the page's title already says.
+        QCOMPARE(model.franchiseStep(QStringLiteral("second")).value(QStringLiteral("title")),
                  QVariant(QStringLiteral("Series")));
-        QVERIFY(model.franchiseOf(QStringLiteral("missing")).isEmpty());
+        QVERIFY(model.franchiseStep(QStringLiteral("first")).isEmpty());
+        QVERIFY(model.franchiseStep(QStringLiteral("missing")).isEmpty());
         model.openFranchise(*group);
         const auto franchise = model.franchise();
         const auto works = franchise.value(QStringLiteral("works")).toList();

@@ -201,7 +201,25 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
                 return false;
             key(Qt::Key_Down);
         }
-        QMetaObject::invokeMethod(dialog, "close");
+        // Descargas: a provider switch that cannot be used is still a stop for Tab, and says why.
+        QMetaObject::invokeMethod(dialog, "openAt", Q_ARG(QVariant, QStringLiteral("downloads")));
+        settle();
+        key(Qt::Key_Tab);
+        QString reason;
+        QString provider;
+        for (int step = 0; step < 30 && reason.isEmpty(); ++step) {
+            if (auto* item = window->activeFocusItem()) {
+                const auto choice = item->property("modelData").toMap();
+                reason = choice.value(QStringLiteral("reason")).toString();
+                provider = choice.value(QStringLiteral("name")).toString();
+            }
+            if (reason.isEmpty())
+                key(Qt::Key_Tab);
+        }
+        qInfo() << "Flow switch reason:" << provider << reason;
+        // The capture shows that switch framed, with its reason.
+        if (!check(!reason.isEmpty(), "Tab reaches why a provider switch cannot be used"))
+            return false;
     } else if (flow == u"navigate") {
         // The library list by keyboard: the arrows open what they reach and keep the keyboard;
         // Enter takes it to the page's title, under its breadcrumb; Esc goes back without
@@ -315,6 +333,48 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
                        window->activeFocusItem()->property("text") == featured,
                    "← from the first poster reaches the featured card"))
             return false;
+    } else if (flow == u"catalog") {
+        // An anime opened from the catalog says where it came from, and its breadcrumb leads
+        // back there; the capture shows it opened again.
+        model->setFilter(LibraryModel::Filter::All);
+        model->setGrouped(false);
+        model->setArchivedOnly(false);
+        settle();
+        auto* catalog = qobject_cast<QQuickItem*>(named("catalogPage"));
+        const auto slug = model->slugAt(0);
+        if (!check(catalog && !slug.isEmpty(), "catalog fixture, page and an anime"))
+            return false;
+        QMetaObject::invokeMethod(window, "showPage", Q_ARG(QVariant, 1));
+        const auto open = [&] {
+            QMetaObject::invokeMethod(catalog, "openAnime", Q_ARG(QVariant, slug),
+                                      Q_ARG(QVariant, QStringLiteral("catalog")),
+                                      Q_ARG(QVariant, false));
+            settle();
+            for (int wait = 0; wait < 10 && catalog->property("busy").toBool(); ++wait)
+                settle();
+        };
+        open();
+        auto* anime = catalog->property("currentItem").value<QQuickItem*>();
+        if (!check(catalog->property("depth").toInt() == 2 && anime, "the catalog opens it"))
+            return false;
+        // The page's own items, its list's header included.
+        QObject* back = nullptr;
+        QList<QQuickItem*> items{anime};
+        for (qsizetype i = 0; i < items.size(); ++i) {
+            items.append(items[i]->childItems());
+            if (items[i]->property("text").toString() == QStringLiteral("Catálogo") &&
+                items[i]->metaObject()->indexOfSignal("clicked()") >= 0)
+                back = items[i];
+        }
+        if (!check(back && back->property("visible").toBool(), "its breadcrumb starts at Catálogo"))
+            return false;
+        QMetaObject::invokeMethod(back, "clicked");
+        settle();
+        for (int wait = 0; wait < 10 && catalog->property("busy").toBool(); ++wait)
+            settle();
+        if (!check(catalog->property("depth").toInt() == 1, "the breadcrumb leads back to it"))
+            return false;
+        open();
     } else
         return false;
     settle();

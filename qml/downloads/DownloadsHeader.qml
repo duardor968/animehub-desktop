@@ -236,17 +236,32 @@ Rectangle {
             }
         }
 
-        // What holds it back and what it does meanwhile (MEGA's quota).
-        Label {
+        // What holds it back and what it does meanwhile (MEGA's quota), and the way past it
+        // once the user changed IP: every episode waiting for MEGA tries again.
+        RowLayout {
             Layout.fillWidth: true
-            visible: text !== ""
-            text: root.downloads.headerNotice
-            color: Theme.warning
-            font.pixelSize: Theme.body
-            elide: Text.ElideRight
-            ToolTip.visible: noticeHover.hovered && truncated
-            ToolTip.text: text
-            HoverHandler { id: noticeHover }
+            visible: root.downloads.headerNotice !== ""
+            spacing: 4
+
+            // Whole when it fits: a layout rounds a fractional width down and would elide it.
+            Label {
+                Layout.preferredWidth: Math.min(Math.ceil(implicitWidth),
+                                                subject.width - retryNow.implicitWidth - 4)
+                text: root.downloads.headerNotice
+                color: Theme.warning
+                font.pixelSize: Theme.body
+                elide: Text.ElideRight
+                ToolTip.visible: noticeHover.hovered && truncated
+                ToolTip.text: text
+                HoverHandler { id: noticeHover }
+            }
+            Button {
+                id: retryNow
+                flat: true
+                text: "Reintentar ahora"
+                onClicked: root.downloads.retryMegaQuota()
+            }
+            Item { Layout.fillWidth: true }
         }
 
         ProgressLine {
@@ -301,6 +316,7 @@ Rectangle {
                 required property string cancelText
                 required property int cancelCount
                 required property bool canPause
+                required property bool canRetryNow
                 required property bool running
 
                 spacing: 4
@@ -341,12 +357,12 @@ Rectangle {
 
     // The speed as one block: its graph over the session's figures, in equal columns. Only
     // while something is in line: at rest there is nothing to measure.
+    // Never under the corner's buttons: while the header grows, it waits below them, clipped.
     ColumnLayout {
         id: speed
         anchors.right: parent.right
         anchors.rightMargin: 32
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 28
+        y: Math.max(root.topRoom, root.height - 28 - height)
         width: root.wide ? 312 : 288
         visible: !root.idle
         spacing: 10

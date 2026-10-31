@@ -354,10 +354,9 @@ Rectangle {
                     Label {
                         Layout.fillWidth: true
                         text: row.title
-                        // Grouped, a franchise's seasons show only what sets them apart and a
-                        // title reads best cut at its end. Ungrouped, the seasons sit one above
-                        // the other and differ at their end ("…Part 2"): that end stays.
-                        elide: root.model.grouped ? Text.ElideRight : Text.ElideMiddle
+                        // Cut in the middle in either view: titles that share a beginning differ
+                        // at their end ("…Part 2", "…2nd Season"), and both ends stay.
+                        elide: Text.ElideMiddle
                         font.pixelSize: Theme.body
                         color: row.ready ? Theme.ink : Theme.muted
                     }

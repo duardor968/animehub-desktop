@@ -140,9 +140,11 @@ StackView {
 
             ComboBox {
                 id: status
-                Layout.preferredWidth: 180
+                // Fits its longest option; AnimeAV1's "próximamente" also holds series between
+                // seasons.
+                Layout.preferredWidth: 230
                 Layout.minimumWidth: 130
-                model: ["Cualquier estado", "En emisión", "Finalizado", "Próximamente"]
+                model: ["Cualquier estado", "En emisión", "Finalizado", "Próximamente o en pausa"]
                 currentIndex: stack.catalog.status
                 onActivated: index => stack.catalog.status = index
                 Accessible.name: "Estado"

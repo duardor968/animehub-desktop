@@ -14,13 +14,10 @@ ModalDialog {
     readonly property AppSettings settings: app.settings
     readonly property JDownloaderView jd: app.jdownloader
 
-    // JDownloader takes part when it downloads, or, while AnimeHub does, when it downloads the
-    // servers AnimeHub does not.
-    readonly property bool jdEngine: settings.preferredJDownloader
-    readonly property bool jdUsed: jdEngine || settings.jdownloader !== AppSettings.Off
-    readonly property bool jdAccount: jdEngine ? settings.cloudJDownloader
-                                               : settings.jdownloader === AppSettings.Remote
-    readonly property bool jdLocal: jdUsed && !jdAccount
+    // How JDownloader is reached, if it is used at all.
+    readonly property bool jdUsed: settings.jdownloader !== AppSettings.Off
+    readonly property bool jdAccount: settings.jdownloader === AppSettings.Remote
+    readonly property bool jdLocal: settings.jdownloader === AppSettings.Local
 
     // Shipped next to AnimeHub.exe by the installer and the portable zip, not by a build.
     readonly property url licenseFile: settings.bundledFile("LICENSE.txt")
@@ -29,7 +26,11 @@ ModalDialog {
     readonly property string isolatedReason: settings.isolated
                                              ? "No disponible en un perfil de prueba" : ""
 
-    readonly property int controlWidth: 300
+    readonly property int controlWidth: 320
+    // Lists and text fields share one width across Ajustes: the widest list's, when its longest
+    // option needs more than controlWidth.
+    property real widestChoice: controlWidth
+    readonly property real fieldWidth: Math.max(controlWidth, widestChoice)
     // Linux has no bundled mpv (the system's is used) and its desktops name things otherwise.
     readonly property bool windows: Qt.platform.os === "windows"
     readonly property var categories: [
@@ -38,6 +39,11 @@ ModalDialog {
         { key: "linked-devices", name: "Dispositivos vinculados" },
         { key: "about", name: "Acerca de" }
     ]
+
+    // A path as the system writes it: every path in Ajustes reads one way.
+    function nativePath(path) {
+        return windows ? path.replace(/\//g, "\\") : path
+    }
 
     // Opens on the category with that key; false when there is none.
     function openAt(key) {
@@ -69,8 +75,10 @@ ModalDialog {
 
         contentWidth: availableWidth
         clip: true
+        // The scroll bar lies in this margin: the rows keep one right edge on every page, with a
+        // bar or without.
         leftPadding: 32
-        rightPadding: ScrollBar.vertical.policy === ScrollBar.AlwaysOn ? ScrollBar.vertical.width + 16 : 32
+        rightPadding: 32
         bottomPadding: 24
         ScrollBar.vertical.policy: contentHeight > availableHeight ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
 
@@ -81,18 +89,20 @@ ModalDialog {
         }
     }
 
-    // Lists and text fields share one width, against the rows' right edge; a list whose longest
-    // option needs more takes it, so no option is ever cut.
+    // Lists and text fields share one width, against the rows' right edge, so their edges and
+    // chevrons line up; no option is ever cut.
     component Choice: ComboBox {
         implicitContentWidthPolicy: ComboBox.WidestText
         Layout.fillWidth: true
-        Layout.preferredWidth: Math.max(dialog.controlWidth, implicitWidth)
-        Layout.maximumWidth: Math.max(dialog.controlWidth, implicitWidth)
+        Layout.preferredWidth: dialog.fieldWidth
+        Layout.maximumWidth: dialog.fieldWidth
+        onImplicitWidthChanged: dialog.widestChoice = Math.max(dialog.widestChoice, implicitWidth)
+        Component.onCompleted: dialog.widestChoice = Math.max(dialog.widestChoice, implicitWidth)
     }
     component Field: TextField {
         Layout.fillWidth: true
-        Layout.preferredWidth: dialog.controlWidth
-        Layout.maximumWidth: dialog.controlWidth
+        Layout.preferredWidth: dialog.fieldWidth
+        Layout.maximumWidth: dialog.fieldWidth
     }
     // A switch as Windows' settings show one: the row's name says what it does, the knob sits
     // against the right edge with no text of its own. `name` is that row's name, for a reader.
@@ -249,45 +259,108 @@ ModalDialog {
                 }
 
                 SettingsPage {
+                    // The path under the name: it has the row's width, and the button keeps its column.
                     SettingRow {
-                        label: "Descargar con"
-                        info: "AnimeHub descarga de MEGA y Pixeldrain. JDownloader descarga también de "
-                              + "MP4Upload y 1Fichier, y su progreso se ve igual en Descargas."
+                        label: "Carpeta"
+                        detail: dialog.nativePath(dialog.settings.downloadDirectory)
+                        unavailable: dialog.isolatedReason
 
-                        Choice {
-                            model: ["AnimeHub", "JDownloader"]
-                            currentIndex: dialog.jdEngine ? 1 : 0
-                            onActivated: index => dialog.settings.preferredJDownloader = index === 1
-                            Accessible.name: "Descargar con"
+                        Button {
+                            text: "Cambiar…"
+                            onClicked: folderDialog.open()
+                            Accessible.name: "Cambiar la carpeta de descargas"
                         }
                     }
 
-                    // Only while AnimeHub downloads: JDownloader, as the engine, takes them all.
                     SettingRow {
-                        visible: !dialog.jdEngine
-                        label: "MP4Upload y 1Fichier"
-                        info: "AnimeHub no descarga de estos servidores. Si un episodio solo está en "
-                              + "ellos, JDownloader puede descargarlo en la carpeta de AnimeHub, y su "
-                              + "progreso se ve igual en Descargas."
+                        label: "Servidor preferido"
 
                         Choice {
-                            model: ["Omitir", "JDownloader en este PC", "JDownloader por MyJDownloader"]
+                            model: ["MEGA", "Pixeldrain"]
+                            currentIndex: dialog.settings.providerOrder[0] === "PIXELDRAIN" ? 1 : 0
+                            onActivated: index => dialog.settings.providerOrder = index === 1
+                                         ? ["PIXELDRAIN", "MEGA"] : ["MEGA", "PIXELDRAIN"]
+                            Accessible.name: "Servidor preferido"
+                        }
+                    }
+
+                    // As the web's preferences: which servers episodes come from. Their knobs in
+                    // one column, their names after them.
+                    SettingRow {
+                        label: "Proveedores"
+
+                        ColumnLayout {
+                            spacing: 8
+
+                            Repeater {
+                                model: dialog.settings.providerSwitches
+
+                                // A switch that cannot be used says why on hover and when the
+                                // keyboard reaches it: a disabled control takes no focus itself.
+                                Item {
+                                    id: provider
+                                    required property var modelData
+                                    readonly property bool explained: modelData.reason !== ""
+                                    Layout.fillWidth: true
+                                    implicitWidth: providerSwitch.implicitWidth
+                                    implicitHeight: providerSwitch.implicitHeight
+                                    activeFocusOnTab: !providerSwitch.enabled
+                                    Accessible.role: Accessible.CheckBox
+                                    Accessible.name: modelData.name
+                                    Accessible.description: modelData.reason
+                                    Accessible.checkable: true
+                                    Accessible.checked: modelData.checked
+                                    Accessible.ignored: providerSwitch.enabled
+                                    HoverHandler { id: reasonHover }
+                                    ToolTip.visible: explained && (reasonHover.hovered || activeFocus)
+                                    ToolTip.text: modelData.reason
+
+                                    Toggle {
+                                        id: providerSwitch
+                                        anchors.fill: parent
+                                        name: provider.modelData.name
+                                        text: provider.modelData.name
+                                        enabled: provider.modelData.enabled
+                                        checked: provider.modelData.checked
+                                        onToggled: dialog.settings.setProviderEnabled(
+                                                       provider.modelData.key, checked)
+
+                                        FocusFrame {
+                                            target: providerSwitch.indicator
+                                            visible: provider.activeFocus
+                                            radiusInside: providerSwitch.indicator.height / 2
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // MP4Upload and 1Fichier only download through it.
+                    SettingRow {
+                        label: "JDownloader"
+                        info: "Descarga MP4Upload y 1Fichier, que AnimeHub no descarga, en la carpeta "
+                              + "de AnimeHub; su progreso se ve igual en Descargas."
+
+                        Choice {
+                            model: ["No usar", "En este PC", "Por MyJDownloader"]
                             currentIndex: dialog.settings.jdownloader
                             onActivated: index => dialog.settings.jdownloader = index
-                            Accessible.name: "MP4Upload y 1Fichier"
+                            Accessible.name: "JDownloader"
                         }
                     }
 
-                    // How to reach JDownloader, only while it takes part.
                     SettingRow {
-                        visible: dialog.jdEngine
-                        label: "Conexión con JDownloader"
+                        visible: dialog.jdUsed
+                        label: "MEGA y Pixeldrain"
+                        info: "AnimeHub los descarga por su cuenta. Con JDownloader, todas las "
+                              + "descargas pasan por él."
 
                         Choice {
-                            model: ["Este PC", "MyJDownloader"]
-                            currentIndex: dialog.settings.cloudJDownloader ? 1 : 0
-                            onActivated: index => dialog.settings.cloudJDownloader = index === 1
-                            Accessible.name: "Conexión con JDownloader"
+                            model: ["Con AnimeHub", "Con JDownloader"]
+                            currentIndex: dialog.settings.preferredJDownloader ? 1 : 0
+                            onActivated: index => dialog.settings.preferredJDownloader = index === 1
+                            Accessible.name: "Descargar MEGA y Pixeldrain"
                         }
                     }
 
@@ -368,11 +441,12 @@ ModalDialog {
                         }
                     }
 
+                    // The path under the name, as the folder's: the buttons keep the column.
                     SettingRow {
                         visible: dialog.jdUsed
                         label: "Aplicación JDownloader"
-                        value: dialog.settings.jdExecutable || "Sin elegir"
-                        valueColor: dialog.settings.jdExecutable ? Theme.ink : Theme.muted
+                        detail: dialog.settings.jdExecutable ? dialog.nativePath(dialog.settings.jdExecutable)
+                                                             : "Sin elegir"
 
                         Button {
                             text: "Elegir…"
@@ -395,81 +469,6 @@ ModalDialog {
                         text: dialog.jd.problem
                         color: Theme.danger
                         wrapMode: Text.Wrap
-                    }
-
-                    // The path under the name: it has the row's width, and the button keeps its column.
-                    SettingRow {
-                        label: "Carpeta"
-                        detail: dialog.windows ? dialog.settings.downloadDirectory.replace(/\//g, "\\")
-                                               : dialog.settings.downloadDirectory
-                        unavailable: dialog.isolatedReason
-
-                        Button {
-                            text: "Cambiar…"
-                            onClicked: folderDialog.open()
-                            Accessible.name: "Cambiar la carpeta de descargas"
-                        }
-                    }
-
-                    SettingRow {
-                        label: "Servidor preferido"
-
-                        Choice {
-                            model: ["MEGA", "Pixeldrain"]
-                            currentIndex: dialog.settings.providerOrder[0] === "PIXELDRAIN" ? 1 : 0
-                            onActivated: index => dialog.settings.providerOrder = index === 1
-                                         ? ["PIXELDRAIN", "MEGA"] : ["MEGA", "PIXELDRAIN"]
-                            Accessible.name: "Servidor preferido"
-                        }
-                    }
-
-                    // As the web's preferences: the servers episodes come from, one kept at least.
-                    SettingRow {
-                        id: providerRow
-                        label: "Proveedores"
-
-                        readonly property var off: dialog.settings.disabledProviders
-                        readonly property var choices: [
-                            { key: "MEGA", name: "MEGA" },
-                            { key: "PIXELDRAIN", name: "Pixeldrain" },
-                            { key: "MP4UPLOAD", name: "MP4Upload" },
-                            { key: "ONE_FICHIER", name: "1Fichier" }
-                        ]
-
-                        ColumnLayout {
-                            spacing: 8
-
-                            Repeater {
-                                model: providerRow.choices
-
-                                // The last one on cannot go off; a disabled switch gets no hover
-                                // of its own, so this says why.
-                                Item {
-                                    id: provider
-                                    required property var modelData
-                                    readonly property bool on: !providerRow.off.includes(modelData.key)
-                                    readonly property bool last:
-                                        on && providerRow.off.length === providerRow.choices.length - 1
-                                    Layout.alignment: Qt.AlignRight
-                                    implicitWidth: providerSwitch.implicitWidth
-                                    implicitHeight: providerSwitch.implicitHeight
-                                    HoverHandler { id: lastHover }
-                                    ToolTip.visible: provider.last && lastHover.hovered
-                                    ToolTip.text: "Al menos un proveedor"
-
-                                    Toggle {
-                                        id: providerSwitch
-                                        anchors.fill: parent
-                                        enabled: !provider.last
-                                        text: provider.modelData.name
-                                        checked: provider.on
-                                        onToggled: dialog.settings.disabledProviders = checked
-                                                   ? providerRow.off.filter(key => key !== provider.modelData.key)
-                                                   : providerRow.off.concat([provider.modelData.key])
-                                    }
-                                }
-                            }
-                        }
                     }
 
                     SettingRow {
@@ -507,7 +506,7 @@ ModalDialog {
                         Layout.fillWidth: true
                         active: linkedDevicesPage.showing
                         remote: dialog.app.remote
-                        controlWidth: dialog.controlWidth
+                        controlWidth: dialog.fieldWidth
                     }
                 }
 

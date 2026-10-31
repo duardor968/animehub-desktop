@@ -28,8 +28,13 @@ namespace animehub::app::display {
 [[nodiscard]] QString download(const downloads::Task& task);
 // Dates and times, worded one way across the app: "27 oct" this year, "27 oct 2025" before;
 // "12:26" on the 24-hour clock.
-[[nodiscard]] QString date(const QDateTime& at);
+[[nodiscard]] QString date(const QDateTime& at, const QDate& today = QDate::currentDate());
 [[nodiscard]] QString time(const QDateTime& at);
+// A day to come, as it reads at the start of a line: "Hoy", "Mañana", its weekday within the
+// coming week ("Martes"), its date from then on ("7 nov"); a day gone by, its date.
+[[nodiscard]] QString day(const QDate& day, const QDate& today);
+// That day and the time: "Martes 11:42", "Hoy 22:00", "7 nov, 11:42".
+[[nodiscard]] QString when(const QDateTime& at, const QDateTime& now);
 // When a waiting download tries again: "Se reintenta a las 11:40".
 [[nodiscard]] QString retry(const QDateTime& at);
 // MEGA's quota and what the episode does meanwhile: "MEGA llegó a su límite · se libera a las

@@ -80,6 +80,8 @@ QString status(api::AnimeStatus status) {
         return QStringLiteral("Finalizado");
     case api::AnimeStatus::Upcoming:
         return QStringLiteral("Próximamente");
+    case api::AnimeStatus::Paused:
+        return QStringLiteral("En pausa");
     case api::AnimeStatus::Unknown:
         break;
     }
@@ -133,25 +135,54 @@ QString issue(const downloads::Task& task) {
     return issue(task.issue);
 }
 
-QString date(const QDateTime& at) {
-    if (!at.isValid()) {
-        return {};
-    }
-    const auto day = at.toLocalTime().date();
+namespace {
+
+QString dayDate(const QDate& day, const QDate& today) {
     auto month = spanish().monthName(day.month(), QLocale::ShortFormat);
     if (month.endsWith(QLatin1Char('.'))) {
         month.chop(1);
     }
     auto text = QString::number(day.day()) + QLatin1Char(' ') + month;
-    if (day.year() != QDate::currentDate().year()) {
+    if (day.year() != today.year()) {
         text += QLatin1Char(' ') + QString::number(day.year());
     }
     return text;
 }
 
+} // namespace
+
+QString date(const QDateTime& at, const QDate& today) {
+    return at.isValid() ? dayDate(at.toLocalTime().date(), today) : QString();
+}
+
 QString time(const QDateTime& at) {
     return at.isValid() ? spanish().toString(at.toLocalTime().time(), QStringLiteral("HH:mm"))
                         : QString();
+}
+
+QString day(const QDate& day, const QDate& today) {
+    const auto days = today.daysTo(day);
+    if (days == 0) {
+        return QStringLiteral("Hoy");
+    }
+    if (days == 1) {
+        return QStringLiteral("Mañana");
+    }
+    // The same weekday a week on would read as this week's: from then on, the date.
+    if (days < 0 || days >= 7) {
+        return dayDate(day, today);
+    }
+    auto name = spanish().dayName(day.dayOfWeek());
+    name[0] = name[0].toUpper();
+    return name;
+}
+
+QString when(const QDateTime& at, const QDateTime& now) {
+    if (!at.isValid()) {
+        return {};
+    }
+    const auto name = day(at.toLocalTime().date(), now.toLocalTime().date());
+    return name + (name.front().isDigit() ? QStringLiteral(", ") : QStringLiteral(" ")) + time(at);
 }
 
 QString retry(const QDateTime& at) {

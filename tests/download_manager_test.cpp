@@ -1050,6 +1050,83 @@ private slots:
 
     // JDownloader takes links of one package with the same name as mirrors: AnimeHub gives them
     // the first one's name, drops what is offline, and counts the file once.
+    // "Reintentar ahora" while MEGA still refuses: the episode asks MEGA again and waits anew,
+    // until the time MEGA gives this time.
+    void retryingNowWhileMegaRefusesWaitsForItsNewTime() {
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        int time_left = 1200;
+        server_->route("POST", "/cs", [this, &time_left](const HttpTestServer::Request&) {
+            ++mega_calls_;
+            return HttpTestServer::Response{
+                .body = QStringLiteral("[{\"e\":-17,\"tl\":%1}]").arg(time_left).toLatin1()};
+        });
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Waiting, kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::Quota);
+        QCOMPARE(mega_calls_, 1);
+
+        time_left = 600;
+        QSignalSpy quota(manager_.get(), &DownloadManager::megaQuotaChanged);
+        manager_->retryMegaQuota();
+        QVERIFY(taskOf(*id)->state != TaskState::Waiting);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Waiting, kTimeout);
+        QCOMPARE(mega_calls_, 2);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::Quota);
+        QCOMPARE(taskOf(*id)->issueDetail, kMegaStatedTime);
+        const auto state = manager_->megaQuota();
+        QVERIFY(state && state->known);
+        QCOMPARE(taskOf(*id)->retryAt, state->until);
+        const auto wait = QDateTime::currentDateTimeUtc().secsTo(state->until);
+        QVERIFY2(wait > 590 && wait <= 600, qPrintable(QString::number(wait)));
+        QVERIFY(quota.size() >= 2); // lifted, then back
+    }
+
+    // Once MEGA answers again (another IP), retrying one waiting episode lifts the quota for
+    // every episode waiting for it, whatever its series.
+    void retryingNowAfterTheQuotaClearsDownloads() {
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        resolveTo(resolution({{"MEGA", megaUrl()}}), kBebop);
+        server_->route("POST", "/cs", [](const HttpTestServer::Request&) {
+            return HttpTestServer::Response{.body = "[{\"e\":-17,\"tl\":1200}]"};
+        });
+        const auto first = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        const auto second = manager_->enqueue(kBebop, 1, titleOf(kBebop), TaskOrigin::Manual);
+        QVERIFY(first && second);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*first)->state, TaskState::Waiting, kTimeout);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*second)->state, TaskState::Waiting, kTimeout);
+        QVERIFY(manager_->megaQuota());
+
+        serveMega();
+        QSignalSpy completed(manager_.get(), &DownloadManager::taskCompleted);
+        manager_->retry(*first);
+        QVERIFY(!manager_->megaQuota());
+        QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 2, kTimeout);
+        QCOMPARE(taskOf(*first)->state, TaskState::Completed);
+        QCOMPARE(taskOf(*second)->state, TaskState::Completed);
+        QCOMPARE(taskOf(*first)->provider, api::Provider::Mega);
+    }
+
+    // An episode waiting for the network tries again at once, without waiting for its time.
+    void retryingNowANetworkWaitRetriesAtOnce() {
+        server_->route(
+            "POST", "/api/v1/anime/" + kFrieren.toLatin1() + "/downloads/resolve",
+            [](const HttpTestServer::Request&) { return HttpTestServer::Response{.status = 503}; });
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Waiting, kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::Network);
+        QVERIFY(QDateTime::currentDateTimeUtc().secsTo(taskOf(*id)->retryAt) > 20);
+        QVERIFY(!manager_->megaQuota());
+
+        resolveTo(resolution({{"MEGA", megaUrl()}}));
+        serveMega();
+        QSignalSpy completed(manager_.get(), &DownloadManager::taskCompleted);
+        manager_->retryWaiting(kFrieren);
+        QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 1, kTimeout);
+        QCOMPARE(taskOf(*id)->state, TaskState::Completed);
+    }
+
     void mirrorsShareOneNameAndCountOnce() {
         other_servers_ = DownloadEngine::JDownloaderLocal;
         FakeJd jd;

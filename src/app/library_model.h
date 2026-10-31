@@ -164,8 +164,9 @@ public:
     Q_INVOKABLE int indexOf(const QString& slug) const;
     Q_INVOKABLE QString slugAt(int row) const;
     Q_INVOKABLE bool contains(const QString& slug) const;
-    // The franchise an anime belongs to, {id, title}; empty when none.
-    Q_INVOKABLE QVariantMap franchiseOf(const QString& slug) const;
+    // The breadcrumb's step between the library and an anime: its franchise, {id, title}. Empty
+    // when it has none, when the franchise holds only this series or carries its name.
+    Q_INVOKABLE QVariantMap franchiseStep(const QString& slug) const;
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;

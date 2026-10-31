@@ -11,7 +11,7 @@ ColumnLayout {
     id: page
 
     required property RemoteView remote
-    property int controlWidth: 320
+    property real controlWidth: 320
     // The page is on view.
     property bool active: false
     // The browser whose unlinking waits for confirmation.
@@ -44,21 +44,28 @@ ColumnLayout {
         label: "Nombre de este PC"
         info: "Vincula este PC con la web de AnimeHub para enviarle descargas desde el navegador."
 
-        TextField {
-            id: deviceName
-            Layout.fillWidth: true
-            Layout.preferredWidth: page.controlWidth
-            Layout.maximumWidth: page.controlWidth
-            text: "Mi PC"
-            maximumLength: 80
-            Accessible.name: "Nombre de este PC"
-            onAccepted: if (activate.enabled) activate.clicked()
-        }
-        Button {
-            id: activate
-            text: "Activar vinculación"
-            enabled: !page.remote.busy && deviceName.text.trim().length > 0
-            onClicked: page.remote.registerDevice(deviceName.text)
+        // The field in Ajustes' column of lists and fields, its button under it, as MyJDownloader's
+        // sign-in.
+        ColumnLayout {
+            spacing: 8
+
+            TextField {
+                id: deviceName
+                Layout.fillWidth: true
+                Layout.preferredWidth: page.controlWidth
+                Layout.maximumWidth: page.controlWidth
+                text: page.remote.suggestedName
+                maximumLength: 80
+                Accessible.name: "Nombre de este PC"
+                onAccepted: if (activate.enabled) activate.clicked()
+            }
+            Button {
+                id: activate
+                Layout.alignment: Qt.AlignRight
+                text: "Activar vinculación"
+                enabled: !page.remote.busy && deviceName.text.trim().length > 0
+                onClicked: page.remote.registerDevice(deviceName.text)
+            }
         }
     }
 

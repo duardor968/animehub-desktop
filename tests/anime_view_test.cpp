@@ -37,7 +37,9 @@ struct Fixture {
     // Where downloads go once transfers are on.
     QString downloads;
 
-    bool open(api::AnimeStatus status) {
+    // Episodes `first` on, `count` of them; a film is one episode of a "Película".
+    bool open(api::AnimeStatus status, int first = 1, int count = 3,
+              const QString& category = QStringLiteral("TV Anime")) {
         auto opened = storage::Database::open(root.filePath(QStringLiteral("library.sqlite3")));
         if (!opened) {
             return false;
@@ -65,14 +67,14 @@ struct Fixture {
         anime.slug = QStringLiteral("a");
         anime.title = QStringLiteral("Anime");
         anime.alternativeTitle = QStringLiteral("ANIME!");
-        anime.category = QStringLiteral("TV Anime");
+        anime.category = category;
         anime.status = status;
-        anime.episodeCount = 3;
+        anime.episodeCount = count;
         if (!repo->saveSnapshot(anime) || !repo->setInLibrary(anime.slug, true)) {
             return false;
         }
         QList<api::Episode> episodes;
-        for (int number = 1; number <= 3; ++number) {
+        for (int number = first; number < first + count; ++number) {
             api::Episode episode;
             episode.id = QStringLiteral("a%1").arg(number);
             episode.number = number;
@@ -190,6 +192,10 @@ private slots:
         // Up to date with an airing series: no button; a figure says when the next one comes.
         QTest::newRow("up to date") << airing << QList<double>{1, 2, 3} << QList<double>{} << -1
                                     << int(Action::Upcoming) << QString() << QString() << QString();
+        // Paused between seasons, it still gets new episodes: as an airing one.
+        QTest::newRow("up to date, between seasons")
+            << int(api::AnimeStatus::Paused) << QList<double>{1, 2, 3} << QList<double>{} << -1
+            << int(Action::Upcoming) << QString() << QString() << QString();
     }
     void mainButtonFollowsTheNextEpisode() {
         QFETCH(int, status);
@@ -220,6 +226,98 @@ private slots:
         if (taskState == int(TaskState::Paused)) {
             QCOMPARE(f.view->primaryProgress(), 0.45);
         }
+    }
+
+    // Everything watched and nothing on disk or on its way: the button downloads the series as
+    // one not begun does, never an episode the user did not choose; a film, the film.
+    void everythingWatchedWithNothingOnDisk_data() {
+        QTest::addColumn<int>("first");
+        QTest::addColumn<int>("count");
+        QTest::addColumn<QString>("category");
+        QTest::addColumn<int>("action");
+        QTest::addColumn<QString>("text");
+        QTest::newRow("from episode 1")
+            << 1 << 3 << QStringLiteral("TV Anime") << int(Action::DownloadAll)
+            << QStringLiteral("Descargar todo (3)");
+        QTest::newRow("with an episode 0")
+            << 0 << 23 << QStringLiteral("TV Anime") << int(Action::DownloadAll)
+            << QStringLiteral("Descargar todo (23)");
+        QTest::newRow("a film") << 1 << 1 << QStringLiteral("Película") << int(Action::Download)
+                                << QStringLiteral("Descargar película");
+        QTest::newRow("a single episode") << 1 << 1 << QStringLiteral("OVA")
+                                          << int(Action::Download) << QStringLiteral("Descargar");
+    }
+    void everythingWatchedWithNothingOnDisk() {
+        QFETCH(int, first);
+        QFETCH(int, count);
+        QFETCH(QString, category);
+        QFETCH(int, action);
+        QFETCH(QString, text);
+        Fixture f;
+        QVERIFY(f.open(api::AnimeStatus::Finished, first, count, category));
+        for (int number = first; number < first + count; ++number) {
+            QVERIFY(f.watch(number));
+        }
+        f.show();
+        QCOMPARE(int(f.view->primaryAction()), action);
+        QCOMPARE(f.view->primaryText(), text);
+        QVERIFY(f.view->primaryEnabled());
+    }
+
+    // A series between seasons says so as the web does, and its new episodes can download
+    // themselves as an airing one's.
+    void aPausedSeriesIsBetweenSeasons() {
+        Fixture f;
+        QVERIFY(f.open(api::AnimeStatus::Paused));
+        f.show();
+        QCOMPARE(f.view->facts(), QStringLiteral("TV · En pausa · 3 episodios"));
+        QVERIFY(f.view->airing());
+    }
+
+    // A download that only waits to try again offers to try now, beside where it says so.
+    void aWaitingDownloadCanTryNow() {
+        const auto action = [](const QVariantList& figures) {
+            for (const auto& figure : figures) {
+                const auto map = figure.toMap();
+                if (map.value(QStringLiteral("caption")).toString() == u"Descarga") {
+                    return map.value(QStringLiteral("action")).toString();
+                }
+            }
+            return QString();
+        };
+        const auto wait = [](Fixture& f, double number) {
+            auto task = f.queue->create(QStringLiteral("a"), number, QStringLiteral("Anime"),
+                                        api::Audio::Sub, downloads::TaskOrigin::Manual,
+                                        f.root.filePath(QStringLiteral("Anime/a%1").arg(number)));
+            if (!task) {
+                return false;
+            }
+            task->state = TaskState::Waiting;
+            task->issue = downloads::TaskIssue::Network;
+            task->retryAt = QDateTime::currentDateTimeUtc().addSecs(600);
+            return static_cast<bool>(f.queue->save(*task));
+        };
+        Fixture one;
+        QVERIFY(one.open(api::AnimeStatus::Finished));
+        QVERIFY(wait(one, 1));
+        one.show();
+        QCOMPARE(action(one.view->figures()), QStringLiteral("Reintentar ahora"));
+
+        Fixture batch;
+        QVERIFY(batch.open(api::AnimeStatus::Finished));
+        QVERIFY(wait(batch, 1));
+        QVERIFY(wait(batch, 2));
+        batch.show();
+        QCOMPARE(value(batch.view->figures(), QStringLiteral("Descarga")),
+                 QStringLiteral("En espera · 0/2"));
+        QCOMPARE(action(batch.view->figures()), QStringLiteral("Reintentar ahora"));
+
+        // In line, it has nothing to retry.
+        Fixture queued;
+        QVERIFY(queued.open(api::AnimeStatus::Finished));
+        QVERIFY(queued.add(1, TaskState::Queued));
+        queued.show();
+        QCOMPARE(action(queued.view->figures()), QString());
     }
 
     // A queued episode says how many wait their turn before it, other series' included.

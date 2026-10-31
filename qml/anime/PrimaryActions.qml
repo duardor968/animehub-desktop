@@ -20,8 +20,8 @@ Row {
     readonly property int action: view.primaryAction
     readonly property string chevron: "e70d"
     // One width for every state, the ▾ included: the figures beside it never move. Wide enough
-    // for "Continuar ep. 100" and "Reintentar la descarga"; a longer text widens it.
-    readonly property int span: 200
+    // for "Descargar todo (100)" with its ▾; a longer text widens it.
+    readonly property int span: 224
     // The one episode missing is the next one: the main button already gets it, nothing is left
     // to choose.
     readonly property bool onlyNextMissing: view.missingCount === 1
@@ -33,8 +33,12 @@ Row {
     readonly property bool offersSplit: (action === AnimeView.Download || action === AnimeView.DownloadAll)
                                         && offersMore
 
-    // Waiting for the next airing is told by a figure, not by a button that cannot be pressed.
-    visible: action !== AnimeView.None && action !== AnimeView.Upcoming
+    // Not known yet (the anime or its episodes still load): the button holds its place, disabled,
+    // so the bar does not change shape when it is. Waiting for the next airing is told by a
+    // figure, not by a button that cannot be pressed; with no episodes there is nothing to press.
+    readonly property bool pending: action === AnimeView.None
+                                    && (!view.loaded || view.refreshing)
+    visible: pending || (action !== AnimeView.None && action !== AnimeView.Upcoming)
     spacing: 1
 
     Button {
@@ -47,10 +51,10 @@ Row {
 
         // Fluent keeps a disabled accent button blue: only a button that can be pressed is.
         highlighted: !root.selecting && enabled
-        enabled: root.view.primaryEnabled
+        enabled: !root.pending && root.view.primaryEnabled
         implicitWidth: Math.max(root.span - (split.visible ? split.implicitWidth + root.spacing : 0),
                                 implicitContentWidth + leftPadding + rightPadding)
-        text: root.view.primaryText
+        text: root.pending ? "Cargando…" : root.view.primaryText
         // The same as the text: what a press does. Waiting (the next airing, a file being
         // checked), a clock.
         icon.source: Theme.source(!enabled ? Theme.icon.clock : ({

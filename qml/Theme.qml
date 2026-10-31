@@ -13,6 +13,9 @@ QtObject {
     readonly property color faint: "#6c737e"
     readonly property color accent: "#2f81f7"
     readonly property color accentInk: "#ffffff"
+    // Fluent's own accent for a disabled control (AccentFillColorDisabled): the brand accent
+    // replaces Fluent's in every state, so this one is given back.
+    readonly property color accentDisabled: "#28ffffff"
     readonly property color success: "#4cb782"
     readonly property color warning: "#d8a23a"
     readonly property color danger: "#e5534b"
