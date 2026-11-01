@@ -18,7 +18,8 @@ const auto kDownloadDirectory = QStringLiteral("downloads/directory");
 const auto kProviders = QStringLiteral("downloads/providers");
 const auto kDisabledProviders = QStringLiteral("downloads/disabledProviders");
 constexpr std::array kAllProviders{api::Provider::Mega, api::Provider::Pixeldrain,
-                                   api::Provider::Mp4Upload, api::Provider::OneFichier};
+                                   api::Provider::TransferIt, api::Provider::Mp4Upload,
+                                   api::Provider::OneFichier};
 const auto kDubbed = QStringLiteral("downloads/dubbed");
 const auto kConcurrent = QStringLiteral("downloads/concurrent");
 const auto kPlayer = QStringLiteral("playback/player");
@@ -27,6 +28,8 @@ const auto kSystemPlayer = QStringLiteral("playback/systemPlayer");
 const auto kNotifications = QStringLiteral("notifications/enabled");
 const auto kCloseAction = QStringLiteral("window/closeAction");
 const auto kTrayNoticeShown = QStringLiteral("window/trayNoticeShown");
+const auto kJdOfferHidden = QStringLiteral("notices/jdownloaderOfferHidden");
+const auto kServersOfferHidden = QStringLiteral("notices/serversOfferHidden");
 const auto kJDownloader = QStringLiteral("jdownloader/mode");
 const auto kJDownloaderDevice = QStringLiteral("jdownloader/device");
 // JDownloader as the engine of every download, and how it was reached then.
@@ -72,7 +75,8 @@ QStringList AppSettings::providerOrder() const {
             order.append(key);
         }
     }
-    for (const auto provider : {api::Provider::Mega, api::Provider::Pixeldrain}) {
+    for (const auto provider :
+         {api::Provider::Mega, api::Provider::Pixeldrain, api::Provider::TransferIt}) {
         if (!order.contains(api::providerKey(provider))) {
             order.append(api::providerKey(provider));
         }
@@ -189,6 +193,22 @@ void AppSettings::setTrayNoticeShown() {
     write(kTrayNoticeShown, true);
 }
 
+bool AppSettings::jdownloaderOfferHidden() const {
+    return settings_.value(kJdOfferHidden, false).toBool();
+}
+
+void AppSettings::hideJdownloaderOffer() {
+    write(kJdOfferHidden, true);
+}
+
+bool AppSettings::serversOfferHidden() const {
+    return settings_.value(kServersOfferHidden, false).toBool();
+}
+
+void AppSettings::hideServersOffer() {
+    write(kServersOfferHidden, true);
+}
+
 AppSettings::JDownloader AppSettings::jdownloader() const {
     // As the engine it was reached the way its own setting said.
     if (settings_.value(kJDownloaderEngine, false).toBool()) {
@@ -214,7 +234,7 @@ void AppSettings::setJdownloader(JDownloader mode) {
         return;
     }
     write(kJDownloaderEngine, false);
-    // Without JDownloader only MEGA and Pixeldrain download: one of them stays on.
+    // Without JDownloader only MEGA, Pixeldrain and transfer.it download: one of them stays on.
     if (auto disabled = disabledProviders(); !anyUsable(disabled)) {
         disabled.removeAll(providerOrder().first());
         write(kDisabledProviders, disabled);

@@ -16,7 +16,6 @@ Item {
     required property string detail
     required property bool problem
     required property bool hasFile
-    required property string engineLine
     required property bool canPause
     required property bool canResume
     required property bool canRetry
@@ -37,10 +36,9 @@ Item {
     readonly property bool running: taskState === "resolving" || taskState === "downloading"
                                     || taskState === "verifying"
 
-    // One more line when JDownloader downloads it: who and where.
-    implicitHeight: engineLine !== "" ? 72 : 52
+    implicitHeight: 52
     Accessible.role: Accessible.ListItem
-    Accessible.name: label + ", " + detail + (engineLine !== "" ? ", " + engineLine : "")
+    Accessible.name: label + ", " + detail
 
     RowLayout {
         anchors.fill: parent
@@ -79,18 +77,6 @@ Item {
                 ToolTip.text: text
                 HoverHandler { id: detailHover }
             }
-
-            Label {
-                Layout.fillWidth: true
-                visible: root.engineLine !== ""
-                text: root.engineLine
-                color: Theme.muted
-                font.pixelSize: Theme.caption
-                elide: Text.ElideMiddle
-                ToolTip.visible: engineHover.hovered && truncated
-                ToolTip.text: text
-                HoverHandler { id: engineHover }
-            }
         }
 
         Item {
@@ -103,8 +89,18 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
                 // Only what has started: a column of empty tracks says nothing.
-                visible: !root.completed && !root.failed && (root.progress > 0 || root.running)
+                visible: root.progress > 0 && !root.completed && !root.failed
                 value: root.progress
+            }
+            // Running with nothing measured yet (looking for the file, opening JDownloader).
+            ProgressBar {
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width
+                // Shown once laid out: Fluent times its sweep by the width it starts with, and
+                // one started at width 0 never moves.
+                visible: root.running && root.progress === 0 && width > 0
+                indeterminate: true
+                Accessible.name: root.detail
             }
         }
 

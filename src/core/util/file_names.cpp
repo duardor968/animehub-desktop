@@ -9,29 +9,50 @@
 
 namespace animehub::util {
 
-QString downloadBasePath(const QString& directory, const QString& slug, const QString& anime_title,
-                         double number) {
+namespace {
+
+// Cut to `max_length` without leaving half a surrogate pair.
+QString cleanName(const QString& name, const QString& fallback, int max_length) {
+    auto result = safeFileName(name, fallback, max_length);
+    if (result.back().isHighSurrogate())
+        result.chop(1);
+    return result;
+}
+
+QString slugHash(const QString& slug, int length) {
+    return QString::fromLatin1(
+        QCryptographicHash::hash(slug.toUtf8(), QCryptographicHash::Sha256).toHex().left(length));
+}
+
+} // namespace
+
+QString workFolderName(const QString& title, std::optional<int> year, const QString& slug,
+                       int attempt) {
+    QString suffix;
+    if (attempt > 0 && year)
+        suffix = QStringLiteral(" (%1)").arg(*year);
+    if (attempt > 1 || (attempt == 1 && !year))
+        suffix += QStringLiteral(" [") + slugHash(slug, 6) + u']';
+    return cleanName(title, QStringLiteral("Anime"), 80 - static_cast<int>(suffix.size())) + suffix;
+}
+
+QString legacyWorkFolderName(const QString& slug) {
     static const QRegularExpression kCanonicalSlug(QStringLiteral("^[a-z0-9]+(?:-[a-z0-9]+)*$"));
-    auto folder = slug;
-    if (slug.size() > 80 || !kCanonicalSlug.match(slug).hasMatch() || safeFileName(slug) != slug) {
-        const auto hash = QString::fromLatin1(
-            QCryptographicHash::hash(slug.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
-        folder = safeFileName(slug, QStringLiteral("anime"), 62);
-        if (folder.back().isHighSurrogate())
-            folder.chop(1);
-        folder += u'~' + hash;
-    }
+    if (slug.size() <= 80 && kCanonicalSlug.match(slug).hasMatch() && safeFileName(slug) == slug)
+        return slug;
+    return cleanName(slug, QStringLiteral("anime"), 62) + u'~' + slugHash(slug, 16);
+}
+
+QString downloadBasePath(const QString& folder, const QString& anime_title, double number) {
     auto label = library::formatEpisodeNumber(number);
     const auto dot = label.indexOf(u'.');
     const auto whole = dot < 0 ? label.size() : dot;
     if (whole < 2)
         label.prepend(QString(2 - whole, u'0'));
     const auto suffix = QStringLiteral(" - ") + label;
-    auto title =
-        safeFileName(anime_title, QStringLiteral("Anime"), 119 - static_cast<int>(suffix.size()));
-    if (title.back().isHighSurrogate())
-        title.chop(1);
-    return QDir(directory).filePath(folder + u'/' + title + suffix);
+    const auto title =
+        cleanName(anime_title, QStringLiteral("Anime"), 119 - static_cast<int>(suffix.size()));
+    return QDir(folder).filePath(title + suffix);
 }
 
 QString safeFileName(const QString& name, const QString& fallback, int max_length) {
@@ -44,9 +65,13 @@ QString safeFileName(const QString& name, const QString& fallback, int max_lengt
             result.append(ch);
         }
     }
-    result = result.simplified();
+    // A character dropped before a closing bracket ("Nakatta!?)") leaves no gap behind.
+    static const QRegularExpression kGapBeforeClose(QStringLiteral(" +([)\\]}])"));
+    result = result.simplified().replace(kGapBeforeClose, QStringLiteral("\\1"));
     if (result.size() > max_length) {
-        result.truncate(max_length);
+        // At the last whole word, unless that loses more than half of what fits.
+        const auto space = result.lastIndexOf(u' ', max_length);
+        result.truncate(space > max_length / 2 ? space : max_length);
     }
     while (!result.isEmpty() && (result.endsWith(u'.') || result.endsWith(u' '))) {
         result.chop(1);

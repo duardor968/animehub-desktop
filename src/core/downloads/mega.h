@@ -3,9 +3,11 @@
 
 #include "platform/aes.h"
 
+#include <QJsonObject>
 #include <QObject>
 #include <QString>
 #include <QUrl>
+#include <QUrlQuery>
 
 #include <array>
 #include <atomic>
@@ -31,6 +33,10 @@ struct FileLink {
 
 // `https://mega.nz/file/<handle>#<key>` and the legacy `https://mega.nz/#!<handle>!<key>`.
 [[nodiscard]] std::optional<FileLink> parseFileLink(const QUrl& url);
+
+// `https://transfer.it/t/<id>`: a transfer served by MEGA's API whose file keys come in the clear.
+// Returns its 12-character id.
+[[nodiscard]] std::optional<QString> parseTransferLink(const QUrl& url);
 
 // The file name stored in the encrypted attributes, or empty when they do not decrypt.
 [[nodiscard]] QString decryptFileName(const QByteArray& attributes_base64url,
@@ -71,6 +77,12 @@ struct ApiFailure {
 // (`X-MEGA-Time-Left`; read the same way by MEGA's own SDK). None when absent or not positive.
 [[nodiscard]] std::optional<std::chrono::seconds> quotaTimeLeft(QByteArrayView header);
 
+// The one video of a transfer.it transfer: where to download it and the key to decrypt it.
+struct TransferFile {
+    RemoteFile file;
+    FileLink link;
+};
+
 // Client for the `g` command of MEGA's public API.
 class Api final : public QObject {
     Q_OBJECT
@@ -81,13 +93,19 @@ public:
 
     using Callback = std::function<void(const std::expected<RemoteFile, ApiFailure>&)>;
     void file(const FileLink& link, QObject* context, Callback done);
+    // Lists a transfer.it transfer and asks the temporary URL of its single video; several videos
+    // answer as a Protocol failure.
+    using TransferCallback = std::function<void(const std::expected<TransferFile, ApiFailure>&)>;
+    void transfer(const QString& transfer_id, QObject* context, TransferCallback done);
     // Asks a temporary download URL for one byte and reads how long its 509 says the quota
     // lasts: aria2 reports the status but not the headers.
     void quotaTimeLeft(const QUrl& url, QObject* context,
                        std::function<void(std::optional<std::chrono::seconds>)> done);
 
 private:
-    void request(const FileLink& link, QObject* context, Callback done, int attempt);
+    using CommandCallback = std::function<void(const std::expected<QJsonObject, ApiFailure>&)>;
+    void command(QUrlQuery query, QJsonObject body, QObject* context, CommandCallback done,
+                 int attempt);
 
     QNetworkAccessManager& network_;
     QUrl endpoint_;

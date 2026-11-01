@@ -160,6 +160,13 @@ CREATE INDEX episode_file_file_id ON episode_file(file_id);
     R"sql(
 DROP TABLE franchise_candidate;
 )sql",
+    // One-time tasks over the user's files, such as naming work folders by title, done once.
+    R"sql(
+CREATE TABLE maintenance (
+    name    TEXT PRIMARY KEY,
+    done_at INTEGER NOT NULL
+) STRICT;
+)sql",
 };
 
 QString errorText(const QSqlError& error) {

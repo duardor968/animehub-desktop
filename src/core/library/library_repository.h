@@ -75,6 +75,13 @@ public:
     // Every stored file path, to check which still exist on disk.
     [[nodiscard]] Stored<QList<std::tuple<QString, double, QString>>> episodeFiles() const;
 
+    // The folder under `directory` for the work's new episodes (see `library::workFolder`).
+    [[nodiscard]] Stored<QString> workFolder(const QString& directory, const QString& slug,
+                                             const QString& title) const;
+    // Stored file paths inside folder `from` move to `to`; returns how many. Runs inside the
+    // caller's transaction.
+    Stored<int> relocateFiles(const QString& from, const QString& to);
+
 private:
     Stored<void> writeFranchiseMember(qint64 id, const QString& slug, bool included);
     Stored<void> ensureEpisode(const QString& slug, double number);

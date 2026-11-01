@@ -305,6 +305,7 @@ ApplicationWindow {
         }
 
         DownloadsPage {
+            objectName: "downloadsPage"
             app: window.app
             onBrowseCatalog: window.showPage(1)
             onOpenAnime: slug => window.openAnime(slug, "downloads")
@@ -379,6 +380,22 @@ ApplicationWindow {
 
     CloseDialog {
         id: closeDialog
+        app: window.app
+    }
+
+    // What follows an episode no enabled server has; it waits while the window is hidden.
+    Binding {
+        target: window.app.downloads
+        property: "windowShown"
+        value: window.visible && window.visibility !== Window.Minimized
+    }
+    DownloadOffer {
+        id: downloadOffer
+        downloads: window.app.downloads
+        onSetupRequested: jdSetup.begin(0, false)
+    }
+    JDownloaderSetup {
+        id: jdSetup
         app: window.app
     }
 

@@ -25,6 +25,8 @@ QString providerKey(Provider provider) {
         return QStringLiteral("MEGA");
     case Provider::Pixeldrain:
         return QStringLiteral("PIXELDRAIN");
+    case Provider::TransferIt:
+        return QStringLiteral("TRANSFERIT");
     case Provider::Mp4Upload:
         return QStringLiteral("MP4UPLOAD");
     case Provider::OneFichier:
@@ -34,8 +36,8 @@ QString providerKey(Provider provider) {
 }
 
 std::optional<Provider> providerFromKey(QStringView key) {
-    for (const auto provider :
-         {Provider::Mega, Provider::Pixeldrain, Provider::Mp4Upload, Provider::OneFichier}) {
+    for (const auto provider : {Provider::Mega, Provider::Pixeldrain, Provider::TransferIt,
+                                Provider::Mp4Upload, Provider::OneFichier}) {
         if (key == providerKey(provider)) {
             return provider;
         }
@@ -49,6 +51,8 @@ QString providerLabel(Provider provider) {
         return QStringLiteral("MEGA");
     case Provider::Pixeldrain:
         return QStringLiteral("Pixeldrain");
+    case Provider::TransferIt:
+        return QStringLiteral("transfer.it");
     case Provider::Mp4Upload:
         return QStringLiteral("MP4Upload");
     case Provider::OneFichier:

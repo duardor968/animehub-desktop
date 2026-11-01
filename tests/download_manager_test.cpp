@@ -18,6 +18,7 @@
 
 using namespace animehub;
 using namespace animehub::downloads;
+using namespace Qt::StringLiterals;
 using animehub::testing::HttpTestServer;
 
 namespace {
@@ -226,6 +227,7 @@ class DownloadManagerTest final : public QObject {
     std::unique_ptr<DownloadManager> manager_;
     QString downloads_;
     int mega_calls_ = 0;
+    int transfer_calls_ = 0;
     int max_concurrent_ = 2;
     DownloadEngine engine_ = DownloadEngine::Native;
     DownloadEngine other_servers_ = DownloadEngine::Native;
@@ -235,6 +237,8 @@ class DownloadManagerTest final : public QObject {
                                     api::Provider::Mp4Upload};
     std::function<bool()> launch_jd_;
     int jd_launches_ = 0;
+    QList<QDateTime> jd_launched_at_;
+    std::chrono::milliseconds jd_launch_wait_{500};
 
     void serveMega(int bytes_per_tick = 0, int status = 200) {
         server_->route("POST", "/cs", [this](const HttpTestServer::Request&) {
@@ -253,6 +257,40 @@ class DownloadManagerTest final : public QObject {
                 return HttpTestServer::Response{.status = status};
             });
         }
+    }
+
+    // A transfer.it transfer holding the MEGA vectors' file: its listing, then its download URL.
+    void serveTransfer() {
+        server_->route("POST", "/cs", [this](const HttpTestServer::Request& request) {
+            const auto body = QJsonDocument::fromJson(request.body).array().first().toObject();
+            if (!request.query.contains("x=HJGrbGh1nZzI") || request.query.contains("p=")) {
+                return HttpTestServer::Response{.body = "[-9]"};
+            }
+            ++transfer_calls_;
+            if (body.value(u"a").toString() == u"f") {
+                const QJsonArray nodes{
+                    QJsonObject{{QStringLiteral("h"), QStringLiteral("folder01")},
+                                {QStringLiteral("t"), 1}},
+                    QJsonObject{{QStringLiteral("h"), QStringLiteral("filenode")},
+                                {QStringLiteral("t"), 0},
+                                {QStringLiteral("s"), vectors().value(u"size")},
+                                {QStringLiteral("a"), vectors().value(u"attributes")},
+                                {QStringLiteral("k"), vectors().value(u"linkKey")}}};
+                return HttpTestServer::Response{
+                    .body = QJsonDocument(QJsonArray{QJsonObject{{QStringLiteral("f"), nodes}}})
+                                .toJson(QJsonDocument::Compact)};
+            }
+            const QJsonObject file{
+                {QStringLiteral("s"), vectors().value(u"size")},
+                {QStringLiteral("g"), server_->url(QStringLiteral("/files/episode")).toString()}};
+            return HttpTestServer::Response{
+                .body = QJsonDocument(QJsonArray{file}).toJson(QJsonDocument::Compact)};
+        });
+        server_->file("/files/episode", encrypted());
+    }
+
+    static QString transferUrl() {
+        return QStringLiteral("https://transfer.it/t/HJGrbGh1nZzI");
     }
 
     void resolveTo(const QByteArray& body, const QString& slug = kFrieren) {
@@ -286,6 +324,23 @@ class DownloadManagerTest final : public QObject {
         const auto port = probe.serverPort();
         probe.close();
         return QUrl(QStringLiteral("http://127.0.0.1:%1").arg(port));
+    }
+
+    // Whether each request for a source asked the API to look again, in order.
+    QList<bool> refreshes() const {
+        QList<bool> asked;
+        for (const auto& request : server_->requests()) {
+            if (request.path.endsWith("/downloads/resolve")) {
+                asked.append(
+                    QJsonDocument::fromJson(request.body).object().value(u"refresh").toBool());
+            }
+        }
+        return asked;
+    }
+
+    QStringList stagingFolders() const {
+        return QDir(QDir(downloads_).filePath(kFrieren))
+            .entryList({QStringLiteral(".jd-*")}, QDir::Dirs | QDir::Hidden);
     }
 
     // Episodes in the order the manager asked the API for their sources.
@@ -361,8 +416,10 @@ class DownloadManagerTest final : public QObject {
                                       nullptr,
                                       [this] {
                                           ++jd_launches_;
+                                          jd_launched_at_.append(QDateTime::currentDateTimeUtc());
                                           return launch_jd_ && launch_jd_();
-                                      }},
+                                      },
+                                      jd_launch_wait_},
             [this] {
                 return DownloadSettings{.directory = downloads_,
                                         .providers = providers_,
@@ -379,28 +436,53 @@ class DownloadManagerTest final : public QObject {
         return manager_->task(id);
     }
 
+    // Where a work with no earlier folder gets an episode: a folder named by its title.
+    QString episodePath(const QString& slug, double number) const {
+        return util::downloadBasePath(QDir(downloads_).filePath(titleOf(slug)), titleOf(slug),
+                                      number);
+    }
+
 private slots:
     void defaultPathsKeepWorkIdentityAndReadableEpisodeNames() {
         const auto root = QStringLiteral("D:/Multimedia/Anime");
-        const auto title = QStringLiteral("Kaguya-sama wa Kokurasetai");
-        const auto first = util::downloadBasePath(root, QStringLiteral("kaguya-sama"), title, 1);
-        const auto second = util::downloadBasePath(root, QStringLiteral("kaguya-sama-2"), title, 1);
-        QCOMPARE(first, root + QStringLiteral("/kaguya-sama/Kaguya-sama wa Kokurasetai - 01"));
-        QVERIFY(first.compare(second, Qt::CaseInsensitive) != 0);
-        QCOMPARE(first, util::downloadBasePath(root, QStringLiteral("kaguya-sama"), title, 1));
-        QVERIFY(util::downloadBasePath(root, QStringLiteral("kaguya-sama"), title, 1.5)
-                    .endsWith(QStringLiteral(" - 01.5")));
-        const auto long_slug = QString(200, u'a');
+        const auto title = QStringLiteral("Kaguya-sama wa Kokurasetai: Ultra Romantic");
+        const auto folder = root + u'/' + util::workFolderName(title, 2022, u"kaguya"_s, 0);
+        QCOMPARE(folder, root + QStringLiteral("/Kaguya-sama wa Kokurasetai Ultra Romantic"));
+        const auto first = util::downloadBasePath(folder, title, 1);
+        QCOMPARE(first, folder + QStringLiteral("/Kaguya-sama wa Kokurasetai Ultra Romantic - 01"));
+        QVERIFY(util::downloadBasePath(folder, title, 1.5).endsWith(QStringLiteral(" - 01.5")));
+        QCOMPARE(util::workFolderName(title, 2022, u"kaguya"_s, 1),
+                 QStringLiteral("Kaguya-sama wa Kokurasetai Ultra Romantic (2022)"));
+        const auto suffixed = util::workFolderName(title, 2022, u"kaguya"_s, 2);
+        QVERIFY(suffixed.startsWith(QStringLiteral("Kaguya-sama wa Kokurasetai Ultra Romantic "
+                                                   "(2022) [")));
+        QVERIFY(suffixed != util::workFolderName(title, 2022, u"kaguya-2"_s, 2));
+        QCOMPARE(suffixed, util::workFolderName(title, 2022, u"kaguya"_s, 2)); // stable
+        QVERIFY(util::workFolderName(title, std::nullopt, u"kaguya"_s, 1).endsWith(u']'));
         const auto long_title = QString(240, u'B');
-        const auto long_path = util::downloadBasePath(root, long_slug, long_title, 123.5);
+        for (int attempt = 0; attempt < 3; ++attempt)
+            QVERIFY(util::workFolderName(long_title, 2024, u"b"_s, attempt).size() <= 80);
+        const auto long_path = util::downloadBasePath(
+            root + u'/' + util::workFolderName(long_title, 2024, u"b"_s, 2), long_title, 123.5);
         QVERIFY(long_path.size() + QStringLiteral(".webm.mega.aria2").size() < 260);
         QVERIFY(QFileInfo(long_path).fileName().size() <= 120);
-        QVERIFY(QFileInfo(long_path).dir().dirName().size() <= 80);
-        QVERIFY(long_path != util::downloadBasePath(root, long_slug + u'b', long_title, 123.5));
-        QVERIFY(util::downloadBasePath(root, QStringLiteral("a:b"), title, 1) !=
-                util::downloadBasePath(root, QStringLiteral("a?b"), title, 1));
-        const auto reserved = util::downloadBasePath(root, QStringLiteral("con"), title, 1);
-        QVERIFY(QFileInfo(reserved).dir().dirName().startsWith(QStringLiteral("_con~")));
+        QCOMPARE(util::workFolderName(QStringLiteral("con"), std::nullopt, u"con"_s, 0),
+                 QStringLiteral("_con"));
+        QCOMPARE(util::workFolderName(QStringLiteral(" ?. "), std::nullopt, u"x"_s, 0),
+                 QStringLiteral("Anime"));
+        QCOMPARE(util::workFolderName(QStringLiteral("Muri Muri! (※Muri ja Nakatta!?)"),
+                                      std::nullopt, u"m"_s, 0),
+                 QStringLiteral("Muri Muri! (※Muri ja Nakatta!)"));
+        QCOMPARE(util::workFolderName(QStringLiteral("Kyouran Reijou Nia Liston Byoujaku Reijou "
+                                                     "ni Tensei shita Kamigoroshi no Bujin no "
+                                                     "Karei naru Musouroku"),
+                                      std::nullopt, u"k"_s, 0),
+                 QStringLiteral("Kyouran Reijou Nia Liston Byoujaku Reijou ni Tensei shita "
+                                "Kamigoroshi no Bujin"));
+        // What earlier versions named the folders, as the migration recognizes them.
+        QCOMPARE(util::legacyWorkFolderName(u"kaguya-sama"_s), u"kaguya-sama"_s);
+        QVERIFY(util::legacyWorkFolderName(u"con"_s).startsWith(QStringLiteral("_con~")));
+        QVERIFY(util::legacyWorkFolderName(u"a:b"_s) != util::legacyWorkFolderName(u"a?b"_s));
     }
 
     void init() {
@@ -427,6 +509,7 @@ private slots:
             std::make_unique<mega::Api>(*network_, nullptr, server_->url(QStringLiteral("/cs")));
         pixeldrain_ = std::make_unique<pixeldrain::Api>(*network_, nullptr, server_->url());
         mega_calls_ = 0;
+        transfer_calls_ = 0;
         max_concurrent_ = 2;
         engine_ = DownloadEngine::Native;
         other_servers_ = DownloadEngine::Native;
@@ -435,6 +518,8 @@ private slots:
         providers_ = {api::Provider::Mega, api::Provider::Pixeldrain, api::Provider::Mp4Upload};
         launch_jd_ = {};
         jd_launches_ = 0;
+        jd_launched_at_.clear();
+        jd_launch_wait_ = std::chrono::milliseconds(500);
         makeManager();
     }
 
@@ -553,9 +638,8 @@ private slots:
         QCOMPARE(taskOf(id)->engineJobId, 77);
         QCOMPARE(taskOf(id)->engineLinkIds, QList<qint64>{88});
         const auto destination = taskOf(id)->engineDestination;
-        QCOMPARE(taskOf(id)->targetPath,
-                 util::downloadBasePath(downloads_, kFrieren, titleOf(kFrieren), 1));
-        QVERIFY(destination.startsWith(QDir(downloads_).filePath(kFrieren)));
+        QCOMPARE(taskOf(id)->targetPath, episodePath(kFrieren, 1));
+        QVERIFY(destination.startsWith(QDir(downloads_).filePath(titleOf(kFrieren))));
         engine_ = DownloadEngine::Native; // settings changes cannot reroute the persisted task
         restart();
         QCOMPARE(taskOf(id)->engine, DownloadEngine::JDownloaderLocal);
@@ -577,9 +661,7 @@ private slots:
         QCOMPARE(jd.submissions, 1);
         QVERIFY(jd.scoped);
         QVERIFY(library_->episodeLocations(kFrieren, 1)->size() == 1);
-        QCOMPARE(taskOf(id)->targetPath,
-                 util::downloadBasePath(downloads_, kFrieren, titleOf(kFrieren), 1) +
-                     QStringLiteral(".mkv"));
+        QCOMPARE(taskOf(id)->targetPath, episodePath(kFrieren, 1) + QStringLiteral(".mkv"));
         QCOMPARE(sha256File(taskOf(id)->targetPath),
                  QString::fromLatin1(
                      QCryptographicHash::hash("12345678", QCryptographicHash::Sha256).toHex()));
@@ -796,20 +878,21 @@ private slots:
         QVERIFY(created);
         const auto id = *created;
         QTRY_VERIFY_WITH_TIMEOUT(jd.moved, kTimeout);
-        // The same task, from one request that asks MEGA and Pixeldrain first, and only the
-        // servers the user enabled: 1Fichier is off by default.
+        // The same task, from one request that asks MEGA and Pixeldrain first, then every other
+        // server; JDownloader gets only the ones the user enabled: 1Fichier is off by default.
         QCOMPARE(manager_->tasks().size(), 1);
         QCOMPARE(server_->count("/api/v1/anime/sousou-no-frieren/downloads/resolve"), 1);
         QCOMPARE(askedProviders(),
                  (QStringList{QStringLiteral("MEGA"), QStringLiteral("PIXELDRAIN"),
-                              QStringLiteral("MP4UPLOAD")}));
+                              QStringLiteral("MP4UPLOAD"), QStringLiteral("TRANSFERIT"),
+                              QStringLiteral("ONE_FICHIER")}));
         QCOMPARE(jd.links, mp4upload);
         const auto handed = *taskOf(id);
         QCOMPARE(handed.engine, DownloadEngine::JDownloaderLocal);
         QCOMPARE(handed.engineEndpoint, server_->url().toString());
         QCOMPARE(handed.provider, api::Provider::Mp4Upload);
         QCOMPARE(handed.state, TaskState::Downloading);
-        QVERIFY(handed.engineDestination.startsWith(QDir(downloads_).filePath(kFrieren) +
+        QVERIFY(handed.engineDestination.startsWith(QDir(downloads_).filePath(titleOf(kFrieren)) +
                                                     QStringLiteral("/.jd-")));
         QCOMPARE(QDir::fromNativeSeparators(jd.destination), handed.engineDestination);
         // JDownloader's progress, as for any of its tasks.
@@ -820,8 +903,7 @@ private slots:
         media.close();
         jd.finished = true;
         QTRY_COMPARE_WITH_TIMEOUT(taskOf(id)->state, TaskState::Completed, kTimeout);
-        const auto path = util::downloadBasePath(downloads_, kFrieren, titleOf(kFrieren), 1) +
-                          QStringLiteral(".mp4");
+        const auto path = episodePath(kFrieren, 1) + QStringLiteral(".mp4");
         QCOMPARE(taskOf(id)->targetPath, path);
         const auto episode = library_->episode(kFrieren, 1);
         QVERIFY(episode && *episode);
@@ -840,9 +922,64 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
         QCOMPARE(taskOf(*id)->issue, TaskIssue::NoSource);
         QCOMPARE(taskOf(*id)->engine, DownloadEngine::Native);
+        // Every server is asked for, so the episode says where it is.
         QCOMPARE(askedProviders(),
-                 (QStringList{QStringLiteral("MEGA"), QStringLiteral("PIXELDRAIN")}));
+                 (QStringList{QStringLiteral("MEGA"), QStringLiteral("PIXELDRAIN"),
+                              QStringLiteral("TRANSFERIT"), QStringLiteral("MP4UPLOAD"),
+                              QStringLiteral("ONE_FICHIER")}));
+        QCOMPARE(taskOf(*id)->excludedServers, QList<api::Provider>{api::Provider::Mp4Upload});
         QCOMPARE(jd.submissions, 0);
+    }
+
+    // With JDownloader, an episode only on servers the user turned off names them.
+    void anEpisodeOnlyOnServersTurnedOffNamesThem() {
+        other_servers_ = DownloadEngine::JDownloaderLocal;
+        providers_ = {api::Provider::Mega, api::Provider::Pixeldrain};
+        FakeJd jd;
+        jd.install(*server_);
+        resolveTo(resolution({{"ONE_FICHIER", QStringLiteral("https://1fichier.com/?x")},
+                              {"MP4UPLOAD", QStringLiteral("https://www.mp4upload.com/abc123")}}));
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::NoSource);
+        QCOMPARE(taskOf(*id)->excludedServers,
+                 (QList<api::Provider>{api::Provider::OneFichier, api::Provider::Mp4Upload}));
+        QCOMPARE(jd.submissions, 0);
+        // Looked for again, it names only what it finds then.
+        resolveTo(resolution({}));
+        manager_->retry(*id);
+        QTRY_COMPARE_WITH_TIMEOUT(
+            server_->count("/api/v1/anime/sousou-no-frieren/downloads/resolve"), 2, kTimeout);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QVERIFY(taskOf(*id)->excludedServers.isEmpty());
+    }
+
+    // A retry by the user asks the API to look for the episode again; the retries the queue
+    // makes by itself do not.
+    void onlyARetryByTheUserAsksTheApiToLookAgain() {
+        resolveTo(resolution({{"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/abc123")}}));
+        server_->json("/api/file/abc123/info", "{\"name\":\"a.mp4\",\"size\":8}");
+        server_->route("GET", "/api/file/abc123", [](const HttpTestServer::Request&) {
+            return HttpTestServer::Response{.status = 404};
+        });
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        // The file's server lost it: the queue looks for it again twice, by itself.
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::SourceRemoved);
+        QCOMPARE(refreshes(), (QList<bool>{false, false, false}));
+
+        manager_->retry(*id);
+        QTRY_COMPARE_WITH_TIMEOUT(refreshes().size(), 6, kTimeout);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(refreshes(), (QList<bool>{false, false, false, true, false, false}));
+
+        // "Reintentar fallidos" on the series, too.
+        manager_->retryFailed(kFrieren);
+        QTRY_COMPARE_WITH_TIMEOUT(refreshes().size(), 9, kTimeout);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(refreshes().mid(6), (QList<bool>{true, false, false}));
     }
 
     void otherServersStopWithTheReasonWhenJDownloaderDoesNotAnswer() {
@@ -897,13 +1034,96 @@ private slots:
         QCOMPARE(task->state, TaskState::Completed);
         QCOMPARE(task->provider, api::Provider::Mega);
         const auto expected_path =
-            downloads_ + QStringLiteral("/sousou-no-frieren/Sousou no Frieren - 01.mp4");
+            downloads_ + QStringLiteral("/Sousou no Frieren/Sousou no Frieren - 01.mp4");
         QCOMPARE(task->targetPath, expected_path);
         QCOMPARE(sha256File(expected_path), vectors().value(u"plainSha256").toString());
         const auto episode = library_->episode(QStringLiteral("sousou-no-frieren"), 1);
         QVERIFY(episode && *episode);
         QCOMPARE((*episode)->filePath, expected_path);
         QTRY_VERIFY(leftovers(downloads_).isEmpty());
+    }
+
+    // transfer.it goes through the same transfer, decryption and MAC check as MEGA.
+    void downloadsAndVerifiesATransferItEpisode() {
+        providers_ = {api::Provider::Mega, api::Provider::Pixeldrain, api::Provider::TransferIt};
+        resolveTo(resolution({{"TRANSFERIT", transferUrl()}}));
+        serveTransfer();
+        QSignalSpy completed(manager_.get(), &DownloadManager::taskCompleted);
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 1, kTimeout);
+        const auto task = taskOf(*id);
+        QCOMPARE(task->provider, api::Provider::TransferIt);
+        QCOMPARE(task->sourceId, QStringLiteral("HJGrbGh1nZzI/filenode"));
+        QCOMPARE(sha256File(task->targetPath), vectors().value(u"plainSha256").toString());
+        QVERIFY(askedProviders().contains(QStringLiteral("TRANSFERIT")));
+        QTRY_VERIFY(leftovers(downloads_).isEmpty());
+    }
+
+    // transfer.it comes after MEGA and Pixeldrain: it is asked only when they have nothing.
+    void triesTransferItAfterMegaAndPixeldrain() {
+        providers_ = {api::Provider::Mega, api::Provider::Pixeldrain, api::Provider::TransferIt};
+        const auto data = plaintext();
+        resolveTo(resolution({{"TRANSFERIT", transferUrl()},
+                              {"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/abc123")}}));
+        serveTransfer();
+        server_->json("/api/file/abc123/info", QByteArrayLiteral("{\"name\":\"a.mp4\",\"size\":") +
+                                                   QByteArray::number(data.size()) + '}');
+        server_->file("/api/file/abc123", data);
+        const auto first = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*first)->state, TaskState::Completed, kTimeout);
+        QCOMPARE(taskOf(*first)->provider, api::Provider::Pixeldrain);
+        QCOMPARE(transfer_calls_, 0);
+
+        // Pixeldrain no longer has it: transfer.it does.
+        server_->route("GET", "/api/file/abc123/info", [](const HttpTestServer::Request&) {
+            return HttpTestServer::Response{.status = 404};
+        });
+        resolveTo(resolution({{"TRANSFERIT", transferUrl()},
+                              {"PIXELDRAIN", QStringLiteral("https://pixeldrain.com/u/abc123")}}),
+                  kBebop);
+        const auto second = manager_->enqueue(kBebop, 1, titleOf(kBebop), TaskOrigin::Manual);
+        QVERIFY(second);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*second)->state, TaskState::Completed, kTimeout);
+        QCOMPARE(taskOf(*second)->provider, api::Provider::TransferIt);
+    }
+
+    // transfer.it is assumed to share MEGA's quota: it is not asked while MEGA is blocked.
+    void skipsTransferItWhileMegaIsBlocked() {
+        providers_ = {api::Provider::Mega, api::Provider::Pixeldrain, api::Provider::TransferIt};
+        resolveTo(resolution({{"MEGA", megaUrl()}, {"TRANSFERIT", transferUrl()}}));
+        server_->route("POST", "/cs", [this](const HttpTestServer::Request& request) {
+            if (request.query.contains("x=")) {
+                ++transfer_calls_;
+            } else {
+                ++mega_calls_;
+            }
+            return HttpTestServer::Response{.body = "[{\"e\":-17,\"tl\":1200}]"};
+        });
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Waiting, kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::Quota);
+        QCOMPARE(mega_calls_, 1);
+        QCOMPARE(transfer_calls_, 0);
+    }
+
+    // An over-quota answer from transfer.it blocks MEGA's quota too.
+    void transferItOverQuotaCountsAsMegas() {
+        providers_ = {api::Provider::Mega, api::Provider::Pixeldrain, api::Provider::TransferIt};
+        resolveTo(resolution({{"TRANSFERIT", transferUrl()}}));
+        server_->route("POST", "/cs", [this](const HttpTestServer::Request&) {
+            ++transfer_calls_;
+            return HttpTestServer::Response{.body = "[{\"e\":-17,\"tl\":900}]"};
+        });
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Waiting, kTimeout);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::Quota);
+        QVERIFY(manager_->megaQuota() && manager_->megaQuota()->known);
+        const auto left = QDateTime::currentDateTimeUtc().secsTo(manager_->megaQuota()->until);
+        QVERIFY2(left > 880 && left <= 900, qPrintable(QString::number(left)));
+        QCOMPARE(transfer_calls_, 1);
     }
 
     void downloadsFromPixeldrainAndKeepsTheExtension() {
@@ -1173,6 +1393,68 @@ private slots:
         makeManager();
     }
 
+    // A JDownloader that does not answer once started (updating itself) is started again, three
+    // times in all, each given its wait; then the episode stops, and its empty folder goes. A
+    // retry by the user starts it three more times; a folder with something in it stays.
+    void startsJDownloaderThreeTimesThenStops() {
+        other_servers_ = DownloadEngine::JDownloaderLocal;
+        jd_endpoint_ = closedPort();
+        QVERIFY(jd_endpoint_.isValid());
+        QVERIFY(jd_endpoint_.port() != 3128); // never the JDownloader of this computer
+        launch_jd_ = [] { return true; };     // started, but its API never opens
+        resolveTo(resolution({{"MP4UPLOAD", QStringLiteral("https://www.mp4upload.com/abc123")}}));
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->enginePhase, QStringLiteral("launching"), kTimeout);
+        QCOMPARE(taskOf(*id)->state, TaskState::Resolving);
+        const auto staging = taskOf(*id)->engineDestination;
+        QVERIFY(QFileInfo(staging).isDir());
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(jd_launches_, 3);
+        for (qsizetype i = 1; i < jd_launched_at_.size(); ++i) {
+            QVERIFY(jd_launched_at_[i - 1].msecsTo(jd_launched_at_[i]) >= 450);
+        }
+        QVERIFY(jd_launched_at_.last().msecsTo(QDateTime::currentDateTimeUtc()) >= 450);
+        QCOMPARE(taskOf(*id)->issue, TaskIssue::Engine);
+        QCOMPARE(
+            taskOf(*id)->issueDetail,
+            QStringLiteral(
+                "JDownloader no responde en este PC. Activa su API local o usa MyJDownloader."));
+        QVERIFY(!QFileInfo::exists(staging));
+        QVERIFY(stagingFolders().isEmpty());
+
+        manager_->retry(*id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->enginePhase, QStringLiteral("launching"), kTimeout);
+        QVERIFY(QFileInfo(staging).isDir());
+        QFile left(QDir(staging).filePath(QStringLiteral("not-animehubs.txt")));
+        QVERIFY(left.open(QIODevice::WriteOnly));
+        left.close();
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Failed, kTimeout);
+        QCOMPARE(jd_launches_, 6);
+        QVERIFY(QFileInfo::exists(left.fileName()));
+    }
+
+    // Cancelled while it waits for JDownloader: nothing reached it, and its empty folder goes.
+    void cancellingWhileJDownloaderOpensRemovesItsEmptyFolder() {
+        other_servers_ = DownloadEngine::JDownloaderLocal;
+        jd_endpoint_ = closedPort();
+        QVERIFY(jd_endpoint_.isValid());
+        QVERIFY(jd_endpoint_.port() != 3128);
+        launch_jd_ = [] { return true; };
+        jd_launch_wait_ = std::chrono::seconds(20);
+        restart();
+        resolveTo(resolution({{"MP4UPLOAD", QStringLiteral("https://www.mp4upload.com/abc123")}}));
+        const auto id = manager_->enqueue(kFrieren, 1, titleOf(kFrieren), TaskOrigin::Manual);
+        QVERIFY(id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->enginePhase, QStringLiteral("launching"), kTimeout);
+        const auto staging = taskOf(*id)->engineDestination;
+        QVERIFY(QFileInfo(staging).isDir());
+        manager_->cancel(*id);
+        QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Cancelled, kTimeout);
+        QCOMPARE(jd_launches_, 1);
+        QVERIFY(!QFileInfo::exists(staging));
+    }
+
     // MEGA's quota would send it to JDownloader, which does not answer and cannot be started:
     // the episode goes on natively with Pixeldrain, and says so.
     void withoutJDownloaderTheQuotaEpisodeGoesOnNatively() {
@@ -1199,7 +1481,7 @@ private slots:
         QCOMPARE(jd_launches_, 1);
         QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Completed, kTimeout);
         QVERIFY(leftovers(downloads_).isEmpty());
-        QVERIFY(!QDir(QDir(downloads_).filePath(kFrieren))
+        QVERIFY(!QDir(QDir(downloads_).filePath(titleOf(kFrieren)))
                      .entryList({QStringLiteral(".jd-*")}, QDir::Dirs | QDir::Hidden)
                      .size());
     }
@@ -1562,7 +1844,7 @@ private slots:
         // Frieren 1 gives way and waits in line with its partial file, without a transfer.
         manager_->prioritize(kBebop);
         QTRY_VERIFY_WITH_TIMEOUT(taskFor(kBebop, 1)->bytesDone > 0, kTimeout);
-        const auto frieren_folder = QDir(downloads_).filePath(kFrieren);
+        const auto frieren_folder = QDir(downloads_).filePath(titleOf(kFrieren));
         QVERIFY(!leftovers(frieren_folder).isEmpty());
 
         manager_->cancelSeries(kFrieren);
@@ -1570,7 +1852,7 @@ private slots:
         QCOMPARE(taskFor(kFrieren, 2)->state, TaskState::Cancelled);
         QTRY_VERIFY_WITH_TIMEOUT(leftovers(frieren_folder).isEmpty(), kTimeout);
         QCOMPARE(taskFor(kBebop, 1)->state, TaskState::Downloading);
-        QVERIFY(!leftovers(QDir(downloads_).filePath(kBebop)).isEmpty());
+        QVERIFY(!leftovers(QDir(downloads_).filePath(titleOf(kBebop))).isEmpty());
     }
 
     void forgetsTheFinishedRowsOfASeries() {

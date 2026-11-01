@@ -100,8 +100,6 @@ QVariant DownloadEpisodesModel::data(const QModelIndex& index, int role) const {
         return row.problem;
     case HasFileRole:
         return row.hasFile;
-    case EngineLineRole:
-        return row.engineLine;
     case CanPauseRole:
         return row.canPause;
     case CanResumeRole:
@@ -118,13 +116,19 @@ QVariant DownloadEpisodesModel::data(const QModelIndex& index, int role) const {
 }
 
 QHash<int, QByteArray> DownloadEpisodesModel::roleNames() const {
-    return {{IdRole, "taskId"},         {NumberRole, "number"},
-            {LabelRole, "label"},       {ImageRole, "image"},
-            {StateRole, "taskState"},   {ProgressRole, "progress"},
-            {DetailRole, "detail"},     {ProblemRole, "problem"},
-            {HasFileRole, "hasFile"},   {EngineLineRole, "engineLine"},
-            {CanPauseRole, "canPause"}, {CanResumeRole, "canResume"},
-            {CanRetryRole, "canRetry"}, {CanRetryNowRole, "canRetryNow"},
+    return {{IdRole, "taskId"},
+            {NumberRole, "number"},
+            {LabelRole, "label"},
+            {ImageRole, "image"},
+            {StateRole, "taskState"},
+            {ProgressRole, "progress"},
+            {DetailRole, "detail"},
+            {ProblemRole, "problem"},
+            {HasFileRole, "hasFile"},
+            {CanPauseRole, "canPause"},
+            {CanResumeRole, "canResume"},
+            {CanRetryRole, "canRetry"},
+            {CanRetryNowRole, "canRetryNow"},
             {PartialRole, "partial"}};
 }
 

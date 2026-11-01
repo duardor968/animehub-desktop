@@ -189,8 +189,8 @@ QString folderOf(const QList<Task>& tasks) {
 } // namespace
 
 DownloadsView::DownloadsView(downloads::DownloadManager& manager, library::LibraryService& library,
-                             playback::Player& player, QObject* parent)
-    : QObject(parent), manager_(manager), library_(library), player_(player) {
+                             playback::Player& player, AppSettings& settings, QObject* parent)
+    : QObject(parent), manager_(manager), library_(library), player_(player), settings_(settings) {
     rebuild_timer_.setSingleShot(true);
     rebuild_timer_.setInterval(60);
     connect(&rebuild_timer_, &QTimer::timeout, this, &DownloadsView::rebuild);
@@ -203,6 +203,8 @@ DownloadsView::DownloadsView(downloads::DownloadManager& manager, library::Libra
     });
     connect(&manager_, &downloads::DownloadManager::taskChanged, this, &DownloadsView::taskChanged);
     connect(&manager_, &downloads::DownloadManager::megaQuotaChanged, this, later);
+    connect(&manager_, &downloads::DownloadManager::taskFailed, this,
+            &DownloadsView::considerOffer);
     connect(&library_, &library::LibraryService::animeChanged, this,
             [this, later](const QString& slug) {
                 infos_.remove(slug);
@@ -394,7 +396,6 @@ void DownloadsView::rebuild() {
                                : taskDetail(task),
                  .problem = task.state == TaskState::Failed,
                  .hasFile = on_disk,
-                 .engineLine = folder.isEmpty() ? QString() : engineLine({folder}),
                  .canPause = pausable(task),
                  .canResume = task.state == TaskState::Paused,
                  .canRetry = retryable(task),
@@ -636,6 +637,7 @@ void DownloadsView::rebuild() {
         sample_timer_.start();
         sample(); // the graph and "Actual" start together
     }
+    updateOffer();
 }
 
 // Counts the bytes the session downloads: what a transfer adds between two looks at it, and
@@ -684,6 +686,210 @@ QString DownloadsView::peakText() const {
 
 QString DownloadsView::totalText() const {
     return display::bytes(session_bytes_);
+}
+
+QString DownloadsView::offer() const {
+    switch (offer_) {
+    case Offer::JDownloader:
+        return QStringLiteral("jdownloader");
+    case Offer::Servers:
+        return QStringLiteral("servers");
+    case Offer::None:
+        break;
+    }
+    return {};
+}
+
+// JDownloader is offered for the servers only it downloads while it is not used; turning on, for
+// the servers the user turned off.
+std::pair<DownloadsView::Offer, QList<api::Provider>>
+DownloadsView::offerFor(const Task& task) const {
+    if (task.state != TaskState::Failed || task.issue != downloads::TaskIssue::NoSource) {
+        return {Offer::None, {}};
+    }
+    const bool jd = settings_.jdownloader() != AppSettings::JDownloader::Off;
+    const auto disabled = settings_.disabledProviders();
+    QList<api::Provider> off;
+    QList<api::Provider> jd_only;
+    for (const auto server : task.excludedServers) {
+        if (!jd && !downloads::DownloadManager::isNative(server)) {
+            jd_only.append(server);
+        } else if (disabled.contains(api::providerKey(server))) {
+            off.append(server);
+        }
+    }
+    if (!off.isEmpty()) {
+        return {Offer::Servers, off};
+    }
+    if (!jd_only.isEmpty()) {
+        return {Offer::JDownloader, jd_only};
+    }
+    return {Offer::None, {}};
+}
+
+DownloadsView::OfferMatch DownloadsView::offerMatch(Offer kind) const {
+    OfferMatch match;
+    for (const auto& task : manager_.tasks()) {
+        const auto [offer, servers] = offerFor(task);
+        if (offer != kind) {
+            continue;
+        }
+        match.tasks.append(task);
+        for (const auto server : servers) {
+            if (!match.servers.contains(server)) {
+                match.servers.append(server);
+            }
+        }
+    }
+    return match;
+}
+
+bool DownloadsView::offerHidden(Offer kind) const {
+    return kind == Offer::JDownloader ? settings_.jdownloaderOfferHidden()
+                                      : settings_.serversOfferHidden();
+}
+
+void DownloadsView::considerOffer() {
+    if (offer_ != Offer::None || !window_shown_) {
+        return;
+    }
+    for (const auto kind : {Offer::JDownloader, Offer::Servers}) {
+        if (offered_.contains(kind) || offerHidden(kind)) {
+            continue;
+        }
+        if (const auto match = offerMatch(kind); !match.tasks.isEmpty()) {
+            offered_.append(kind);
+            presentOffer(kind, match);
+            return;
+        }
+    }
+}
+
+// An open offer follows the episodes it is about, and closes once none is left.
+void DownloadsView::updateOffer() {
+    if (offer_ == Offer::None || offer_preview_) {
+        return;
+    }
+    const auto match = offerMatch(offer_);
+    if (match.tasks.isEmpty()) {
+        closeOffer(false);
+        return;
+    }
+    presentOffer(offer_, match);
+}
+
+void DownloadsView::presentOffer(Offer kind, const OfferMatch& match) {
+    QStringList slugs;
+    for (const auto& task : match.tasks) {
+        if (!slugs.contains(task.slug)) {
+            slugs.append(task.slug);
+        }
+    }
+    const auto episodes = match.tasks.size();
+    const auto& first = match.tasks.first();
+    const auto title = slugs.size() > 1
+                           ? QStringLiteral("%1 episodios").arg(episodes)
+                           : first.animeTitle + QStringLiteral(" · ") +
+                                 (episodes == 1 ? display::episode(first.number)
+                                                : QStringLiteral("%1 episodios").arg(episodes));
+    QStringList names;
+    for (const auto server : match.servers) {
+        names.append(display::provider(server));
+    }
+    names.sort(Qt::CaseInsensitive);
+    const auto last = names.takeLast();
+    const auto listed =
+        names.isEmpty() ? last : names.join(QStringLiteral(", ")) + QStringLiteral(" y ") + last;
+    const bool one = match.servers.size() == 1;
+    auto text = (episodes == 1 ? QStringLiteral("Este episodio solo está en ")
+                               : QStringLiteral("Estos episodios solo están en ")) +
+                listed;
+    if (kind == Offer::Servers) {
+        text += one ? QStringLiteral(", desactivado en Ajustes.")
+                    : QStringLiteral(", desactivados en Ajustes.");
+    } else {
+        text += one ? QStringLiteral(", que se descarga con JDownloader.")
+                    : QStringLiteral(", que se descargan con JDownloader.");
+    }
+    if (kind == offer_ && title == offer_title_ && text == offer_text_) {
+        return;
+    }
+    offer_ = kind;
+    offer_title_ = title;
+    offer_text_ = text;
+    emit offerChanged();
+}
+
+void DownloadsView::closeOffer(bool never) {
+    if (offer_ == Offer::None) {
+        return;
+    }
+    if (never && offer_ == Offer::JDownloader) {
+        settings_.hideJdownloaderOffer();
+    } else if (never) {
+        settings_.hideServersOffer();
+    }
+    offer_ = Offer::None;
+    offer_preview_ = false;
+    offer_title_.clear();
+    offer_text_.clear();
+    emit offerChanged();
+}
+
+void DownloadsView::setWindowShown(bool shown) {
+    if (window_shown_ == shown) {
+        return;
+    }
+    window_shown_ = shown;
+    emit windowShownChanged();
+    considerOffer(); // what failed while it was hidden, if it still applies
+}
+
+void DownloadsView::dismissOffer(bool never) {
+    closeOffer(never);
+    considerOffer();
+}
+
+void DownloadsView::acceptOffer(bool never) {
+    const auto kind = offer_;
+    const auto match = offer_preview_ ? OfferMatch{} : offerMatch(kind);
+    closeOffer(never);
+    if (kind != Offer::Servers) {
+        return;
+    }
+    for (const auto server : match.servers) {
+        settings_.setProviderEnabled(api::providerKey(server), true);
+    }
+    for (const auto& task : match.tasks) {
+        manager_.retry(task.id);
+    }
+}
+
+void DownloadsView::retryWithJdownloader() {
+    int retried = 0;
+    for (const auto& task : manager_.tasks()) {
+        if (task.state == TaskState::Failed && task.issue == downloads::TaskIssue::NoSource &&
+            std::ranges::any_of(task.excludedServers, [](api::Provider server) {
+                return !downloads::DownloadManager::isNative(server);
+            })) {
+            manager_.retry(task.id);
+            ++retried;
+        }
+    }
+    emit message(retried == 0 ? QStringLiteral("JDownloader conectado")
+                              : QStringLiteral("JDownloader conectado · ") +
+                                    count(retried, QStringLiteral("1 episodio en cola"),
+                                          QStringLiteral("%1 episodios en cola")),
+                 false);
+}
+
+void DownloadsView::previewOffer(Offer kind, const QString& title, double number,
+                                 const QList<api::Provider>& servers) {
+    Task task;
+    task.animeTitle = title;
+    task.number = number;
+    presentOffer(kind, {.tasks = {task}, .servers = servers});
+    offer_preview_ = true;
 }
 
 QList<Task> DownloadsView::tasksOf(const QString& slug) const {

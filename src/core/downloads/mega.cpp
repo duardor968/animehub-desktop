@@ -58,6 +58,49 @@ bool isHandle(QStringView handle) {
            });
 }
 
+FileLink linkFromKey(const QString& handle, const QByteArray& raw) {
+    FileLink link;
+    link.handle = handle;
+    std::array<std::uint32_t, 8> words{};
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        words[i] = readWord(raw, static_cast<qsizetype>(i * 4));
+    }
+    for (std::size_t i = 0; i < 4; ++i) {
+        writeWord(link.key.data() + i * 4, words[i] ^ words[i + 4]);
+    }
+    writeWord(link.nonce.data(), words[4]);
+    writeWord(link.nonce.data() + 4, words[5]);
+    link.metaMac = {words[6], words[7]};
+    return link;
+}
+
+bool isVideoName(const QString& name) {
+    static const QStringList kExtensions{
+        QStringLiteral("mp4"), QStringLiteral("mkv"), QStringLiteral("avi"), QStringLiteral("webm"),
+        QStringLiteral("mov"), QStringLiteral("m4v"), QStringLiteral("ts")};
+    return kExtensions.contains(name.section(u'.', -1).toLower());
+}
+
+// The temporary URL and size of a `g` answer; the name comes from the node's attributes.
+std::expected<RemoteFile, ApiFailure>
+remoteFile(const QJsonObject& object, const QString& attributes, const platform::AesBlock& key) {
+    const QUrl download(object.value(QLatin1StringView("g")).toString(), QUrl::StrictMode);
+    const auto size = object.value(QLatin1StringView("s")).toInteger(-1);
+    // The bytes are encrypted and MAC-checked, so plain HTTP mirrors are acceptable.
+    if ((download.scheme() != u"https" && download.scheme() != u"http") || size < 0) {
+        return std::unexpected(ApiFailure{.kind = ApiFailure::Kind::Protocol,
+                                          .message = QStringLiteral("unexpected answer")});
+    }
+    return RemoteFile{
+        .url = download, .size = size, .name = decryptFileName(attributes.toLatin1(), key)};
+}
+
+struct TransferNode {
+    FileLink link;
+    QString attributes;
+    QString name;
+};
+
 platform::AesBlock chunkIv(const std::array<std::uint8_t, 8>& nonce) {
     platform::AesBlock iv{};
     std::ranges::copy(nonce, iv.begin());
@@ -121,19 +164,22 @@ std::optional<FileLink> parseFileLink(const QUrl& url) {
     if (!raw || raw->size() != 32) {
         return std::nullopt;
     }
-    FileLink link;
-    link.handle = handle;
-    std::array<std::uint32_t, 8> words{};
-    for (std::size_t i = 0; i < words.size(); ++i) {
-        words[i] = readWord(*raw, static_cast<qsizetype>(i * 4));
+    return linkFromKey(handle, *raw);
+}
+
+std::optional<QString> parseTransferLink(const QUrl& url) {
+    const auto host = url.host().toLower();
+    if (url.scheme() != u"https" || (host != u"transfer.it" && host != u"www.transfer.it") ||
+        !url.path().startsWith(u"/t/")) {
+        return std::nullopt;
     }
-    for (std::size_t i = 0; i < 4; ++i) {
-        writeWord(link.key.data() + i * 4, words[i] ^ words[i + 4]);
+    const auto id = url.path().mid(3);
+    if (id.size() != 12 || !std::ranges::all_of(id, [](QChar ch) {
+            return ch.isLetterOrNumber() && ch.unicode() < 128;
+        })) {
+        return std::nullopt;
     }
-    writeWord(link.nonce.data(), words[4]);
-    writeWord(link.nonce.data() + 4, words[5]);
-    link.metaMac = {words[6], words[7]};
-    return link;
+    return id;
 }
 
 QString decryptFileName(const QByteArray& attributes_base64url, const platform::AesBlock& key) {
@@ -255,89 +301,155 @@ Api::Api(QNetworkAccessManager& network, QObject* parent, QUrl endpoint)
       sequence_(QRandomGenerator::global()->bounded(1'000'000'000)) {}
 
 void Api::file(const FileLink& link, QObject* context, Callback done) {
-    request(link, context, std::move(done), 1);
+    command(
+        {},
+        QJsonObject{{QStringLiteral("a"), QStringLiteral("g")},
+                    {QStringLiteral("g"), 1},
+                    {QStringLiteral("ssl"), 2},
+                    {QStringLiteral("p"), link.handle}},
+        context,
+        [key = link.key,
+         done = std::move(done)](const std::expected<QJsonObject, ApiFailure>& answer) {
+            if (!answer) {
+                done(std::unexpected(answer.error()));
+                return;
+            }
+            done(remoteFile(*answer, answer->value(QLatin1StringView("at")).toString(), key));
+        },
+        1);
 }
 
-void Api::request(const FileLink& link, QObject* context, Callback done, int attempt) {
+void Api::transfer(const QString& transfer_id, QObject* context, TransferCallback done) {
+    const QUrlQuery scope{{QStringLiteral("x"), transfer_id}};
+    command(
+        scope,
+        QJsonObject{{QStringLiteral("a"), QStringLiteral("f")},
+                    {QStringLiteral("c"), 1},
+                    {QStringLiteral("r"), 1}},
+        context,
+        [this, scope, context,
+         done = std::move(done)](const std::expected<QJsonObject, ApiFailure>& listing) mutable {
+            if (!listing) {
+                done(std::unexpected(listing.error()));
+                return;
+            }
+            // The single video of the transfer; several of them are not guessed between.
+            std::vector<TransferNode> files;
+            for (const auto& value : listing->value(QLatin1StringView("f")).toArray()) {
+                const auto node = value.toObject();
+                const auto handle = node.value(QLatin1StringView("h")).toString();
+                const auto raw =
+                    fromBase64Url(node.value(QLatin1StringView("k")).toString().toLatin1());
+                if (node.value(QLatin1StringView("t")).toInt(-1) != 0 || !isHandle(handle) ||
+                    !raw || raw->size() != 32) {
+                    continue;
+                }
+                TransferNode entry{.link = linkFromKey(handle, *raw),
+                                   .attributes = node.value(QLatin1StringView("a")).toString()};
+                entry.name = decryptFileName(entry.attributes.toLatin1(), entry.link.key);
+                files.push_back(std::move(entry));
+            }
+            if (files.size() > 1) {
+                std::erase_if(files,
+                              [](const TransferNode& node) { return !isVideoName(node.name); });
+            }
+            if (files.size() != 1) {
+                done(std::unexpected(ApiFailure{.kind = ApiFailure::Kind::Protocol,
+                                                .message = QStringLiteral("no single video")}));
+                return;
+            }
+            auto node = std::move(files.front());
+            command(
+                scope,
+                QJsonObject{{QStringLiteral("a"), QStringLiteral("g")},
+                            {QStringLiteral("n"), node.link.handle},
+                            {QStringLiteral("g"), 1},
+                            {QStringLiteral("ssl"), 1}},
+                context,
+                [node,
+                 done = std::move(done)](const std::expected<QJsonObject, ApiFailure>& answer) {
+                    if (!answer) {
+                        done(std::unexpected(answer.error()));
+                        return;
+                    }
+                    auto file = remoteFile(*answer, node.attributes, node.link.key);
+                    if (!file) {
+                        done(std::unexpected(file.error()));
+                        return;
+                    }
+                    done(TransferFile{.file = std::move(*file), .link = node.link});
+                },
+                1);
+        },
+        1);
+}
+
+void Api::command(QUrlQuery query, QJsonObject body, QObject* context, CommandCallback done,
+                  int attempt) {
     QUrl url = endpoint_;
-    url.setQuery(QUrlQuery{{QStringLiteral("id"), QString::number(++sequence_)}});
+    query.addQueryItem(QStringLiteral("id"), QString::number(++sequence_));
+    url.setQuery(query);
     QNetworkRequest http(url);
     http.setHeader(QNetworkRequest::ContentTypeHeader, QByteArrayLiteral("application/json"));
     http.setTransferTimeout(30'000);
-    const QJsonArray body{QJsonObject{{QStringLiteral("a"), QStringLiteral("g")},
-                                      {QStringLiteral("g"), 1},
-                                      {QStringLiteral("ssl"), 2},
-                                      {QStringLiteral("p"), link.handle}}};
-    auto* reply = network_.post(http, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    auto* reply =
+        network_.post(http, QJsonDocument(QJsonArray{body}).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
-    connect(
-        reply, &QNetworkReply::finished, context,
-        [this, reply, link, context, done = std::move(done), attempt]() mutable {
-            const auto retry = [&](ApiFailure failure) {
-                if (attempt >= kMaxAttempts) {
-                    done(std::unexpected(std::move(failure)));
+    connect(reply, &QNetworkReply::finished, context,
+            [this, reply, query, body, context, done = std::move(done), attempt]() mutable {
+                const auto retry = [&](ApiFailure failure) {
+                    if (attempt >= kMaxAttempts) {
+                        done(std::unexpected(std::move(failure)));
+                        return;
+                    }
+                    QTimer::singleShot(
+                        1000 * (1 << (attempt - 1)), context,
+                        [this, query, body, context, done = std::move(done), attempt] {
+                            this->command(query, body, context, done, attempt + 1);
+                        });
+                };
+                if (reply->error() != QNetworkReply::NoError) {
+                    const int status =
+                        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                    retry({.kind = status >= 500 ? ApiFailure::Kind::Unavailable
+                                                 : ApiFailure::Kind::Network,
+                           .message = reply->errorString()});
                     return;
                 }
-                QTimer::singleShot(1000 * (1 << (attempt - 1)), context,
-                                   [this, link, context, done = std::move(done), attempt] {
-                                       this->request(link, context, done, attempt + 1);
-                                   });
-            };
-            if (reply->error() != QNetworkReply::NoError) {
-                const int status =
-                    reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-                retry({.kind = status >= 500 ? ApiFailure::Kind::Unavailable
-                                             : ApiFailure::Kind::Network,
-                       .message = reply->errorString()});
-                return;
-            }
-            const auto raw = reply->read(kMaxApiBody);
-            const auto document = QJsonDocument::fromJson(raw);
-            QJsonValue answer;
-            if (document.isArray() && !document.array().isEmpty()) {
-                answer = document.array().first();
-            } else if (const auto number = raw.trimmed().toInt();
-                       raw.trimmed() == QByteArray::number(number)) {
-                answer = number;
-            }
-            if (answer.isDouble()) {
-                auto failure = failureFor(answer.toInt());
-                if (failure.kind == ApiFailure::Kind::Unavailable) {
-                    retry(std::move(failure));
-                } else {
-                    done(std::unexpected(std::move(failure)));
+                const auto raw = reply->read(kMaxApiBody);
+                const auto document = QJsonDocument::fromJson(raw);
+                QJsonValue answer;
+                if (document.isArray() && !document.array().isEmpty()) {
+                    answer = document.array().first();
+                } else if (const auto number = raw.trimmed().toInt();
+                           raw.trimmed() == QByteArray::number(number)) {
+                    answer = number;
                 }
-                return;
-            }
-            const auto object = answer.toObject();
-            // A file the IP may not download now comes as {"e": -17, "tl": seconds, ...}.
-            if (const auto error = object.value(QLatin1StringView("e")); error.isDouble()) {
-                auto failure = failureFor(error.toInt());
-                if (failure.kind == ApiFailure::Kind::OverQuota) {
-                    failure.timeLeft = timeLeftFrom(object.value(QLatin1StringView("tl")));
+                if (answer.isDouble()) {
+                    auto failure = failureFor(answer.toInt());
+                    if (failure.kind == ApiFailure::Kind::Unavailable) {
+                        retry(std::move(failure));
+                    } else {
+                        done(std::unexpected(std::move(failure)));
+                    }
+                    return;
                 }
-                if (failure.kind == ApiFailure::Kind::Unavailable) {
-                    retry(std::move(failure));
-                } else {
-                    done(std::unexpected(std::move(failure)));
+                const auto object = answer.toObject();
+                // A file the IP may not download now comes as {"e": -17, "tl": seconds, ...}.
+                if (const auto error = object.value(QLatin1StringView("e")); error.isDouble()) {
+                    auto failure = failureFor(error.toInt());
+                    if (failure.kind == ApiFailure::Kind::OverQuota) {
+                        failure.timeLeft = timeLeftFrom(object.value(QLatin1StringView("tl")));
+                    }
+                    if (failure.kind == ApiFailure::Kind::Unavailable) {
+                        retry(std::move(failure));
+                    } else {
+                        done(std::unexpected(std::move(failure)));
+                    }
+                    return;
                 }
-                return;
-            }
-            const QUrl download(object.value(QLatin1StringView("g")).toString(), QUrl::StrictMode);
-            const auto size = object.value(QLatin1StringView("s")).toInteger(-1);
-            // The bytes are encrypted and MAC-checked, so plain HTTP mirrors are acceptable.
-            if ((download.scheme() != u"https" && download.scheme() != u"http") || size < 0) {
-                done(std::unexpected(ApiFailure{.kind = ApiFailure::Kind::Protocol,
-                                                .message = QStringLiteral("unexpected answer")}));
-                return;
-            }
-            done(RemoteFile{
-                .url = download,
-                .size = size,
-                .name = decryptFileName(object.value(QLatin1StringView("at")).toString().toLatin1(),
-                                        link.key),
+                done(object);
             });
-        });
 }
 
 void Api::quotaTimeLeft(const QUrl& url, QObject* context,

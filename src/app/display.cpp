@@ -209,7 +209,9 @@ QString download(const downloads::Task& task) {
     case TaskState::Queued:
         return QStringLiteral("En cola");
     case TaskState::Resolving:
-        return QStringLiteral("Buscando el archivo…");
+        // A hand-over waits for the JDownloader AnimeHub started.
+        return task.enginePhase == u"launching" ? QStringLiteral("Abriendo JDownloader…")
+                                                : QStringLiteral("Buscando el archivo…");
     case TaskState::Downloading: {
         QStringList parts;
         if (!size.isEmpty()) {

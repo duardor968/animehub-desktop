@@ -70,6 +70,97 @@ private slots:
             !mega::parseFileLink(QUrl(QStringLiteral("https://mega.nz/folder/STRBjZya#") + key)));
     }
 
+    void parsesTransferLinks() {
+        QCOMPARE(
+            mega::parseTransferLink(QUrl(QStringLiteral("https://transfer.it/t/HJGrbGh1nZzI"))),
+            std::optional(QStringLiteral("HJGrbGh1nZzI")));
+        QVERIFY(!mega::parseTransferLink(QUrl(QStringLiteral("https://transfer.it/t/short"))));
+        QVERIFY(
+            !mega::parseTransferLink(QUrl(QStringLiteral("http://transfer.it/t/HJGrbGh1nZzI"))));
+        QVERIFY(!mega::parseTransferLink(QUrl(QStringLiteral("https://evil.it/t/HJGrbGh1nZzI"))));
+        QVERIFY(
+            !mega::parseTransferLink(QUrl(QStringLiteral("https://transfer.it/x/HJGrbGh1nZzI"))));
+    }
+
+    // The listing and the download URL go to the transfer's scope (`x=`), the key is the node's
+    // own, and a transfer with several videos is not guessed.
+    void listsATransfer() {
+        HttpTestServer server;
+        QVERIFY(server.listen());
+        const auto attributes = vectors().value(u"attributes").toString();
+        const auto key = vectors().value(u"linkKey").toString();
+        QStringList queries;
+        QStringList commands;
+        bool two_videos = false;
+        server.route("POST", "/cs", [&](const HttpTestServer::Request& request) {
+            queries.append(QString::fromLatin1(request.query));
+            const auto body = QJsonDocument::fromJson(request.body).array().first().toObject();
+            commands.append(body.value(u"a").toString());
+            if (body.value(u"a").toString() == u"f") {
+                QJsonArray nodes{QJsonObject{{QStringLiteral("h"), QStringLiteral("folder01")},
+                                             {QStringLiteral("t"), 1}},
+                                 QJsonObject{{QStringLiteral("h"), QStringLiteral("filenode")},
+                                             {QStringLiteral("t"), 0},
+                                             {QStringLiteral("s"), 3145733},
+                                             {QStringLiteral("a"), attributes},
+                                             {QStringLiteral("k"), key}}};
+                if (two_videos) {
+                    nodes.append(QJsonObject{{QStringLiteral("h"), QStringLiteral("filenod2")},
+                                             {QStringLiteral("t"), 0},
+                                             {QStringLiteral("s"), 3145733},
+                                             {QStringLiteral("a"), attributes},
+                                             {QStringLiteral("k"), key}});
+                }
+                return HttpTestServer::Response{
+                    .body = QJsonDocument(QJsonArray{QJsonObject{{QStringLiteral("f"), nodes}}})
+                                .toJson()};
+            }
+            if (body.value(u"n").toString() != u"filenode") {
+                return HttpTestServer::Response{.body = "[-9]"};
+            }
+            return HttpTestServer::Response{
+                .body = "[{\"s\":3145733,\"g\":\"https://gfs.example/dl/abc\"}]"};
+        });
+        QNetworkAccessManager network;
+        mega::Api api(network, nullptr, server.url(QStringLiteral("/cs")));
+        std::optional<std::expected<mega::TransferFile, mega::ApiFailure>> result;
+        api.transfer(QStringLiteral("HJGrbGh1nZzI"), this,
+                     [&](const auto& answer) { result = answer; });
+        QTRY_VERIFY_WITH_TIMEOUT(result.has_value(), 5000);
+        QVERIFY(*result);
+        QCOMPARE((*result)->file.size, 3145733);
+        QCOMPARE((*result)->file.name, QStringLiteral("Sousou no Frieren - 01.mp4"));
+        QCOMPARE((*result)->file.url.host(), QStringLiteral("gfs.example"));
+        QCOMPARE((*result)->link.handle, QStringLiteral("filenode"));
+        QCOMPARE((*result)->link.key, mega::parseFileLink(linkUrl())->key);
+        QCOMPARE((*result)->link.metaMac, mega::parseFileLink(linkUrl())->metaMac);
+        QCOMPARE(commands, QStringList({QStringLiteral("f"), QStringLiteral("g")}));
+        for (const auto& query : queries) {
+            QVERIFY2(query.contains(u"x=HJGrbGh1nZzI"), qPrintable(query));
+            QVERIFY(!query.contains(u"p="));
+        }
+
+        two_videos = true;
+        result.reset();
+        api.transfer(QStringLiteral("HJGrbGh1nZzI"), this,
+                     [&](const auto& answer) { result = answer; });
+        QTRY_VERIFY_WITH_TIMEOUT(result.has_value(), 5000);
+        QVERIFY(!*result);
+        QCOMPARE(result->error().kind, mega::ApiFailure::Kind::Protocol);
+
+        // Over quota, as for a MEGA file.
+        server.route("POST", "/cs", [](const HttpTestServer::Request&) {
+            return HttpTestServer::Response{.body = "[{\"e\":-17,\"tl\":600}]"};
+        });
+        result.reset();
+        api.transfer(QStringLiteral("HJGrbGh1nZzI"), this,
+                     [&](const auto& answer) { result = answer; });
+        QTRY_VERIFY_WITH_TIMEOUT(result.has_value(), 5000);
+        QVERIFY(!*result);
+        QCOMPARE(result->error().kind, mega::ApiFailure::Kind::OverQuota);
+        QCOMPARE(result->error().timeLeft, std::optional(std::chrono::seconds(600)));
+    }
+
     void followsTheChunkLayout() {
         QCOMPARE(mega::chunkLength(0), 128 * 1024);
         QCOMPARE(mega::chunkLength(7), 1024 * 1024);

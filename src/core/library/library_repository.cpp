@@ -1,5 +1,8 @@
 #include "library_repository.h"
 
+#include "util/file_names.h"
+#include "work_folders.h"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QHash>
@@ -1047,6 +1050,54 @@ Stored<void> LibraryRepository::importEpisodeFile(const QString& slug, double nu
         }
         return {};
     });
+}
+
+Stored<QString> LibraryRepository::workFolder(const QString& directory, const QString& slug,
+                                              const QString& title) const {
+    return library::workFolder(database_, directory, slug, title);
+}
+
+Stored<int> LibraryRepository::relocateFiles(const QString& from, const QString& to) {
+    const auto source = normalizedPath(from);
+    const auto target = normalizedPath(to);
+    const auto moved = [&](const QString& path) {
+        const auto clean = normalizedPath(path);
+        return util::isInside(clean, source) ? target + clean.mid(source.size()) : QString();
+    };
+    auto files = database_.run(QStringLiteral("SELECT id, path FROM media_file"));
+    if (!files)
+        return std::unexpected(files.error());
+    QList<std::pair<qint64, QString>> renamed;
+    while (files->next()) {
+        if (const auto path = moved(files->value(1).toString()); !path.isEmpty())
+            renamed.append({files->value(0).toLongLong(), path});
+    }
+    files->finish();
+    for (const auto& [id, path] : renamed) {
+        auto updated = database_.run(
+            QStringLiteral("UPDATE media_file SET path = ?, path_key = ? WHERE id = ?"),
+            {path, pathKey(path), id});
+        if (!updated)
+            return std::unexpected(updated.error());
+    }
+    auto episodes = database_.run(
+        QStringLiteral("SELECT slug, number, file_path FROM episode WHERE file_path IS NOT NULL"));
+    if (!episodes)
+        return std::unexpected(episodes.error());
+    QList<std::tuple<QString, double, QString>> legacy;
+    while (episodes->next()) {
+        if (const auto path = moved(episodes->value(2).toString()); !path.isEmpty())
+            legacy.append({episodes->value(0).toString(), episodes->value(1).toDouble(), path});
+    }
+    episodes->finish();
+    for (const auto& [slug, number, path] : legacy) {
+        auto updated = database_.run(
+            QStringLiteral("UPDATE episode SET file_path = ? WHERE slug = ? AND number = ?"),
+            {path, slug, number});
+        if (!updated)
+            return std::unexpected(updated.error());
+    }
+    return static_cast<int>(renamed.size());
 }
 
 } // namespace animehub::library

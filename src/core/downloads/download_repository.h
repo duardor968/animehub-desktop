@@ -40,6 +40,9 @@ public:
                                                         api::Audio audio) const;
     // After a restart nothing is transferring: those tasks go back to the queue.
     Stored<int> requeueInterrupted();
+    // Target and engine paths inside folder `from` move to `to`, finished tasks too; returns how
+    // many tasks. Runs inside the caller's transaction.
+    Stored<int> relocate(const QString& from, const QString& to);
 
 private:
     storage::Database& database_;

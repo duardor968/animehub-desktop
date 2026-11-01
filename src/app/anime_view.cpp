@@ -2,7 +2,6 @@
 
 #include "display.h"
 #include "shell.h"
-#include "util/file_names.h"
 
 #include <QDesktopServices>
 #include <QDir>
@@ -601,11 +600,11 @@ bool AnimeView::refreshing() const {
     return fetching_ || services_.library.isRefreshing(slug_);
 }
 
-// The anime's own folder, named by its slug as the queue names it.
+// The anime's own folder, where the queue puts its episodes.
 QString AnimeView::folderPath() const {
-    return QFileInfo(
-               util::downloadBasePath(services_.settings.downloadDirectory(), slug_, title(), 1))
-        .path();
+    return services_.library.repository()
+        .workFolder(services_.settings.downloadDirectory(), slug_, title())
+        .value_or(QString());
 }
 
 QString AnimeView::downloadFolder() const {
@@ -1300,7 +1299,8 @@ void AnimeView::showFile(double number) {
 }
 
 bool AnimeView::hasFolder() const {
-    return !slug_.isEmpty() && QDir(folderPath()).exists();
+    const auto folder = slug_.isEmpty() ? QString() : folderPath();
+    return !folder.isEmpty() && QDir(folder).exists();
 }
 
 void AnimeView::openFolder() {

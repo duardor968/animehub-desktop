@@ -1,6 +1,7 @@
 #ifndef ANIMEHUB_APP_DOWNLOADS_VIEW_H
 #define ANIMEHUB_APP_DOWNLOADS_VIEW_H
 
+#include "app_settings.h"
 #include "download_series_model.h"
 #include "downloads/download_manager.h"
 #include "library/library_service.h"
@@ -59,6 +60,15 @@ class DownloadsView final : public QObject {
     Q_PROPERTY(QString peakText READ peakText NOTIFY speedChanged)
     Q_PROPERTY(QString totalText READ totalText NOTIFY speedChanged)
 
+    // After an episode that none of the enabled servers has, once per session each and only while
+    // the window shows: "jdownloader" offers JDownloader for the servers only it downloads,
+    // "servers" turning on the ones that have it; empty when there is none.
+    Q_PROPERTY(QString offer READ offer NOTIFY offerChanged)
+    Q_PROPERTY(QString offerTitle READ offerTitle NOTIFY offerChanged)
+    Q_PROPERTY(QString offerText READ offerText NOTIFY offerChanged)
+    // Whether the window is on screen; set by the window.
+    Q_PROPERTY(bool windowShown READ windowShown WRITE setWindowShown NOTIFY windowShownChanged)
+
 public:
     enum class Mode {
         Idle,    // nothing in line
@@ -68,9 +78,10 @@ public:
         Failed,  // only failed downloads are left
     };
     Q_ENUM(Mode)
+    enum class Offer { None, JDownloader, Servers };
 
     DownloadsView(downloads::DownloadManager& manager, library::LibraryService& library,
-                  playback::Player& player, QObject* parent = nullptr);
+                  playback::Player& player, AppSettings& settings, QObject* parent = nullptr);
 
     [[nodiscard]] DownloadSeriesModel* queue() {
         return &queue_;
@@ -152,6 +163,28 @@ public:
     [[nodiscard]] QString peakText() const;
     [[nodiscard]] QString totalText() const;
 
+    [[nodiscard]] QString offer() const;
+    [[nodiscard]] QString offerTitle() const {
+        return offer_title_;
+    }
+    [[nodiscard]] QString offerText() const {
+        return offer_text_;
+    }
+    [[nodiscard]] bool windowShown() const {
+        return window_shown_;
+    }
+    void setWindowShown(bool shown);
+    // Closes the offer; `never` keeps it from coming back.
+    Q_INVOKABLE void dismissOffer(bool never);
+    // "servers" turns them on and tries the episodes again; "jdownloader" only closes it, as the
+    // window goes on to JDownloader's setup.
+    Q_INVOKABLE void acceptOffer(bool never);
+    // JDownloader was just connected: the episodes only it can download try again.
+    void retryWithJdownloader();
+    // A capture shows an offer with no download behind it.
+    void previewOffer(Offer kind, const QString& title, double number,
+                      const QList<api::Provider>& servers);
+
     // Resuming all brings back only what pausing all stopped; what the user paused on its own
     // waits for them (DownloadManager::resumeAll).
     Q_INVOKABLE void pauseAll();
@@ -194,6 +227,8 @@ signals:
     void summaryChanged();
     void speedChanged();
     void message(const QString& text, bool problem);
+    void offerChanged();
+    void windowShownChanged();
 
 private:
     // What the page needs from the library about a series, read once per change.
@@ -243,9 +278,24 @@ private:
     void forgetCancelled(const QString& slug);
     [[nodiscard]] QList<downloads::Task> tasksOf(const QString& slug) const;
 
+    // The failed episodes an offer of that kind is about, and the servers it names.
+    struct OfferMatch {
+        QList<downloads::Task> tasks;
+        QList<api::Provider> servers;
+    };
+    [[nodiscard]] std::pair<Offer, QList<api::Provider>>
+    offerFor(const downloads::Task& task) const;
+    [[nodiscard]] OfferMatch offerMatch(Offer kind) const;
+    [[nodiscard]] bool offerHidden(Offer kind) const;
+    void considerOffer();
+    void updateOffer();
+    void presentOffer(Offer kind, const OfferMatch& match);
+    void closeOffer(bool never);
+
     downloads::DownloadManager& manager_;
     library::LibraryService& library_;
     playback::Player& player_;
+    AppSettings& settings_;
     DownloadSeriesModel queue_;
     DownloadSeriesModel completed_;
     DownloadSeriesModel current_;
@@ -267,6 +317,13 @@ private:
     qint64 peak_ = 0;
     qint64 session_bytes_ = 0;
     QHash<qint64, Seen> seen_;
+
+    Offer offer_ = Offer::None;
+    QString offer_title_;
+    QString offer_text_;
+    QList<Offer> offered_; // shown this session
+    bool offer_preview_ = false;
+    bool window_shown_ = false;
 };
 
 } // namespace animehub::app

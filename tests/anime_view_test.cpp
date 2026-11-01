@@ -499,13 +499,19 @@ private slots:
         QVERIFY(f.view->problem().isEmpty()); // its own detail failed, but its episodes are here
     }
 
-    // Downloads go to the anime's own folder, named by its slug as the queue names it.
-    void folderIsTheSlugs() {
+    // Downloads go to the anime's own folder: named by its title, or the one its files are in.
+    void folderIsTheWorks() {
         Fixture f;
         QVERIFY(f.open(api::AnimeStatus::Finished));
         f.show();
         QCOMPARE(f.view->downloadFolder(),
-                 QDir::toNativeSeparators(f.root.filePath(QStringLiteral("Anime/a"))));
+                 QDir::toNativeSeparators(f.root.filePath(QStringLiteral("Anime/Anime"))));
+        QVERIFY(!f.view->hasFolder());
+        const auto kept = f.root.filePath(QStringLiteral("Anime/a"));
+        QVERIFY(QDir().mkpath(kept));
+        QVERIFY(f.repo->setEpisodeFile(QStringLiteral("a"), 1, kept + QStringLiteral("/1.mkv"), 1));
+        QCOMPARE(f.view->downloadFolder(), QDir::toNativeSeparators(kept));
+        QVERIFY(f.view->hasFolder());
     }
 
     // One episode is named, several are counted; the bar's figures say only what applies.

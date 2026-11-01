@@ -22,6 +22,7 @@ Rectangle {
 
     readonly property int mode: downloads.headerMode
     readonly property bool idle: mode === DownloadsView.Idle
+    readonly property bool busy: mode === DownloadsView.Active && downloads.headerProgress === 0
     readonly property bool wide: width >= 1280
     // The corner's line: at rest, the whole header.
     readonly property int topRoom: pageActions.y + pageActions.height + 16
@@ -264,11 +265,20 @@ Rectangle {
             Item { Layout.fillWidth: true }
         }
 
+        // Nothing measured yet (looking for the file, opening JDownloader): a moving bar.
         ProgressLine {
             Layout.fillWidth: true
             Layout.topMargin: 12
             implicitHeight: 4
+            visible: !root.busy
             value: root.downloads.headerProgress
+        }
+        ProgressBar {
+            Layout.fillWidth: true
+            Layout.topMargin: 12
+            visible: root.busy
+            indeterminate: true
+            Accessible.name: root.downloads.headerDetail
         }
 
         Label {

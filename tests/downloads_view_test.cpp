@@ -1,20 +1,47 @@
 #include "app/display.h"
 #include "app/downloads_view.h"
+#include "http_test_server.h"
+
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLocale>
 #include <QNetworkAccessManager>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 
 using namespace animehub;
+using animehub::testing::HttpTestServer;
 
 namespace {
 
-// A queue, a library and the page over them, with nothing that reaches the network: the API
-// and JDownloader point at a closed port and aria2 does not exist.
+// What the API answers when asked for the episode's sources: links of these servers.
+QByteArray resolution(const QStringList& providers) {
+    QJsonArray links;
+    for (const auto& provider : providers) {
+        links.append(QJsonObject{{QStringLiteral("provider"), provider},
+                                 {QStringLiteral("url"), QStringLiteral("https://host.test/x")}});
+    }
+    const QJsonObject episode{{QStringLiteral("episodeNumber"), 1},
+                              {QStringLiteral("audio"), QStringLiteral("SUB")},
+                              {QStringLiteral("errorCode"), QJsonValue::Null},
+                              {QStringLiteral("links"), links}};
+    return QJsonDocument(
+               QJsonObject{{QStringLiteral("data"),
+                            QJsonObject{{QStringLiteral("packageName"), QStringLiteral("A")},
+                                        {QStringLiteral("episodes"), QJsonArray{episode}}}}})
+        .toJson(QJsonDocument::Compact);
+}
+
+// A queue, a library and the page over them. Nothing leaves the computer: the API is a local
+// test server, JDownloader points at a closed port and aria2 does not exist, so only
+// JDownloader's tasks look for their sources.
 struct Fixture {
     QTemporaryDir root;
+    HttpTestServer server;
     std::unique_ptr<storage::Database> db;
     std::unique_ptr<library::LibraryRepository> repo;
     std::unique_ptr<downloads::DownloadRepository> queue;
@@ -26,9 +53,26 @@ struct Fixture {
     std::unique_ptr<downloads::pixeldrain::Api> pixeldrain;
     std::unique_ptr<downloads::DownloadManager> manager;
     std::unique_ptr<playback::Player> player;
+    std::unique_ptr<app::AppSettings> settings;
     library::AnimeRecord anime;
+    // The servers the downloads use, as AppSettings would give them.
+    QList<api::Provider> providers{api::Provider::Mega, api::Provider::Pixeldrain};
+
+    // The episode's sources are on these servers.
+    void serve(const QStringList& servers) {
+        server.route("POST", "/api/v1/anime/a/downloads/resolve",
+                     [body = resolution(servers)](const HttpTestServer::Request&) {
+                         return HttpTestServer::Response{.body = body};
+                     });
+    }
+    [[nodiscard]] int resolves() const {
+        return server.count("/api/v1/anime/a/downloads/resolve");
+    }
 
     bool open() {
+        if (!server.listen()) {
+            return false;
+        }
         auto opened = storage::Database::open(root.filePath(QStringLiteral("library.sqlite3")));
         if (!opened) {
             return false;
@@ -37,7 +81,7 @@ struct Fixture {
         repo = std::make_unique<library::LibraryRepository>(*db);
         queue = std::make_unique<downloads::DownloadRepository>(*db);
         api = std::make_unique<api::ApiClient>(
-            network, api::ApiClient::Options{.baseUrl = QUrl(QStringLiteral("http://127.0.0.1:1/")),
+            network, api::ApiClient::Options{.baseUrl = server.url(QStringLiteral("/api/v1/")),
                                              .cacheDirectory = root.path()});
         library = std::make_unique<library::LibraryService>(*repo, *api);
         aria = std::make_unique<downloads::Aria2>(
@@ -46,9 +90,11 @@ struct Fixture {
         pixeldrain = std::make_unique<downloads::pixeldrain::Api>(network);
         manager = std::make_unique<downloads::DownloadManager>(
             downloads::DownloadManager::Services{*api, *aria, *mega, *pixeldrain, *queue, *repo},
-            [] { return downloads::DownloadSettings{}; });
+            [this] { return downloads::DownloadSettings{.providers = providers}; });
         player = std::make_unique<playback::Player>(
             *repo, [] { return playback::PlayerSettings{}; }, [](const QString&) { return false; });
+        settings = std::make_unique<app::AppSettings>(root.filePath(QStringLiteral("settings.ini")),
+                                                      root.filePath(QStringLiteral("Anime")));
         anime.slug = QStringLiteral("a");
         anime.title = QStringLiteral("A");
         return static_cast<bool>(repo->saveSnapshot(anime));
@@ -138,7 +184,7 @@ private slots:
         jd->bytesTotal = 100;
         QVERIFY(f.queue->save(*jd));
         f.manager->start(false); // No aria2, API or JD traffic.
-        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
         // JDownloader has its task: only the paused native one is AnimeHub's to act on.
         QVERIFY(!view.canPauseAll());
         QVERIFY(view.canResumeAll());
@@ -158,8 +204,6 @@ private slots:
         // The engine and the destination, on one line, only where JDownloader takes part.
         const auto line = QStringLiteral("JDownloader · ") +
                           QDir::toNativeSeparators(f.root.filePath(QStringLiteral("Anime/a")));
-        QCOMPARE(series.episodes[0].engineLine, QString());
-        QCOMPARE(series.episodes[1].engineLine, line);
         QCOMPARE(series.engineLine, line);
         for (const auto& episode : series.episodes) {
             QVERIFY(!episode.detail.contains(QStringLiteral("Incorporad")));
@@ -179,11 +223,11 @@ private slots:
             "JDownloader no responde en este PC. Activa su API local o usa MyJDownloader.");
         QVERIFY(f.queue->save(*jd));
         f.manager->start(false);
-        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
         const auto& episode = view.current()->rows().first().episodes.first();
         QCOMPARE(episode.detail, jd->issueDetail);
         QVERIFY(episode.canRetry);
-        QCOMPARE(episode.engineLine,
+        QCOMPARE(view.current()->rows().first().engineLine,
                  QStringLiteral("JDownloader · ") +
                      QDir::toNativeSeparators(f.root.filePath(QStringLiteral("Anime/a"))));
     }
@@ -193,10 +237,9 @@ private slots:
         QVERIFY(f.open());
         QVERIFY(f.add(1, downloads::TaskState::Paused));
         f.manager->start(false);
-        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
         const auto& series = view.current()->rows().first();
         QCOMPARE(series.engineLine, QString());
-        QCOMPARE(series.episodes.first().engineLine, QString());
     }
 
     // "Reanudar todo" brings back only what "Pausar todo" stopped; what the user paused on
@@ -208,7 +251,7 @@ private slots:
         const auto paused = f.add(2, downloads::TaskState::Paused);
         QVERIFY(queued && paused);
         f.manager->start(); // aria2 never starts, so the queued one waits for it
-        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
         const auto state = [&](qint64 id) { return f.manager->task(id)->state; };
         QCOMPARE(state(queued->id), downloads::TaskState::Queued);
         QTRY_VERIFY(view.canPauseAll());
@@ -237,7 +280,7 @@ private slots:
         QVERIFY(f.addOnDisk(1, 100'000'000));
         QVERIFY(f.addOnDisk(2, 186'000'000));
         f.manager->start(false);
-        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
         QCOMPARE(view.completed()->rows().size(), 1);
         const auto& series = view.completed()->rows().first();
         // One date format on the page: "31 oct", as every date it shows.
@@ -262,7 +305,7 @@ private slots:
         QVERIFY(QFile::remove(first->targetPath) && QFile::remove(second->targetPath));
         QVERIFY(QDir(QFileInfo(first->targetPath).absolutePath()).isEmpty());
         f.manager->start(false);
-        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
         QCOMPARE(view.completed()->rows().size(), 1);
         const auto& series = view.completed()->rows().first();
         QVERIFY(series.filesGone);
@@ -286,7 +329,7 @@ private slots:
         waiting->retryAt = QDateTime::currentDateTimeUtc().addSecs(3600);
         QVERIFY(f.queue->save(*waiting));
         f.manager->start(false);
-        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
         const auto quota = f.manager->megaQuota();
         QVERIFY(quota && quota->known);
         const auto said = QStringLiteral("MEGA llegó a su límite · se libera a las ") +
@@ -333,7 +376,7 @@ private slots:
         const auto quota = wait(QStringLiteral("b"), 1, downloads::TaskIssue::Quota, 3600);
         QVERIFY(own && gone && quota);
         f.manager->start(false);
-        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
         QCOMPARE(view.headerSlug(), QStringLiteral("a"));
         QCOMPARE(view.headerNotice(), QString());
         QCOMPARE(view.headerDetail(), QStringLiteral("Episodio 1 · Se reintenta a las ") +
@@ -362,7 +405,7 @@ private slots:
         QVERIFY(f.queue->save(*running));
         QVERIFY(f.add(3, downloads::TaskState::Failed));
         f.manager->start(false); // the state stays as stored: nothing transfers
-        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
         QVERIFY(view.barVisible());
         QCOMPARE(view.barMode(), app::DownloadsView::Mode::Active);
         QCOMPARE(view.barText(), QStringLiteral("Descargando 2 de 3 · A ep. 2"));
@@ -386,12 +429,106 @@ private slots:
         const auto paused = f.add(2, downloads::TaskState::Paused);
         QVERIFY(queued && paused);
         f.manager->start();
-        app::DownloadsView view(*f.manager, *f.library, *f.player);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
         view.pauseAll();
         f.manager->cancel(queued->id);
         QCOMPARE(f.manager->task(queued->id)->state, downloads::TaskState::Cancelled);
         view.resumeAll();
         QCOMPARE(f.manager->task(paused->id)->state, downloads::TaskState::Queued);
+    }
+
+    // An episode only on servers JDownloader downloads, while it is not used, offers it: only
+    // while the window shows and once a session. Connected, the episode goes again; only on a
+    // server turned off, it offers turning it on, which "No volver a mostrar" keeps away.
+    void anEpisodeNoEnabledServerHasOffersWhatWouldDownloadIt() {
+        Fixture f;
+        QVERIFY(f.open());
+        f.serve({QStringLiteral("MP4UPLOAD"), QStringLiteral("ONE_FICHIER")});
+        const auto task =
+            f.add(1, downloads::TaskState::Queued, downloads::DownloadEngine::JDownloaderLocal);
+        QVERIFY(task);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
+        const auto state = [&] { return f.manager->task(task->id)->state; };
+        f.manager->start();
+        QTRY_COMPARE(state(), downloads::TaskState::Failed);
+        QCOMPARE(f.manager->task(task->id)->issue, downloads::TaskIssue::NoSource);
+        QCOMPARE(view.offer(), QString()); // the window is hidden
+
+        view.setWindowShown(true);
+        QCOMPARE(view.offer(), QStringLiteral("jdownloader"));
+        QCOMPARE(view.offerTitle(), QStringLiteral("A · Episodio 1"));
+        QCOMPARE(view.offerText(),
+                 QStringLiteral("Este episodio solo está en 1Fichier y MP4Upload, "
+                                "que se descargan con JDownloader."));
+        view.dismissOffer(false);
+        QCOMPARE(view.offer(), QString());
+        QVERIFY(!f.settings->jdownloaderOfferHidden());
+
+        // Failing again in the same session, it does not come back.
+        f.manager->retry(task->id);
+        QTRY_COMPARE(f.resolves(), 2);
+        QTRY_COMPARE(state(), downloads::TaskState::Failed);
+        QCOMPARE(view.offer(), QString());
+
+        // The setup connected JDownloader: the episode goes again, and the API looks again.
+        f.settings->setJdownloader(app::AppSettings::JDownloader::Local);
+        QSignalSpy messages(&view, &app::DownloadsView::message);
+        view.retryWithJdownloader();
+        QCOMPARE(messages.size(), 1);
+        QCOMPARE(messages.first().first().toString(),
+                 QStringLiteral("JDownloader conectado · 1 episodio en cola"));
+        QTRY_COMPARE(f.resolves(), 3);
+        QVERIFY(QJsonDocument::fromJson(f.server.requests().last().body)
+                    .object()
+                    .value(u"refresh")
+                    .toBool());
+
+        // With JDownloader, 1Fichier is still off: turning it on is offered.
+        QTRY_COMPARE(state(), downloads::TaskState::Failed);
+        QCOMPARE(view.offer(), QStringLiteral("servers"));
+        QCOMPARE(view.offerText(),
+                 QStringLiteral("Este episodio solo está en 1Fichier, desactivado en Ajustes."));
+        view.acceptOffer(true);
+        QCOMPARE(view.offer(), QString());
+        QVERIFY(!f.settings->disabledProviders().contains(QStringLiteral("ONE_FICHIER")));
+        QTRY_COMPARE(f.resolves(), 4);
+        QVERIFY(QJsonDocument::fromJson(f.server.requests().last().body)
+                    .object()
+                    .value(u"refresh")
+                    .toBool());
+        // Kept for later sessions.
+        QVERIFY(app::AppSettings(f.root.filePath(QStringLiteral("settings.ini")), f.root.path())
+                    .serversOfferHidden());
+    }
+
+    // "No volver a mostrar" holds in a new session; and an episode no longer failed when the
+    // window shows offers nothing.
+    void offersStayAwayWhenHiddenOrNoLongerWanted() {
+        Fixture f;
+        QVERIFY(f.open());
+        f.settings->hideJdownloaderOffer();
+        f.serve({QStringLiteral("MP4UPLOAD")});
+        const auto first =
+            f.add(1, downloads::TaskState::Queued, downloads::DownloadEngine::JDownloaderLocal);
+        QVERIFY(first);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
+        view.setWindowShown(true);
+        f.manager->start();
+        QTRY_COMPARE(f.manager->task(first->id)->state, downloads::TaskState::Failed);
+        QCOMPARE(view.offer(), QString());
+
+        Fixture g;
+        QVERIFY(g.open());
+        g.serve({QStringLiteral("MP4UPLOAD")});
+        const auto second =
+            g.add(1, downloads::TaskState::Queued, downloads::DownloadEngine::JDownloaderLocal);
+        QVERIFY(second);
+        app::DownloadsView later(*g.manager, *g.library, *g.player, *g.settings);
+        g.manager->start();
+        QTRY_COMPARE(g.manager->task(second->id)->state, downloads::TaskState::Failed);
+        g.manager->forget(second->id);
+        later.setWindowShown(true);
+        QCOMPARE(later.offer(), QString());
     }
 };
 QTEST_GUILESS_MAIN(DownloadsViewTest)

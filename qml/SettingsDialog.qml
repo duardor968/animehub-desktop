@@ -276,10 +276,11 @@ ModalDialog {
                         label: "Servidor preferido"
 
                         Choice {
-                            model: ["MEGA", "Pixeldrain"]
-                            currentIndex: dialog.settings.providerOrder[0] === "PIXELDRAIN" ? 1 : 0
-                            onActivated: index => dialog.settings.providerOrder = index === 1
-                                         ? ["PIXELDRAIN", "MEGA"] : ["MEGA", "PIXELDRAIN"]
+                            readonly property var keys: ["MEGA", "PIXELDRAIN", "TRANSFERIT"]
+                            model: ["MEGA", "Pixeldrain", "transfer.it"]
+                            currentIndex: Math.max(0, keys.indexOf(dialog.settings.providerOrder[0]))
+                            onActivated: index => dialog.settings.providerOrder =
+                                         [keys[index]].concat(keys.filter((key, at) => at !== index))
                             Accessible.name: "Servidor preferido"
                         }
                     }
@@ -352,7 +353,7 @@ ModalDialog {
 
                     SettingRow {
                         visible: dialog.jdUsed
-                        label: "MEGA y Pixeldrain"
+                        label: "MEGA, Pixeldrain y transfer.it"
                         info: "AnimeHub los descarga por su cuenta. Con JDownloader, todas las "
                               + "descargas pasan por él."
 
@@ -360,7 +361,7 @@ ModalDialog {
                             model: ["Con AnimeHub", "Con JDownloader"]
                             currentIndex: dialog.settings.preferredJDownloader ? 1 : 0
                             onActivated: index => dialog.settings.preferredJDownloader = index === 1
-                            Accessible.name: "Descargar MEGA y Pixeldrain"
+                            Accessible.name: "Descargar MEGA, Pixeldrain y transfer.it"
                         }
                     }
 

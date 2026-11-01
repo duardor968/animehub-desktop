@@ -15,9 +15,12 @@ namespace {
 
 using namespace std::chrono_literals;
 
-// A JDownloader that AnimeHub started opens its API within this, looked at this often.
-constexpr auto kJdStartTimeout = 120s;
+// A JDownloader that AnimeHub started is looked at this often until its API opens. It is
+// started up to this many times for one hand-over (Services::jdLaunchWait apart): one that was
+// updating itself restarts meanwhile, and a start while it runs does nothing, as it allows one
+// instance.
 constexpr auto kJdStartPoll = 2s;
+constexpr int kJdLaunches = 3;
 
 // The folder JDownloader downloaded into goes once its videos have left it, but only if nothing
 // else is in it: whatever stays (an archive, a file AnimeHub does not know) keeps it, untouched.
@@ -80,10 +83,10 @@ void DownloadManager::jdRequest(qint64 id, const QString& path, const QJsonArray
             }
             if (!result) {
                 const auto failure = result.error();
-                // A closed local JDownloader is started once, in the tray, for the hand-over.
+                // A closed local JDownloader is started, in the tray, for the hand-over.
                 if (tasks_[id].engineJobId <= 0 && failure == myjd::Failure::DeviceOffline &&
                     tasks_[id].engine == DownloadEngine::JDownloaderLocal &&
-                    services_.launchJDownloader && !live_[id].jdLaunched) {
+                    services_.launchJDownloader && live_[id].jdLaunches == 0) {
                     launchJd(id, path, params, done);
                     return;
                 }
@@ -105,18 +108,21 @@ void DownloadManager::jdRequest(qint64 id, const QString& path, const QJsonArray
 
 void DownloadManager::launchJd(qint64 id, const QString& path, const QJsonArray& params,
                                myjd::Client::Callback<QJsonValue> done) {
-    live_[id].jdLaunched = true;
+    auto& live = live_[id];
+    ++live.jdLaunches;
     if (!services_.launchJDownloader()) {
+        live.jdBusy = false;
         unreachedJd(id, myjd::Failure::DeviceOffline);
         return;
     }
-    tasks_[id].enginePhase = u"launching"_s;
-    store(tasks_[id]);
-    live_[id].jdBusy = true;
-    awaitJd(id, live_[id].generation,
-            QDateTime::currentDateTimeUtc().addSecs(
-                std::chrono::duration_cast<std::chrono::seconds>(kJdStartTimeout).count()),
-            path, params, std::move(done));
+    if (tasks_[id].enginePhase != u"launching") {
+        tasks_[id].enginePhase = u"launching"_s;
+        store(tasks_[id]);
+    }
+    live.jdBusy = true;
+    awaitJd(id, live.generation,
+            QDateTime::currentDateTimeUtc().addMSecs(services_.jdLaunchWait.count()), path, params,
+            std::move(done));
 }
 
 void DownloadManager::awaitJd(qint64 id, quint64 generation, QDateTime deadline,
@@ -126,7 +132,8 @@ void DownloadManager::awaitJd(qint64 id, quint64 generation, QDateTime deadline,
         return !stopping_ && tasks_.contains(id) && live_.contains(id) &&
                live_[id].generation == generation && tasks_[id].active();
     };
-    QTimer::singleShot(kJdStartPoll, this, [=, this] {
+    const auto poll = std::min<std::chrono::milliseconds>(kJdStartPoll, services_.jdLaunchWait);
+    QTimer::singleShot(poll, this, [=, this] {
         if (!current())
             return;
         if (tasks_[id].enginePhase == u"cancel_requested") {
@@ -143,6 +150,10 @@ void DownloadManager::awaitJd(qint64 id, quint64 generation, QDateTime deadline,
                             return;
                         }
                         if (QDateTime::currentDateTimeUtc() >= deadline) {
+                            if (live_[id].jdLaunches < kJdLaunches) {
+                                launchJd(id, path, params, done);
+                                return;
+                            }
                             live_[id].jdBusy = false;
                             unreachedJd(id, myjd::Failure::DeviceOffline);
                             return;
@@ -163,6 +174,7 @@ void DownloadManager::releaseJd(qint64 id) {
 void DownloadManager::unreachedJd(qint64 id, myjd::Failure failure) {
     auto& task = tasks_[id];
     const bool cancelled = task.enginePhase == u"cancel_requested";
+    dropStaging(id); // nothing reached JDownloader
     releaseJd(id);
     if (cancelled) {
         task.state = TaskState::Cancelled;
@@ -176,7 +188,6 @@ void DownloadManager::unreachedJd(qint64 id, myjd::Failure failure) {
     // MEGA's quota sent it there: without JDownloader it goes on with AnimeHub's own servers,
     // or waits for MEGA.
     if (task.detour == TaskIssue::Quota) {
-        QDir().rmdir(task.engineDestination); // empty: nothing reached JDownloader
         task.engine = DownloadEngine::Native;
         task.engineEndpoint.clear();
         task.engineDevice.clear();
@@ -197,8 +208,15 @@ void DownloadManager::unreachedJd(qint64 id, myjd::Failure failure) {
              : u"Conecta tu cuenta de MyJDownloader en Ajustes."_s);
 }
 
+void DownloadManager::dropStaging(qint64 id) {
+    const auto& path = tasks_[id].engineDestination;
+    if (!path.isEmpty() && QFileInfo(path).isDir())
+        removeStaging(path);
+}
+
 void DownloadManager::submitJd(qint64 id, const QList<api::ResolvedLink>& links) {
     auto& task = tasks_[id];
+    live_[id].jdLaunches = 0; // each hand-over may start JDownloader again
     if (links.isEmpty()) {
         fail(id, TaskIssue::NoSource);
         return;
@@ -332,6 +350,7 @@ void DownloadManager::cancelJd(qint64 id, bool collector) {
                     cancelJd(id, true);
                     return;
                 }
+                dropStaging(id);
                 auto& task = tasks_[id];
                 task.state = TaskState::Cancelled;
                 task.enginePhase = u"cancelled"_s;

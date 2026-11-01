@@ -45,6 +45,16 @@ private slots:
                  QStringLiteral("13 oct"));
     }
 
+    // While AnimeHub waits for the JDownloader it started, the episode says so.
+    void aHandOverWaitingForJDownloaderSaysItOpens() {
+        downloads::Task task;
+        task.state = downloads::TaskState::Resolving;
+        QCOMPARE(display::download(task), QStringLiteral("Buscando el archivo…"));
+        task.engine = downloads::DownloadEngine::JDownloaderLocal;
+        task.enginePhase = QStringLiteral("launching");
+        QCOMPARE(display::download(task), QStringLiteral("Abriendo JDownloader…"));
+    }
+
     // The agenda's day headings and lines, by the same rule.
     void theAgendaUsesTheSameDays() {
         const QDateTime now(QDate(2026, 10, 31), QTime(9, 0));

@@ -29,6 +29,8 @@ qt_add_library(animehub-core STATIC
   library/library_repository.h
   library/library_types.cpp
   library/library_types.h
+  library/work_folders.cpp
+  library/work_folders.h
   playback/player.cpp
   playback/player.h
   playback/playlist_tracker.cpp

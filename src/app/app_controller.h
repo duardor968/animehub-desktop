@@ -34,6 +34,8 @@ struct AppPaths {
     bool isolated = false;
     bool transfers = true;
     bool smoke = false;
+    // A capture of JDownloader's setup as on a PC without it.
+    bool detectJDownloader = true;
 };
 
 // Builds and owns everything the window shows, and the app's life outside it: tray icon,

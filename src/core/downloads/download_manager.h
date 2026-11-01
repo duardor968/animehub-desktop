@@ -23,7 +23,7 @@ struct DownloadSettings {
     // The servers the user enabled, in their order. AnimeHub downloads MEGA and Pixeldrain;
     // JDownloader gets every enabled one. 1Fichier is off by default, as on the web.
     QList<api::Provider> providers{api::Provider::Mega, api::Provider::Pixeldrain,
-                                   api::Provider::Mp4Upload};
+                                   api::Provider::TransferIt, api::Provider::Mp4Upload};
     api::Audio audio = api::Audio::Sub;
     int maxConcurrent = 2;
     DownloadEngine engine = DownloadEngine::Native;
@@ -64,6 +64,8 @@ public:
         // Starts the local JDownloader in the background (in the tray) when a hand-over finds
         // its API closed; false when it is not installed. Never called otherwise.
         std::function<bool()> launchJDownloader;
+        // How long each start gets to open the API before the next one.
+        std::chrono::milliseconds jdLaunchWait = std::chrono::seconds(40);
     };
 
     // MEGA's transfer quota ran out for this IP: MEGA is skipped until `until`. `known` says
@@ -144,7 +146,9 @@ private:
         std::shared_ptr<std::atomic<bool>> cancel;
         QDateTime savedAt;
         bool jdBusy = false;
-        bool jdLaunched = false; // this hand-over already started JDownloader once
+        int jdLaunches = 0; // times this hand-over started JDownloader
+        // The next request for its source asks the API to look again (a retry by the user).
+        bool refresh = false;
     };
 
     void pump();
@@ -167,7 +171,8 @@ private:
     void keepMirrors(qint64 id, QJsonArray links);
     // Removes `drop`, renames, then moves the kept links to the download list and starts them.
     void prepareJd(qint64 id, QList<qint64> drop, QList<std::pair<qint64, QString>> renames);
-    // Starts JDownloader and repeats `path` once its API answers.
+    // Starts JDownloader and repeats `path` once its API answers; starts it again while it does
+    // not, a few times.
     void launchJd(qint64 id, const QString& path, const QJsonArray& params,
                   myjd::Client::Callback<QJsonValue> done);
     void awaitJd(qint64 id, quint64 generation, QDateTime deadline, const QString& path,
@@ -177,6 +182,8 @@ private:
     void releaseJd(qint64 id);
     // The hand-over never reached JDownloader: the task stops with the reason and what to do.
     void unreachedJd(qint64 id, myjd::Failure failure);
+    // The task's JDownloader folder goes if nothing is in it.
+    void dropStaging(qint64 id);
     void pollJd(qint64 id);
     void collectJd(qint64 id);
     void jdRequest(qint64 id, const QString& path, const QJsonArray& params,

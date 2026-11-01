@@ -1,5 +1,6 @@
 #pragma once
 
+#include "downloads_view.h"
 #include "library_model.h"
 #include <QCoreApplication>
 #include <QEventLoop>
@@ -13,7 +14,8 @@
 
 namespace animehub::app {
 // Runs only against an explicit smoke profile; events stay inside this Qt process.
-inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QString& flow) {
+inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QString& flow,
+                         DownloadsView* downloads = nullptr) {
     const auto settle = [] {
         QEventLoop loop;
         QTimer::singleShot(260, &loop, &QEventLoop::quit);
@@ -375,6 +377,96 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
         if (!check(catalog->property("depth").toInt() == 1, "the breadcrumb leads back to it"))
             return false;
         open();
+    } else if (flow == u"offer" || flow == u"setup") {
+        // The keyboard through JDownloader's notice and setup: Tab stays in the dialog and shows
+        // where it is, Enter takes the main button, Esc closes.
+        auto* offer = qobject_cast<QObject*>(named("downloadOffer"));
+        auto* setup = qobject_cast<QObject*>(named("jdSetup"));
+        if (!offer || !setup || !downloads)
+            return false;
+        const auto inside = [window](QObject* dialog) {
+            auto* item = window->activeFocusItem();
+            auto* popup = dialog->property("contentItem").value<QQuickItem*>();
+            auto* box = popup ? popup->parentItem() : nullptr;
+            return item && box && (box == item || box->isAncestorOf(item));
+        };
+        const auto waitFor = [&settle](const std::function<bool()>& ready, int tries = 12) {
+            for (int wait = 0; wait < tries && !ready(); ++wait)
+                settle();
+            return ready();
+        };
+        // Tab round the dialog: every stop inside it, framed, and back to where it started.
+        const auto tabRound = [&](QObject* dialog, const char* what) {
+            auto* start = window->activeFocusItem();
+            QStringList stops;
+            for (int step = 0; step < 12; ++step) {
+                key(Qt::Key_Tab);
+                // A text field shows the focus by itself; a control frames it (visualFocus).
+                const auto framed = window->activeFocusItem()->property("visualFocus");
+                if (!inside(dialog) || (framed.isValid() && !framed.toBool())) {
+                    qCritical("Flow %s: Tab left it or shows no focus at %s", what,
+                              qPrintable(focused()));
+                    return false;
+                }
+                stops.append(focused());
+                if (window->activeFocusItem() == start)
+                    break;
+            }
+            qInfo("Flow %s Tab: %s", what, qPrintable(stops.join(QStringLiteral(" → "))));
+            return window->activeFocusItem() == start;
+        };
+        if (flow == u"offer") {
+            downloads->previewOffer(DownloadsView::Offer::JDownloader,
+                                    QStringLiteral("Tougen Anki: Nikko Kegon no Taki-hen"), 5,
+                                    {api::Provider::OneFichier, api::Provider::Mp4Upload});
+            if (!check(waitFor([&] { return offer->property("opened").toBool() && inside(offer); }),
+                       "the notice opens with the keyboard on it"))
+                return false;
+            if (!check(focused().endsWith(QStringLiteral("Usar JDownloader")),
+                       "its main button has the keyboard"))
+                return false;
+            if (!check(tabRound(offer, "notice"), "Tab goes round the notice, framed"))
+                return false;
+            key(Qt::Key_Escape);
+            if (!check(waitFor([&] { return !offer->property("visible").toBool(); }) &&
+                           downloads->offer().isEmpty(),
+                       "Esc closes it"))
+                return false;
+            downloads->previewOffer(DownloadsView::Offer::JDownloader,
+                                    QStringLiteral("Tougen Anki: Nikko Kegon no Taki-hen"), 5,
+                                    {api::Provider::Mp4Upload});
+            if (!check(waitFor([&] { return offer->property("opened").toBool() && inside(offer); }),
+                       "an offer right after another opens too"))
+                return false;
+            key(Qt::Key_Return);
+            if (!check(waitFor([&] { return setup->property("opened").toBool(); }),
+                       "Enter takes Usar JDownloader to the setup"))
+                return false;
+        } else {
+            // Connecting through this PC: the profile's local API is a closed port.
+            QMetaObject::invokeMethod(setup, "begin", Q_ARG(QVariant, 1), Q_ARG(QVariant, false));
+            if (!check(waitFor([&] { return setup->property("opened").toBool() && inside(setup); }),
+                       "the setup opens with the keyboard on it"))
+                return false;
+            if (!check(tabRound(setup, "setup"), "Tab goes round the setup, framed"))
+                return false;
+            key(Qt::Key_Return);
+            if (!check(setup->property("step").toInt() == 2, "Enter goes on to the test"))
+                return false;
+            const bool retried = waitFor(
+                [&] {
+                    return !setup->property("testing").toBool() && inside(setup) &&
+                           focused().endsWith(QStringLiteral("Probar otra vez"));
+                },
+                30);
+            qInfo("Flow setup after the test: %s", qPrintable(focused()));
+            if (!check(retried, "a failed test leaves the keyboard on Probar otra vez"))
+                return false;
+            key(Qt::Key_Escape);
+            if (!check(waitFor([&] { return !setup->property("visible").toBool(); }),
+                       "Esc cancels it"))
+                return false;
+        }
     } else
         return false;
     settle();

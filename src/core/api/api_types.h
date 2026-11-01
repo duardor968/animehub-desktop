@@ -14,7 +14,7 @@ namespace animehub::api {
 
 // Paused: a series between seasons, which AnimeAV1 marks "Próximamente" (One Piece).
 enum class AnimeStatus { Unknown, Airing, Finished, Upcoming, Paused };
-enum class Provider { Mega, Pixeldrain, Mp4Upload, OneFichier };
+enum class Provider { Mega, Pixeldrain, TransferIt, Mp4Upload, OneFichier };
 enum class Audio { Sub, Dub };
 
 enum class RelationKind {

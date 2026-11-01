@@ -103,6 +103,13 @@ public:
     [[nodiscard]] bool trayNoticeShown() const;
     void setTrayNoticeShown();
 
+    // "No volver a mostrar" on the offers that follow an episode no enabled server has: using
+    // JDownloader for it, or turning on the servers that have it.
+    [[nodiscard]] bool jdownloaderOfferHidden() const;
+    void hideJdownloaderOffer();
+    [[nodiscard]] bool serversOfferHidden() const;
+    void hideServersOffer();
+
     [[nodiscard]] downloads::DownloadSettings downloads() const;
     // The enabled servers: MEGA and Pixeldrain in the user's order, then MP4Upload and 1Fichier
     // while JDownloader is used.

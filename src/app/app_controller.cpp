@@ -1,9 +1,11 @@
 #include "app_controller.h"
 
 #include "display.h"
+#include "library/work_folders.h"
 #include "platform/installed_apps.h"
 #include "platform/trash.h"
 #include "shell.h"
+#include "util/file_names.h"
 
 #include <QApplication>
 #include <QCryptographicHash>
@@ -120,7 +122,23 @@ AppController::AppController(AppPaths paths, QObject* parent)
     myjd_ = std::make_unique<downloads::myjd::Client>(network_);
     // One saved account per data folder, so test profiles never touch the real one.
     const auto credential = QStringLiteral("AnimeHub/MyJDownloader/") + instanceName(paths_.data);
-    jdownloader_view_ = std::make_unique<JDownloaderView>(*settings_, *myjd_, credential);
+    jdownloader_view_ = std::make_unique<JDownloaderView>(
+        *settings_, *myjd_, network_, credential,
+        JDownloaderView::System{
+            .findExecutable =
+                [this] {
+                    return paths_.detectJDownloader ? platform::jdownloaderExecutable() : QString();
+                },
+            // A test profile never starts the user's JDownloader nor their browser.
+            .start =
+                [this](const QString& program) {
+                    return !paths_.isolated && QProcess::startDetached(program, {});
+                },
+            .openUrl =
+                [this](const QUrl& url) {
+                    if (!paths_.isolated)
+                        QDesktopServices::openUrl(url);
+                }});
     downloads_ = std::make_unique<downloads::DownloadManager>(
         downloads::DownloadManager::Services{
             *api_, *aria2_, *mega_, *pixeldrain_, *download_repository_, *library_repository_,
@@ -196,7 +214,9 @@ AppController::AppController(AppPaths paths, QObject* parent)
     const Services services{*api_, *library_, *downloads_, *player_, *settings_};
     library_model_ = std::make_unique<LibraryModel>(*library_, *downloads_, *api_);
     catalog_view_ = std::make_unique<CatalogView>(*api_, *library_model_);
-    downloads_view_ = std::make_unique<DownloadsView>(*downloads_, *library_, *player_);
+    downloads_view_ = std::make_unique<DownloadsView>(*downloads_, *library_, *player_, *settings_);
+    connect(jdownloader_view_.get(), &JDownloaderView::connectionReady, downloads_view_.get(),
+            &DownloadsView::retryWithJdownloader);
     library_anime_ = std::make_unique<AnimeView>(services);
     catalog_anime_ = std::make_unique<AnimeView>(services);
 
@@ -231,14 +251,15 @@ AppController::AppController(AppPaths paths, QObject* parent)
                task->slug);
     });
 #ifdef Q_OS_LINUX
-    // Without the system's aria2, MEGA and Pixeldrain downloads wait in the queue until it is
-    // installed.
+    // Without the system's aria2, MEGA, Pixeldrain and transfer.it downloads wait in the queue
+    // until it is installed.
     connect(downloads_.get(), &downloads::DownloadManager::taskAdded, this, [this](qint64 id) {
         const auto task = downloads_->task(id);
         if (task && task->engine == downloads::DownloadEngine::Native &&
             QStandardPaths::findExecutable(QStringLiteral("aria2c")).isEmpty()) {
             emit message(
-                QStringLiteral("Instala el paquete aria2 para descargar de MEGA y Pixeldrain."),
+                QStringLiteral(
+                    "Instala el paquete aria2 para descargar de MEGA, Pixeldrain y transfer.it."),
                 true);
         }
     });
@@ -256,6 +277,18 @@ void AppController::start() {
         return;
     }
     if (!paths_.smoke && paths_.transfers) {
+        // Before the queue starts: folders named by slug take their work's title. A test profile
+        // only renames inside itself.
+        const auto directory = settings_->downloadDirectory();
+        if (!paths_.isolated || util::isInside(directory, paths_.data)) {
+            const auto renamed = library::migrateWorkFolders(*database_, directory);
+            if (!renamed)
+                qWarning("work folders: %s", qPrintable(renamed.error().message));
+            else
+                for (const auto& skip : renamed->skipped)
+                    qWarning("work folder %s kept: %s", qPrintable(skip.folder),
+                             qPrintable(skip.reason));
+        }
         library_->verifyFiles();
         library_->startWatching();
     }

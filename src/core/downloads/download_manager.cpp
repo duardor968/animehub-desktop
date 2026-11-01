@@ -13,7 +13,9 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <array>
 #include <tuple>
+#include <utility>
 
 namespace animehub::downloads {
 namespace {
@@ -29,6 +31,11 @@ constexpr auto kProgressSaveInterval = 5s;
 // Each look at JDownloader is a request to it, through MyJDownloader's servers when it is not
 // local; its transfers last minutes, so a look every few seconds is enough.
 constexpr auto kJdPollInterval = 5s;
+// Every server AnimeHub knows: the API is asked for all of them, so an episode none of the
+// enabled ones has says where it is.
+constexpr std::array kKnownProviders{api::Provider::Mega, api::Provider::Pixeldrain,
+                                     api::Provider::TransferIt, api::Provider::Mp4Upload,
+                                     api::Provider::OneFichier};
 
 // aria2 exit statuses (https://aria2.github.io/manual/en/html/aria2c.html#exit-status).
 enum Aria2Code {
@@ -116,7 +123,8 @@ DownloadManager::~DownloadManager() {
 }
 
 bool DownloadManager::isNative(api::Provider provider) {
-    return provider == api::Provider::Mega || provider == api::Provider::Pixeldrain;
+    return provider == api::Provider::Mega || provider == api::Provider::Pixeldrain ||
+           provider == api::Provider::TransferIt;
 }
 
 void DownloadManager::start(bool transfers) {
@@ -329,10 +337,13 @@ std::expected<qint64, QString> DownloadManager::enqueue(const QString& slug, dou
     if (settings.directory.isEmpty() || !QDir().mkpath(settings.directory)) {
         return std::unexpected(QStringLiteral("La carpeta de descargas no está disponible."));
     }
-    auto created = services_.repository.create(
-        slug, number, anime_title, settings.audio, origin,
-        util::downloadBasePath(settings.directory, slug, anime_title, number), settings.engine,
-        settings.jdEndpoint.toString(), settings.jdDeviceId);
+    const auto folder = services_.library.workFolder(settings.directory, slug, anime_title);
+    if (!folder)
+        return std::unexpected(folder.error().message);
+    auto created = services_.repository.create(slug, number, anime_title, settings.audio, origin,
+                                               util::downloadBasePath(*folder, anime_title, number),
+                                               settings.engine, settings.jdEndpoint.toString(),
+                                               settings.jdDeviceId);
     if (!created) {
         return std::unexpected(created.error().message);
     }
@@ -356,10 +367,12 @@ DownloadManager::enqueueMany(const QString& slug, const QList<double>& numbers,
     if (!sourceRequestId.isEmpty()) {
         if (settings.directory.isEmpty())
             return std::unexpected(QStringLiteral("El pedido no tiene un destino local fijado."));
+        const auto folder = services_.library.workFolder(settings.directory, slug, anime_title);
+        if (!folder)
+            return std::unexpected(folder.error().message);
         QList<std::pair<double, QString>> episodes;
         for (const auto number : wanted)
-            episodes.append(
-                {number, util::downloadBasePath(settings.directory, slug, anime_title, number)});
+            episodes.append({number, util::downloadBasePath(*folder, anime_title, number)});
         auto created = services_.repository.createMany(
             slug, episodes, anime_title, settings.audio, origin, settings.engine,
             settings.jdEndpoint.toString(), settings.jdDeviceId, sourceRequestId);
@@ -398,10 +411,12 @@ DownloadManager::enqueueMany(const QString& slug, const QList<double>& numbers,
         if (settings.directory.isEmpty() || !QDir().mkpath(settings.directory)) {
             return std::unexpected(QStringLiteral("La carpeta de descargas no está disponible."));
         }
+        const auto folder = services_.library.workFolder(settings.directory, slug, anime_title);
+        if (!folder)
+            return std::unexpected(folder.error().message);
         QList<std::pair<double, QString>> episodes;
         for (const auto number : fresh) {
-            episodes.append(
-                {number, util::downloadBasePath(settings.directory, slug, anime_title, number)});
+            episodes.append({number, util::downloadBasePath(*folder, anime_title, number)});
         }
         auto created = services_.repository.createMany(
             slug, episodes, anime_title, settings.audio, origin, settings.engine,
@@ -516,7 +531,9 @@ void DownloadManager::resolve(qint64 id) {
     task.issue = TaskIssue::None;
     task.issueDetail.clear();
     task.issueProvider.reset();
+    task.excludedServers.clear();
     store(task);
+    const bool refresh = std::exchange(live.refresh, false);
 
     if (task.handedOver()) {
         task.state = TaskState::Downloading;
@@ -547,8 +564,18 @@ void DownloadManager::resolve(qint64 id) {
         return;
     }
     const auto generation = live.generation;
+    auto asked = providers;
+    for (const auto provider : kKnownProviders) {
+        if (!asked.contains(provider)) {
+            asked.append(provider);
+        }
+    }
     services_.api.resolve(
-        task.slug, {.episodeNumbers = {task.number}, .audio = task.audio, .providers = providers},
+        task.slug,
+        {.episodeNumbers = {task.number},
+         .audio = task.audio,
+         .providers = asked,
+         .refresh = refresh},
         this, [this, id, generation, providers](const api::Result<api::Resolution>& result) {
             if (!isCurrent(id, generation, TaskState::Resolving)) {
                 return;
@@ -581,6 +608,15 @@ void DownloadManager::resolve(qint64 id) {
                 }
             }
             if (candidates.isEmpty()) {
+                auto& excluded = tasks_[id].excludedServers;
+                for (const auto& episode : result->value.episodes) {
+                    for (const auto& link : episode.links) {
+                        if (!providers.contains(link.provider) &&
+                            !excluded.contains(link.provider)) {
+                            excluded.append(link.provider);
+                        }
+                    }
+                }
                 fail(id, TaskIssue::NoSource);
                 return;
             }
@@ -625,7 +661,7 @@ void DownloadManager::tryCandidate(qint64 id, quint64 generation,
         pump(); // its native slot is free
         return true;
     };
-    // Neither MEGA nor Pixeldrain had it.
+    // None of the native servers had it.
     if (!isNative(link.provider)) {
         if (!hand_over()) {
             give_up(last_issue);
@@ -635,6 +671,12 @@ void DownloadManager::tryCandidate(qint64 id, quint64 generation,
     const auto next = [this, id, generation, candidates, index](TaskIssue issue) {
         tryCandidate(id, generation, candidates, index + 1, issue);
     };
+    if (link.provider == api::Provider::TransferIt && megaBlocked()) {
+        // transfer.it is served by MEGA's API and storage: its quota is assumed to be MEGA's.
+        tasks_[id].detour = TaskIssue::Quota;
+        next(TaskIssue::Quota);
+        return;
+    }
     if (link.provider == api::Provider::Mega && megaBlocked()) {
         tasks_[id].detour = TaskIssue::Quota;
         // JDownloader may leave through another IP: MEGA goes to it too, with the rest.
@@ -643,42 +685,71 @@ void DownloadManager::tryCandidate(qint64 id, quint64 generation,
         }
         return;
     }
-    if (link.provider == api::Provider::Mega) {
-        const auto file_link = mega::parseFileLink(link.url);
-        if (!file_link) {
+    if (link.provider == api::Provider::Mega || link.provider == api::Provider::TransferIt) {
+        const auto provider = link.provider;
+        const auto file_link =
+            provider == api::Provider::Mega ? mega::parseFileLink(link.url) : std::nullopt;
+        const auto transfer_id = provider == api::Provider::TransferIt
+                                     ? mega::parseTransferLink(link.url)
+                                     : std::nullopt;
+        if (!file_link && !transfer_id) {
             next(TaskIssue::NoSource);
             return;
         }
-        services_.mega.file(*file_link, this,
-                            [this, id, generation, file_link, next, candidates, index, last_issue](
-                                const std::expected<mega::RemoteFile, mega::ApiFailure>& answer) {
-                                if (!isCurrent(id, generation, TaskState::Resolving)) {
-                                    return;
-                                }
-                                if (!answer) {
-                                    switch (answer.error().kind) {
-                                    case mega::ApiFailure::Kind::NotFound:
-                                    case mega::ApiFailure::Kind::Blocked:
-                                        next(TaskIssue::SourceRemoved);
-                                        return;
-                                    case mega::ApiFailure::Kind::OverQuota:
-                                        // MEGA is skipped from now on, this episode included.
-                                        megaOverQuota(answer.error().timeLeft);
-                                        tryCandidate(id, generation, candidates, index, last_issue);
-                                        return;
-                                    case mega::ApiFailure::Kind::Protocol:
-                                        next(TaskIssue::NoSource);
-                                        return;
-                                    default:
-                                        tasks_[id].issueProvider = api::Provider::Mega;
-                                        retryLater(id, TaskIssue::Connection,
-                                                   answer.error().message);
-                                        return;
-                                    }
-                                }
-                                startTransfer(id, api::Provider::Mega, file_link->handle,
-                                              answer->url, answer->size, answer->name, file_link);
-                            });
+        // Acts on a failed answer.
+        const auto failed = [this, id, generation, provider, next, candidates, index,
+                             last_issue](const mega::ApiFailure& failure) {
+            switch (failure.kind) {
+            case mega::ApiFailure::Kind::NotFound:
+            case mega::ApiFailure::Kind::Blocked:
+                next(TaskIssue::SourceRemoved);
+                return;
+            case mega::ApiFailure::Kind::OverQuota:
+                // MEGA is skipped from now on, this episode included.
+                megaOverQuota(failure.timeLeft);
+                tryCandidate(id, generation, candidates, index, last_issue);
+                return;
+            case mega::ApiFailure::Kind::Protocol:
+                next(TaskIssue::NoSource);
+                return;
+            default:
+                tasks_[id].issueProvider = provider;
+                retryLater(id, TaskIssue::Connection, failure.message);
+                return;
+            }
+        };
+        if (file_link) {
+            services_.mega.file(
+                *file_link, this,
+                [this, id, generation, file_link,
+                 failed](const std::expected<mega::RemoteFile, mega::ApiFailure>& answer) {
+                    if (!isCurrent(id, generation, TaskState::Resolving)) {
+                        return;
+                    }
+                    if (!answer) {
+                        failed(answer.error());
+                        return;
+                    }
+                    startTransfer(id, api::Provider::Mega, file_link->handle, answer->url,
+                                  answer->size, answer->name, file_link);
+                });
+            return;
+        }
+        services_.mega.transfer(
+            *transfer_id, this,
+            [this, id, generation, transfer_id,
+             failed](const std::expected<mega::TransferFile, mega::ApiFailure>& answer) {
+                if (!isCurrent(id, generation, TaskState::Resolving)) {
+                    return;
+                }
+                if (!answer) {
+                    failed(answer.error());
+                    return;
+                }
+                startTransfer(id, api::Provider::TransferIt,
+                              *transfer_id + u'/' + answer->link.handle, answer->file.url,
+                              answer->file.size, answer->file.name, answer->link);
+            });
         return;
     }
     if (link.provider == api::Provider::Pixeldrain) {
@@ -739,7 +810,8 @@ void DownloadManager::startTransfer(qint64 id, api::Provider provider, const QSt
         fail(id, TaskIssue::Storage, target.absolutePath());
         return;
     }
-    const bool is_mega = provider == api::Provider::Mega;
+    // Both are MEGA-encrypted: the bytes land as `.mega` and are decrypted and checked after.
+    const bool is_mega = provider == api::Provider::Mega || provider == api::Provider::TransferIt;
     live.partialPath =
         task.targetPath + (is_mega ? QStringLiteral(".mega") : QStringLiteral(".part"));
     live.megaLink = std::move(mega_link);
@@ -1025,7 +1097,8 @@ void DownloadManager::transferFailed(qint64 id, int code, const QString& message
         retryLater(id, TaskIssue::Connection, message);
         return;
     case kHttpUnexpected:
-        if (message.contains(u"509") && task.provider == api::Provider::Mega) {
+        if (message.contains(u"509") &&
+            (task.provider == api::Provider::Mega || task.provider == api::Provider::TransferIt)) {
             // The transfer quota ran out: the episode looks for its file again, skipping MEGA,
             // while MEGA's own answer says when it frees.
             if (const auto url = live.megaUrl; url.isValid()) {
@@ -1092,6 +1165,9 @@ void DownloadManager::fail(qint64 id, TaskIssue issue, const QString& detail) {
     task.issueDetail = detail;
     task.bytesPerSecond = 0;
     task.finishedAt = QDateTime::currentDateTimeUtc();
+    if (task.engine != DownloadEngine::Native) {
+        dropStaging(id);
+    }
     store(task);
     emit taskFailed(id);
     pump();
@@ -1235,6 +1311,9 @@ void DownloadManager::cancelTask(qint64 id) {
                   [this, id](const auto&) { cancelJd(id); });
         return;
     }
+    if (task.engine != DownloadEngine::Native) {
+        dropStaging(id);
+    }
     // The partial files go once aria2 has let go of them, unless the episode was asked for
     // again meanwhile: they are then that task's.
     dropTransfer(id, [this, id, path = task.targetPath] {
@@ -1270,6 +1349,8 @@ bool DownloadManager::retryTask(qint64 id) {
         liftMegaQuota(); // it goes with every other episode waiting for MEGA
         return true;
     }
+    // A failed episode is looked for anew: the API may have stale links for it.
+    live_[id].refresh = it->state == TaskState::Failed;
     requeueRetry(*it);
     return true;
 }

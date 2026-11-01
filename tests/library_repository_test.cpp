@@ -189,7 +189,7 @@ private slots:
     }
 
     void migratesToTheCurrentSchema() {
-        QCOMPARE(database_->schemaVersion(), 7);
+        QCOMPARE(database_->schemaVersion(), 8);
     }
 
     void fileReferenceLookupUsesTheReverseIndex() {
@@ -245,7 +245,7 @@ private slots:
         auto opened = storage::Database::open(path);
         QVERIFY2(opened, qPrintable(opened ? QString() : opened.error().message));
         const auto& database = **opened;
-        QCOMPARE(database.schemaVersion(), 7);
+        QCOMPARE(database.schemaVersion(), 8);
         // The library as it was before the migration stays beside it.
         const auto copy = QStringLiteral("%1.schema-%2.bak").arg(path).arg(version);
         QVERIFY(QFileInfo::exists(copy));

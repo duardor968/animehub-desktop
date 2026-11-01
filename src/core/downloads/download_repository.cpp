@@ -1,6 +1,8 @@
 #include "download_repository.h"
 #include "jdownloader.h"
+#include "util/file_names.h"
 
+#include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -412,6 +414,37 @@ Stored<int> DownloadRepository::requeueInterrupted() {
         return std::unexpected(result.error());
     }
     return result->numRowsAffected();
+}
+
+Stored<int> DownloadRepository::relocate(const QString& from, const QString& to) {
+    const auto source = QDir::cleanPath(QDir::fromNativeSeparators(from));
+    const auto target = QDir::cleanPath(QDir::fromNativeSeparators(to));
+    const auto moved = [&](const QString& path) {
+        const auto clean = QDir::cleanPath(QDir::fromNativeSeparators(path));
+        return !path.isEmpty() && util::isInside(clean, source) ? target + clean.mid(source.size())
+                                                                : path;
+    };
+    auto rows =
+        database_.run(QStringLiteral("SELECT id, target_path, engine_destination FROM download"));
+    if (!rows)
+        return std::unexpected(rows.error());
+    QList<std::tuple<qint64, QString, QString>> renamed;
+    while (rows->next()) {
+        const auto path = rows->value(1).toString();
+        const auto destination = rows->value(2).toString();
+        if (moved(path) != path || moved(destination) != destination)
+            renamed.append({rows->value(0).toLongLong(), moved(path), moved(destination)});
+    }
+    rows->finish();
+    for (const auto& [id, path, destination] : renamed) {
+        auto updated = database_.run(
+            QStringLiteral(
+                "UPDATE download SET target_path = ?, engine_destination = ? WHERE id = ?"),
+            {path, destination, id});
+        if (!updated)
+            return std::unexpected(updated.error());
+    }
+    return static_cast<int>(renamed.size());
 }
 
 } // namespace animehub::downloads

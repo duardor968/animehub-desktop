@@ -18,8 +18,6 @@ struct DownloadEpisodeRow {
     QString detail; // display::download
     bool problem = false;
     bool hasFile = false; // completed and still on disk
-    // "JDownloader · D:\Anime\frieren": who downloads it and where; empty for native ones.
-    QString engineLine;
     bool canPause = false;
     bool canResume = false;
     bool canRetry = false;
@@ -80,7 +78,6 @@ public:
         ProblemRole,
         HasFileRole,
         PartialRole,
-        EngineLineRole,
         CanPauseRole,
         CanResumeRole,
         CanRetryRole,

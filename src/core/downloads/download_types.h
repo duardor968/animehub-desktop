@@ -80,6 +80,9 @@ struct Task {
     // and whether JDownloader, which should have taken it then, did not answer.
     TaskIssue detour = TaskIssue::None;
     bool jdUnreachable = false;
+    // Live only: with TaskIssue::NoSource, the servers that have the episode but the settings
+    // leave out (turned off, or only JDownloader downloads them).
+    QList<api::Provider> excludedServers;
 
     [[nodiscard]] bool active() const {
         return state != TaskState::Completed && state != TaskState::Cancelled &&

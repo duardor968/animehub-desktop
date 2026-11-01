@@ -142,9 +142,11 @@ qt_add_qml_module(animehub-desktop
     qml/components/Shelf.qml
     qml/components/Toast.qml
     qml/downloads/DownloadBar.qml
+    qml/downloads/DownloadOffer.qml
     qml/downloads/DownloadsHeader.qml
     qml/downloads/DownloadsPage.qml
     qml/downloads/EpisodeLine.qml
+    qml/downloads/JDownloaderSetup.qml
     qml/downloads/SectionHeading.qml
     qml/downloads/SeriesRow.qml
     qml/downloads/SpeedGraph.qml

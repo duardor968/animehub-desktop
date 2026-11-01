@@ -5,6 +5,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -19,6 +20,7 @@
 #include <QStandardPaths>
 #include <QStyleHints>
 #include <QSystemTrayIcon>
+#include <QTcpServer>
 #include <QThread>
 #include <QTimer>
 
@@ -87,11 +89,16 @@ int main(int argc, char* argv[]) {
         if (argument == "--smoke-screenshot" || argument.starts_with("--smoke-screenshot=") ||
             argument == "--smoke-hidden-native") {
             suppressHeadlessErrorDialogs();
+            // A hidden window has no vsync to pace the threaded render loop: its frames could
+            // stall in grabWindow() and its animations stand still between captures. The basic
+            // loop renders each grab on this thread, with the animations at the wall clock.
+            if (qEnvironmentVariableIsEmpty("QSG_RENDER_LOOP"))
+                qputenv("QSG_RENDER_LOOP", "basic");
             smokeWatchdog = std::jthread([](std::stop_token stop) {
                 std::mutex mutex;
                 std::condition_variable_any wake;
                 std::unique_lock lock(mutex);
-                wake.wait_for(lock, stop, std::chrono::seconds(20), [] { return false; });
+                wake.wait_for(lock, stop, std::chrono::seconds(30), [] { return false; });
                 if (!stop.stop_requested()) {
                     // Do not acquire a logger/Qt lock if a rendering thread is stuck.
                     std::_Exit(4);
@@ -169,6 +176,26 @@ int main(int argc, char* argv[]) {
                                                        "navigate o catalog."),
                                         QStringLiteral("caso"));
     parser.addOption(smoke_flow);
+    const QCommandLineOption smoke_dialog(
+        QStringLiteral("smoke-dialog"),
+        QStringLiteral("Diálogo de JDownloader: offer-jdownloader, offer-servers, setup-install, "
+                       "setup-local, setup-account, setup-test o setup-test-error."),
+        QStringLiteral("diálogo"));
+    parser.addOption(smoke_dialog);
+    // Animations end at the hidden window's own pace: a busy machine needs longer.
+    const QCommandLineOption smoke_wait(QStringLiteral("smoke-wait"),
+                                        QStringLiteral("Milisegundos antes de la captura."),
+                                        QStringLiteral("ms"), QStringLiteral("2500"));
+    parser.addOption(smoke_wait);
+    const QCommandLineOption smoke_unfold(
+        QStringLiteral("smoke-unfold"),
+        QStringLiteral("Desplegar los episodios de la serie a la vista en Descargas."));
+    parser.addOption(smoke_unfold);
+    const QCommandLineOption smoke_frames(
+        QStringLiteral("smoke-frames"),
+        QStringLiteral("Capturas sucesivas, 350 ms entre ellas (archivo-2.png, archivo-3.png…)."),
+        QStringLiteral("n"), QStringLiteral("1"));
+    parser.addOption(smoke_frames);
     parser.addOptions({api_base, smoke_image, smoke_size, smoke_page, smoke_settings,
                        profile_transfers, smoke_hidden_native, smoke_view, smoke_archive,
                        smoke_franchise, smoke_anime});
@@ -180,10 +207,11 @@ int main(int argc, char* argv[]) {
     const bool smoke = parser.isSet(smoke_image);
     const bool smokeHidden = parser.isSet(smoke_hidden_native);
     if (parser.isSet(smoke_flow) &&
-        (!smokeHidden || !QStringList{QStringLiteral("create"), QStringLiteral("archive"),
-                                      QStringLiteral("settings"), QStringLiteral("navigate"),
-                                      QStringLiteral("catalog")}
-                              .contains(parser.value(smoke_flow))))
+        (!smokeHidden ||
+         !QStringList{QStringLiteral("create"), QStringLiteral("archive"),
+                      QStringLiteral("settings"), QStringLiteral("navigate"),
+                      QStringLiteral("catalog"), QStringLiteral("offer"), QStringLiteral("setup")}
+              .contains(parser.value(smoke_flow))))
         return 2;
     if (smokeHidden &&
         (!smoke || !parser.isSet(data_dir) || QGuiApplication::platformName() != u"windows")) {
@@ -210,6 +238,25 @@ int main(int argc, char* argv[]) {
                                     QStringLiteral("linked-devices"), QStringLiteral("about")};
     if (parser.isSet(smoke_settings) && (!smoke || parser.value(smoke_page) != u"settings" ||
                                          !smokeSettings.contains(parser.value(smoke_settings))))
+        return 2;
+    const QStringList smokeDialogs{
+        QStringLiteral("offer-jdownloader"), QStringLiteral("offer-servers"),
+        QStringLiteral("setup-install"),     QStringLiteral("setup-local"),
+        QStringLiteral("setup-account"),     QStringLiteral("setup-test"),
+        QStringLiteral("setup-test-error")};
+    if (parser.isSet(smoke_dialog) &&
+        (!smoke || !smokeDialogs.contains(parser.value(smoke_dialog))))
+        return 2;
+    bool waitValid = false;
+    const int smokeWait = parser.value(smoke_wait).toInt(&waitValid);
+    if ((parser.isSet(smoke_wait) || parser.isSet(smoke_unfold)) && !smoke)
+        return 2;
+    if (!waitValid || smokeWait < 500 || smokeWait > 12000)
+        return 2;
+    bool framesValid = false;
+    const int smokeFrames = parser.value(smoke_frames).toInt(&framesValid);
+    if (!framesValid || smokeFrames < 1 || smokeFrames > 6 ||
+        (parser.isSet(smoke_frames) && !smoke))
         return 2;
     const QStringList smokeViews{QStringLiteral("grouped"), QStringLiteral("flat")};
     const bool librarySmokeOptions = parser.isSet(smoke_view) || parser.isSet(smoke_archive) ||
@@ -258,6 +305,7 @@ int main(int argc, char* argv[]) {
     if (paths.isolated && !selectedCanonical.isEmpty())
         paths.data = selectedCanonical;
     paths.smoke = smoke;
+    paths.detectJDownloader = parser.value(smoke_dialog) != u"setup-install";
     paths.transfers = !smoke && (!paths.isolated || parser.isSet(profile_transfers));
     if (paths.isolated)
         paths.downloads = QDir(paths.data).filePath(QStringLiteral("downloads"));
@@ -359,6 +407,50 @@ int main(int argc, char* argv[]) {
                 !opened.toBool())
                 return 5;
         }
+        // The series on view unfolded into its episodes, once the queue is on the page.
+        if (parser.isSet(smoke_unfold)) {
+            QTimer::singleShot(1000, &app, [window, &controller] {
+                if (auto* page = window->findChild<QObject*>(QStringLiteral("downloadsPage")))
+                    QMetaObject::invokeMethod(
+                        page, "toggle", Q_ARG(QVariant, controller.downloads()->headerSlug()));
+            });
+        }
+        // JDownloader's offer and setup, without a download or a connection behind them,
+        // opened once the page has settled (--smoke-wait).
+        const auto dialogName = parser.value(smoke_dialog);
+        auto* setup = window->findChild<QObject*>(QStringLiteral("jdSetup"));
+        auto* offer = window->findChild<QObject*>(QStringLiteral("downloadOffer"));
+        if (!dialogName.isEmpty() && (!setup || !offer))
+            return 5;
+        // "setup-test" shows the test running: its local API is a port that takes the
+        // connection and never answers. "setup-test-error" uses the profile's, a closed port.
+        auto* silent = new QTcpServer(&app);
+        if (dialogName == u"setup-test") {
+            if (!silent->listen(QHostAddress::LocalHost))
+                return 5;
+            controller.settings()->setJdEndpoint(
+                QStringLiteral("http://127.0.0.1:%1").arg(silent->serverPort()));
+        }
+        auto* dialog = dialogName.isEmpty()               ? nullptr
+                       : dialogName.startsWith(u"offer-") ? offer
+                                                          : setup;
+        QTimer::singleShot(smokeWait, &app, [&controller, setup, dialogName] {
+            if (dialogName.startsWith(u"offer-")) {
+                using animehub::api::Provider;
+                controller.downloads()->previewOffer(
+                    dialogName == u"offer-servers"
+                        ? animehub::app::DownloadsView::Offer::Servers
+                        : animehub::app::DownloadsView::Offer::JDownloader,
+                    QStringLiteral("Tougen Anki: Nikko Kegon no Taki-hen"), 5,
+                    {Provider::OneFichier, Provider::Mp4Upload});
+            } else if (dialogName.startsWith(u"setup-")) {
+                const int step = dialogName == u"setup-install"         ? 0
+                                 : dialogName.startsWith(u"setup-test") ? 2
+                                                                        : 1;
+                QMetaObject::invokeMethod(setup, "begin", Q_ARG(QVariant, step),
+                                          Q_ARG(QVariant, dialogName == u"setup-account"));
+            }
+        });
         // A hidden window has no regular render loop. Render a few frames so asynchronous
         // images and the product's own fade-in transitions settle before the evidence frame.
         auto* warmup = new QTimer(&app);
@@ -371,7 +463,8 @@ int main(int argc, char* argv[]) {
             window->grabWindow();
         });
         warmup->start();
-        const auto capture = [window, warmup, smokeHidden, file = parser.value(smoke_image)] {
+        const auto capture = [window, warmup, smokeHidden, file = parser.value(smoke_image),
+                              frames = smokeFrames, &app] {
             warmup->stop();
             if (auto* grid = window->findChild<QObject*>(QStringLiteral("franchiseWorks"))) {
                 qInfo("Smoke franchise grid: height=%.1f contentY=%.1f originY=%.1f",
@@ -386,28 +479,72 @@ int main(int argc, char* argv[]) {
                 return;
             }
             QDir().mkpath(QFileInfo(file).absolutePath());
-            const auto image = window->grabWindow();
-            if (image.isNull() || !image.save(file)) {
-                qCritical("Smoke: captura vacía o no guardada");
-                QCoreApplication::exit(3);
-                return;
-            }
-            qInfo("Smoke: %dx%d guardada", image.width(), image.height());
-            QCoreApplication::exit(0);
+            // Successive frames show what moves; the warm-up keeps frames coming between them.
+            auto* shot = new QTimer(&app);
+            shot->setInterval(350);
+            auto taken = std::make_shared<int>(0);
+            const auto take = [window, warmup, shot, taken, file, frames] {
+                warmup->stop();
+                const QFileInfo info(file);
+                const auto path =
+                    *taken == 0 ? file
+                                : info.absolutePath() + u'/' + info.completeBaseName() + u'-' +
+                                      QString::number(*taken + 1) + u'.' + info.suffix();
+                const auto image = window->grabWindow();
+                if (image.isNull() || !image.save(path)) {
+                    qCritical("Smoke: captura vacía o no guardada");
+                    QCoreApplication::exit(3);
+                    return;
+                }
+                qInfo("Smoke: %dx%d guardada", image.width(), image.height());
+                if (++*taken >= frames) {
+                    shot->stop();
+                    QCoreApplication::exit(0);
+                    return;
+                }
+                warmup->start();
+            };
+            QObject::connect(shot, &QTimer::timeout, window, take);
+            take();
+            if (*taken < frames)
+                shot->start();
         };
         // A flow runs while frames keep rendering, and the capture shows where it ended.
         if (parser.isSet(smoke_flow)) {
-            QTimer::singleShot(
-                650, &app, [window, &controller, capture, flow = parser.value(smoke_flow)] {
-                    if (animehub::app::runSmokeFlow(window, controller.library(), flow))
-                        capture();
-                    else
-                        QCoreApplication::exit(8);
-                });
+            QTimer::singleShot(650, &app,
+                               [window, &controller, capture, flow = parser.value(smoke_flow)] {
+                                   if (animehub::app::runSmokeFlow(window, controller.library(),
+                                                                   flow, controller.downloads()))
+                                       capture();
+                                   else
+                                       QCoreApplication::exit(8);
+                               });
+        } else if (dialog) {
+            // Not at a fixed time: once the dialog is open, its transition over, and the state
+            // it is captured in reached.
+            auto* ready = new QTimer(&app);
+            ready->setInterval(100);
+            auto openedFor = std::make_shared<int>(0);
+            QObject::connect(ready, &QTimer::timeout, &app,
+                             [ready, dialog, openedFor, capture, &controller, dialogName] {
+                                 const auto* jd = controller.jdownloader();
+                                 const bool state = dialogName == u"setup-test" ? jd->testing()
+                                                    : dialogName == u"setup-test-error"
+                                                        ? !jd->testProblem().isEmpty()
+                                                        : true;
+                                 *openedFor = dialog->property("opened").toBool() && state
+                                                  ? *openedFor + 1
+                                                  : 0;
+                                 if (*openedFor < 5) // half a second open and settled
+                                     return;
+                                 ready->stop();
+                                 capture();
+                             });
+            ready->start();
         } else {
-            QTimer::singleShot(2500, &app, capture);
+            QTimer::singleShot(smokeWait, &app, capture);
         }
-        QTimer::singleShot(15000, &app, [] { QCoreApplication::exit(4); });
+        QTimer::singleShot(25000, &app, [] { QCoreApplication::exit(4); });
     }
     return QApplication::exec();
 }

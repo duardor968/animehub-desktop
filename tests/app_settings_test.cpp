@@ -52,7 +52,8 @@ private slots:
         QCOMPARE(downloads.jdDeviceId, QStringLiteral("dev1"));
         // Every server but 1Fichier, which is off until the user turns it on; MP4Upload only
         // through JDownloader.
-        auto providers = QList<api::Provider>{api::Provider::Mega, api::Provider::Pixeldrain};
+        auto providers = QList<api::Provider>{api::Provider::Mega, api::Provider::Pixeldrain,
+                                              api::Provider::TransferIt};
         if (engine != int(DownloadEngine::Native))
             providers.append(api::Provider::Mp4Upload);
         QCOMPARE(downloads.providers, providers);
@@ -123,16 +124,19 @@ private slots:
         const auto withoutJd = QStringLiteral(" MP4Upload:off!Necesita JDownloader"
                                               " 1Fichier:off!Necesita JDownloader");
         // Without JDownloader, MP4Upload is not on although the user never turned it off.
-        QCOMPARE(state(), QStringLiteral("MEGA:on Pixeldrain:on") + withoutJd);
+        QCOMPARE(state(), QStringLiteral("MEGA:on Pixeldrain:on transfer.it:on") + withoutJd);
         // The last one on stays on, and says why.
         settings.setProviderEnabled(QStringLiteral("PIXELDRAIN"), false);
-        const auto onlyMega = QStringLiteral("MEGA:on!Al menos un proveedor Pixeldrain:off");
+        settings.setProviderEnabled(QStringLiteral("TRANSFERIT"), false);
+        const auto onlyMega =
+            QStringLiteral("MEGA:on!Al menos un proveedor Pixeldrain:off transfer.it:off");
         QCOMPARE(state(), onlyMega + withoutJd);
         settings.setProviderEnabled(QStringLiteral("MEGA"), false);
         QCOMPARE(settings.providers(), QList<api::Provider>{api::Provider::Mega});
         // With JDownloader, MP4Upload comes back as it was left, and MEGA may go off.
         settings.setJdownloader(AppSettings::JDownloader::Local);
-        QCOMPARE(state(), QStringLiteral("MEGA:on Pixeldrain:off MP4Upload:on 1Fichier:off"));
+        QCOMPARE(state(), QStringLiteral(
+                              "MEGA:on Pixeldrain:off transfer.it:off MP4Upload:on 1Fichier:off"));
         settings.setProviderEnabled(QStringLiteral("MEGA"), false);
         QCOMPARE(settings.providers(), QList<api::Provider>{api::Provider::Mp4Upload});
         // Without JDownloader again nothing would download: the preferred native comes back.
@@ -148,11 +152,12 @@ private slots:
         AppSettings settings(root.filePath(QStringLiteral("settings.ini")),
                              root.filePath(QStringLiteral("Anime")));
         QCOMPARE(settings.disabledProviders(), QStringList{QStringLiteral("ONE_FICHIER")});
-        settings.setDisabledProviders(
-            {QStringLiteral("MEGA"), QStringLiteral("MP4UPLOAD"), QStringLiteral("ONE_FICHIER")});
+        settings.setDisabledProviders({QStringLiteral("MEGA"), QStringLiteral("TRANSFERIT"),
+                                       QStringLiteral("MP4UPLOAD"), QStringLiteral("ONE_FICHIER")});
         QCOMPARE(settings.providers(), QList<api::Provider>{api::Provider::Pixeldrain});
         settings.setDisabledProviders({QStringLiteral("MEGA"), QStringLiteral("PIXELDRAIN"),
-                                       QStringLiteral("MP4UPLOAD"), QStringLiteral("ONE_FICHIER")});
+                                       QStringLiteral("TRANSFERIT"), QStringLiteral("MP4UPLOAD"),
+                                       QStringLiteral("ONE_FICHIER")});
         QCOMPARE(settings.providers(), QList<api::Provider>{api::Provider::Pixeldrain});
     }
 };

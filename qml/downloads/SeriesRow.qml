@@ -268,8 +268,17 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     width: parent.width
                     implicitHeight: 4
-                    visible: root.queued
+                    visible: root.queued && !(root.running && root.progress === 0)
                     value: root.progress
+                }
+                // Running with nothing measured yet: a moving bar.
+                ProgressBar {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width
+                    // Once laid out: a sweep started at width 0 never moves (see EpisodeLine).
+                    visible: root.queued && root.running && root.progress === 0 && width > 0
+                    indeterminate: true
+                    Accessible.name: root.summary
                 }
 
                 // Completed: watch the next episode, or, its files gone, download them again.
