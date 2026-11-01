@@ -197,6 +197,10 @@ private:
     // MEGA said its quota ran out, with the time it frees if it said so.
     void megaOverQuota(std::optional<std::chrono::seconds> time_left);
     [[nodiscard]] bool megaBlocked() const;
+    // transfer.it runs on MEGA's API and storage, yet its quota is its own until it shows
+    // otherwise: each is skipped only while it said it ran out.
+    void transferItOverQuota(std::optional<std::chrono::seconds> time_left);
+    [[nodiscard]] bool transferItBlocked() const;
     // MEGA is tried again at once: the episodes waiting for its quota go back in line.
     void liftMegaQuota();
 
@@ -241,6 +245,7 @@ private:
     bool stopping_ = false;
     QDateTime mega_until_;
     bool mega_until_known_ = false;
+    QDateTime transfer_it_until_;
 };
 
 } // namespace animehub::downloads

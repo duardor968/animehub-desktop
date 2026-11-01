@@ -1088,8 +1088,8 @@ private slots:
         QCOMPARE(taskOf(*second)->provider, api::Provider::TransferIt);
     }
 
-    // transfer.it is assumed to share MEGA's quota: it is not asked while MEGA is blocked.
-    void skipsTransferItWhileMegaIsBlocked() {
+    // transfer.it's quota is its own until it says otherwise: MEGA blocked, transfer.it is asked.
+    void asksTransferItWhileMegaIsBlocked() {
         providers_ = {api::Provider::Mega, api::Provider::Pixeldrain, api::Provider::TransferIt};
         resolveTo(resolution({{"MEGA", megaUrl()}, {"TRANSFERIT", transferUrl()}}));
         server_->route("POST", "/cs", [this](const HttpTestServer::Request& request) {
@@ -1105,11 +1105,14 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Waiting, kTimeout);
         QCOMPARE(taskOf(*id)->issue, TaskIssue::Quota);
         QCOMPARE(mega_calls_, 1);
-        QCOMPARE(transfer_calls_, 0);
+        QCOMPARE(transfer_calls_, 1);
+        // Both said they ran out: the episode waits until the first one frees.
+        const auto left = QDateTime::currentDateTimeUtc().secsTo(taskOf(*id)->retryAt);
+        QVERIFY2(left > 1180 && left <= 1200, qPrintable(QString::number(left)));
     }
 
-    // An over-quota answer from transfer.it blocks MEGA's quota too.
-    void transferItOverQuotaCountsAsMegas() {
+    // An over-quota answer from transfer.it leaves MEGA's quota alone.
+    void transferItOverQuotaLeavesMegasAlone() {
         providers_ = {api::Provider::Mega, api::Provider::Pixeldrain, api::Provider::TransferIt};
         resolveTo(resolution({{"TRANSFERIT", transferUrl()}}));
         server_->route("POST", "/cs", [this](const HttpTestServer::Request&) {
@@ -1120,8 +1123,8 @@ private slots:
         QVERIFY(id);
         QTRY_COMPARE_WITH_TIMEOUT(taskOf(*id)->state, TaskState::Waiting, kTimeout);
         QCOMPARE(taskOf(*id)->issue, TaskIssue::Quota);
-        QVERIFY(manager_->megaQuota() && manager_->megaQuota()->known);
-        const auto left = QDateTime::currentDateTimeUtc().secsTo(manager_->megaQuota()->until);
+        QVERIFY(!manager_->megaQuota());
+        const auto left = QDateTime::currentDateTimeUtc().secsTo(taskOf(*id)->retryAt);
         QVERIFY2(left > 880 && left <= 900, qPrintable(QString::number(left)));
         QCOMPARE(transfer_calls_, 1);
     }

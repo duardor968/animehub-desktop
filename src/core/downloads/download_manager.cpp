@@ -299,6 +299,18 @@ bool DownloadManager::megaBlocked() const {
     return mega_until_.isValid() && QDateTime::currentDateTimeUtc() < mega_until_;
 }
 
+bool DownloadManager::transferItBlocked() const {
+    return transfer_it_until_.isValid() && QDateTime::currentDateTimeUtc() < transfer_it_until_;
+}
+
+void DownloadManager::transferItOverQuota(std::optional<std::chrono::seconds> time_left) {
+    if (!time_left && transferItBlocked())
+        return;
+    transfer_it_until_ = QDateTime::currentDateTimeUtc().addSecs(
+        time_left ? time_left->count()
+                  : std::chrono::duration_cast<std::chrono::seconds>(kQuotaWait).count());
+}
+
 void DownloadManager::megaOverQuota(std::optional<std::chrono::seconds> time_left) {
     // A later failure without a time keeps the one MEGA stated, or the retry already set.
     if (!time_left && megaBlocked()) {
@@ -638,11 +650,14 @@ void DownloadManager::tryCandidate(qint64 id, quint64 generation,
         submitJd(id, candidates.mid(index));
         return;
     }
-    // Nothing else to try: an episode MEGA's quota holds waits until it frees.
+    // Nothing else to try: an episode a quota holds waits until the first one frees.
     const auto give_up = [this, id](TaskIssue issue) {
-        if (issue == TaskIssue::Quota && megaBlocked()) {
+        if (issue == TaskIssue::Quota && megaBlocked() &&
+            (!transferItBlocked() || mega_until_ <= transfer_it_until_)) {
             wait(id, TaskIssue::Quota, mega_until_,
                  mega_until_known_ ? kMegaStatedTime : QString());
+        } else if (issue == TaskIssue::Quota && transferItBlocked()) {
+            wait(id, TaskIssue::Quota, transfer_it_until_);
         } else {
             fail(id, issue);
         }
@@ -671,9 +686,7 @@ void DownloadManager::tryCandidate(qint64 id, quint64 generation,
     const auto next = [this, id, generation, candidates, index](TaskIssue issue) {
         tryCandidate(id, generation, candidates, index + 1, issue);
     };
-    if (link.provider == api::Provider::TransferIt && megaBlocked()) {
-        // transfer.it is served by MEGA's API and storage: its quota is assumed to be MEGA's.
-        tasks_[id].detour = TaskIssue::Quota;
+    if (link.provider == api::Provider::TransferIt && transferItBlocked()) {
         next(TaskIssue::Quota);
         return;
     }
@@ -705,8 +718,11 @@ void DownloadManager::tryCandidate(qint64 id, quint64 generation,
                 next(TaskIssue::SourceRemoved);
                 return;
             case mega::ApiFailure::Kind::OverQuota:
-                // MEGA is skipped from now on, this episode included.
-                megaOverQuota(failure.timeLeft);
+                // The server is skipped from now on, this episode included.
+                if (provider == api::Provider::TransferIt)
+                    transferItOverQuota(failure.timeLeft);
+                else
+                    megaOverQuota(failure.timeLeft);
                 tryCandidate(id, generation, candidates, index, last_issue);
                 return;
             case mega::ApiFailure::Kind::Protocol:
@@ -1099,19 +1115,24 @@ void DownloadManager::transferFailed(qint64 id, int code, const QString& message
     case kHttpUnexpected:
         if (message.contains(u"509") &&
             (task.provider == api::Provider::Mega || task.provider == api::Provider::TransferIt)) {
-            // The transfer quota ran out: the episode looks for its file again, skipping MEGA,
-            // while MEGA's own answer says when it frees.
+            // The transfer quota ran out: the episode looks for its file again, skipping that
+            // server, while the server's own answer says when it frees.
+            const bool transfer_it = task.provider == api::Provider::TransferIt;
             if (const auto url = live.megaUrl; url.isValid()) {
-                services_.mega.quotaTimeLeft(url, this,
-                                             [this](std::optional<std::chrono::seconds> left) {
-                                                 if (left) {
-                                                     megaOverQuota(left);
-                                                 }
-                                             });
+                services_.mega.quotaTimeLeft(
+                    url, this, [this, transfer_it](std::optional<std::chrono::seconds> left) {
+                        if (left && transfer_it)
+                            transferItOverQuota(left);
+                        else if (left)
+                            megaOverQuota(left);
+                    });
             }
             task.state = TaskState::Queued;
             store(task);
-            megaOverQuota(std::nullopt);
+            if (transfer_it)
+                transferItOverQuota(std::nullopt);
+            else
+                megaOverQuota(std::nullopt);
             pump();
             return;
         }
