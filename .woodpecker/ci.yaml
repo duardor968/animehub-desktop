@@ -1,0 +1,34 @@
+# Linux CI in the KVM8 Woodpecker (https://ci.asrlabs.space): the toolchain of
+# scripts/linux-build.Dockerfile, Qt from aqt. Windows still builds on GitHub Actions (ci.yml).
+when:
+  - event: push
+    branch: [main, dev]
+  - event: pull_request
+
+steps:
+  linux:
+    image: ubuntu:24.04
+    environment:
+      DEBIAN_FRONTEND: noninteractive
+    commands:
+      - apt-get update -qq
+      - >-
+        apt-get install -y -qq --no-install-recommends g++-14 gcc-14 ninja-build pkg-config git
+        ca-certificates curl xz-utils python3-venv libgl-dev libegl-dev libxkbcommon-dev
+        libxkbcommon-x11-0 libfontconfig1 libfreetype6 libdbus-1-3 libglib2.0-0t64 libxcb-cursor0
+        libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
+        libxcb-xinerama0 libxcb-xkb1 libxcb-xinput0 libx11-xcb1 libxrender1 libxi6 libsm6 libice6
+        libssl-dev libsecret-1-dev mpv aria2 fonts-dejavu-core dbus dbus-x11 gnome-keyring >/dev/null
+      - python3 -m venv /opt/venv && /opt/venv/bin/pip install -q cmake==4.4.2 aqtinstall==3.3.0
+      - export PATH=/opt/venv/bin:$${PATH}
+      - aqt install-qt linux desktop 6.11.0 linux_gcc_64 -m qtimageformats -O /opt/qt >/dev/null
+      - CXX=g++-14 QT_ROOT=/opt/qt/6.11.0/gcc_64 cmake --fresh --preset linux-debug
+      # The step gets 4 CPUs and 8 GB of the agent, not the host's 8.
+      - cmake --build --preset linux-debug --parallel 4
+      # A throwaway session bus and keyring (in a folder of its own, so no earlier keyring with
+      # another password asks to be unlocked), so the credential test runs too.
+      - export XDG_RUNTIME_DIR=$(mktemp -d) && chmod 700 "$${XDG_RUNTIME_DIR}"
+      - >-
+        XDG_DATA_HOME="$(mktemp -d)" dbus-run-session -- sh -c 'printf ci |
+        gnome-keyring-daemon --unlock --components=secrets >/dev/null &&
+        ANIMEHUB_TEST_KEYRING=private ctest --preset linux-debug'
