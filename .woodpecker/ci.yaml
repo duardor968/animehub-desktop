@@ -13,13 +13,21 @@ steps:
       DEBIAN_FRONTEND: noninteractive
     commands:
       - apt-get update -qq
+      # The .deb files live in the agent's persistent cache (/ci-cache), one apt at a time under a
+      # lock; autoclean drops versions the archive no longer has. The log keeps apt's download line.
+      - export APT_CACHE=/ci-cache/apt/ubuntu-24.04
+      - mkdir -p "$${APT_CACHE}/partial"
       - >-
-        apt-get install -y -qq --no-install-recommends g++-14 gcc-14 ninja-build pkg-config git
+        flock "$${APT_CACHE}.lock" sh -c 'apt-get install -y -q --no-install-recommends
+        -o Dir::Cache::Archives="$${APT_CACHE}" g++-14 gcc-14 ninja-build pkg-config git
         ca-certificates curl xz-utils python3-venv libgl-dev libegl-dev libxkbcommon-dev
         libxkbcommon-x11-0 libfontconfig1 libfreetype6 libdbus-1-3 libglib2.0-0t64 libxcb-cursor0
         libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
         libxcb-xinerama0 libxcb-xkb1 libxcb-xinput0 libx11-xcb1 libxrender1 libxi6 libsm6 libice6
-        libssl-dev libsecret-1-dev mpv aria2 fonts-dejavu-core dbus dbus-x11 gnome-keyring ccache >/dev/null
+        libssl-dev libsecret-1-dev mpv aria2 fonts-dejavu-core dbus dbus-x11 gnome-keyring ccache
+        >/tmp/apt.log && apt-get autoclean -qq -o Dir::Cache::Archives="$${APT_CACHE}"'
+        || { cat /tmp/apt.log; exit 1; }
+      - grep -E '^(Need to get|Fetched)' /tmp/apt.log || echo "apt downloaded nothing"
       - export PIP_CACHE_DIR=/ci-cache/pip
       - python3 -m venv /opt/venv && /opt/venv/bin/pip install -q cmake==4.4.2 aqtinstall==3.3.0
       - export PATH=/opt/venv/bin:$${PATH}
