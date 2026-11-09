@@ -5,7 +5,7 @@
 #   docker run --rm -v animehub-qt-cache:/opt/qt animehub-linux-build:24.04 \
 #     aqt install-qt linux desktop 6.11.0 linux_gcc_64 -m qtimageformats -O /opt/qt
 # then, with that volume at /opt/qt: QT_ROOT=/opt/qt/6.11.0/gcc_64 and the linux-* presets, the
-# test command and scripts/package-linux.sh as .github/workflows run them.
+# test command of .woodpecker/ci.yaml and scripts/package-linux.sh as release.yml runs it.
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive

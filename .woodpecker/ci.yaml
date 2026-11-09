@@ -1,5 +1,6 @@
 # Linux CI in the KVM8 Woodpecker (https://ci.asrlabs.space): the toolchain of
-# scripts/linux-build.Dockerfile, Qt from aqt. Windows still builds on GitHub Actions (ci.yml).
+# scripts/linux-build.Dockerfile, Qt from aqt. Windows (ci.yml) and the releases
+# (release.yml) stay on GitHub Actions.
 when:
   - event: push
     branch: [main, dev]
