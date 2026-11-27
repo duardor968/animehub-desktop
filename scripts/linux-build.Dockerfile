@@ -11,7 +11,7 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       g++-14 gcc-14 ninja-build pkg-config patchelf file git curl ca-certificates xz-utils \
-      python3-pip python3-venv dpkg-dev zsync clang-tidy \
+      python3-pip python3-venv dpkg-dev zsync clang-tidy-20 \
       libgl-dev libegl-dev libxkbcommon-dev libxkbcommon-x11-0 libfontconfig1 libfreetype6 \
       libdbus-1-3 libglib2.0-0t64 \
       libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
@@ -28,5 +28,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-14 100
 
 RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir cmake==4.4.2 aqtinstall==3.3.0
+    && /opt/venv/bin/pip install --no-cache-dir cmake==4.4.2 aqtinstall==3.3.0 zstandard cryptography
 ENV PATH=/opt/venv/bin:$PATH

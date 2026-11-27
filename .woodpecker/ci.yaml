@@ -27,12 +27,12 @@ steps:
         libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
         libxcb-xinerama0 libxcb-xkb1 libxcb-xinput0 libx11-xcb1 libxrender1 libxi6 libsm6 libice6
         libssl-dev libsecret-1-dev mpv aria2 fonts-dejavu-core dbus dbus-x11 gnome-keyring ccache
-        clang-tidy
+        clang-tidy-20
         >/tmp/apt.log && apt-get autoclean -qq -o Dir::Cache::Archives="$${APT_CACHE}"'
         || { cat /tmp/apt.log; exit 1; }
       - grep -E '^(Need to get|Fetched)' /tmp/apt.log || echo "apt downloaded nothing"
       - export PIP_CACHE_DIR=/ci-cache/pip
-      - python3 -m venv /opt/venv && /opt/venv/bin/pip install -q cmake==4.4.2 aqtinstall==3.3.0
+      - python3 -m venv /opt/venv && /opt/venv/bin/pip install -q cmake==4.4.2 aqtinstall==3.3.0 zstandard cryptography
       - export PATH=/opt/venv/bin:$${PATH}
       # Qt and the compiler cache live in the agent's persistent cache (/ci-cache). Qt installs once per
       # version and modules, under a lock and with a completion mark, so concurrent builds never see half of it.
@@ -48,15 +48,22 @@ steps:
       # The step gets 4 CPUs and 8 GB of the agent, not the host's 8.
       - cmake --build --preset linux-debug --parallel 4
       - ccache --show-stats
-      # Static analysis on Linux (moved from Windows CI, where VS18 STL1000 broke clang-tidy).
+      # Static analysis on Linux with clang-tidy-20 (Clang 20 supports C++26 & libstdc++-14 <expected>;
+      # moved from Windows CI where VS18 STL1000 broke clang-tidy). Strip ccache from a temp compile DB.
       - >-
-        python3 -c 'import json, os, sys;
+        python3 -c 'import json, os, shlex, sys;
         root = os.path.realpath(os.getcwd());
         allowed = (os.path.join(root, "src") + os.sep, os.path.join(root, "tests") + os.sep);
         db = json.load(open("out/build/linux-debug/compile_commands.json"));
-        files = sorted({os.path.realpath(e["file"]) for e in db if os.path.realpath(e["file"]).startswith(allowed)});
-        sys.stdout.write("\0".join(files))' |
-        xargs -0 -r -P 4 -n 4 clang-tidy -p out/build/linux-debug --extra-arg=-Wno-unknown-warning-option --quiet
+        strip = lambda cmd: shlex.join((lambda p: p[1:] if p and os.path.basename(p[0]) == "ccache" else p)(shlex.split(cmd)));
+        clean = [dict(e, command=strip(e["command"])) for e in db];
+        os.makedirs("/tmp/tidy-db", exist_ok=True);
+        json.dump(clean, open("/tmp/tidy-db/compile_commands.json", "w"));
+        files = sorted({os.path.realpath(e["file"]) for e in db if os.path.realpath(e["file"]).startswith(allowed) and e["file"].endswith(".cpp")});
+        sys.stdout.write(chr(0).join(files))' |
+        xargs -0 -r -P 4 -n 4 clang-tidy-20 -p /tmp/tidy-db
+        --extra-arg=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/14
+        --extra-arg=-Wno-unknown-warning-option --quiet
       # A throwaway session bus and keyring (in a folder of its own, so no earlier keyring with
       # another password asks to be unlocked), so the credential test runs too.
       - export XDG_RUNTIME_DIR=$(mktemp -d) && chmod 700 "$${XDG_RUNTIME_DIR}"
