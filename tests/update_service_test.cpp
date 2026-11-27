@@ -226,7 +226,15 @@ private slots:
         const QString install_dir = temp.filePath(QStringLiteral("install"));
         const QString stage_v2 = temp.filePath(QStringLiteral("stage-v2"));
         writeFileBytes(install_dir + QStringLiteral("/AnimeHub.exe"), QByteArray(16 * 1024, '1'));
-        writeFileBytes(stage_v2 + QStringLiteral("/AnimeHub.exe"), QByteArray(48 * 1024, '2'));
+        // Use incompressible pseudo-random bytes so the zstd pack spans multiple ticks and stalls
+        // cleanly mid-transfer until cancelDownload() runs.
+        QByteArray stage_payload(16 * 1024, Qt::Uninitialized);
+        std::uint32_t prng = 0x12345678U;
+        for (qsizetype i = 0; i < stage_payload.size(); ++i) {
+            prng = prng * 1664525U + 1013904223U;
+            stage_payload[i] = static_cast<char>((prng >> 16U) & 0xFFU);
+        }
+        writeFileBytes(stage_v2 + QStringLiteral("/AnimeHub.exe"), stage_payload);
 
         HttpTestServer server;
         QVERIFY(server.listen());
@@ -246,11 +254,12 @@ private slots:
         const QByteArray env_bytes = readFileBytes(out_v2 + QStringLiteral("/update-win64.json"));
         const QByteArray pack_bytes =
             readFileBytes(out_v2 + QStringLiteral("/AnimeHub-0.5.0-win64.ahpack"));
+        QVERIFY(pack_bytes.size() > 4096);
 
         // API returns 503 -> triggers GitHub fallback.
         server.json("/api/v1/desktop/releases/latest", R"({"error":"down"})", 503);
         server.json("/github/update-win64.json", env_bytes);
-        server.file("/dl/AnimeHub-0.5.0-win64.ahpack", pack_bytes, 64);
+        server.file("/dl/AnimeHub-0.5.0-win64.ahpack", pack_bytes, 512, 1024);
 
         InstallContext ctx;
         ctx.installDir = install_dir;
