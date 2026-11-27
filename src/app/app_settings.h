@@ -44,6 +44,7 @@ class AppSettings final : public QObject {
     Q_PROPERTY(QString jdEndpoint READ jdEndpoint WRITE setJdEndpoint NOTIFY changed)
     Q_PROPERTY(QString jdExecutable READ jdExecutable WRITE setJdExecutable NOTIFY changed)
     Q_PROPERTY(CloseAction closeAction READ closeAction WRITE setCloseAction NOTIFY changed)
+    Q_PROPERTY(UpdateMode updateMode READ updateMode WRITE setUpdateMode NOTIFY changed)
     Q_PROPERTY(JDownloader jdownloader READ jdownloader WRITE setJdownloader NOTIFY changed)
     Q_PROPERTY(
         QString jdownloaderDevice READ jdownloaderDevice WRITE setJdownloaderDevice NOTIFY changed)
@@ -57,6 +58,8 @@ class AppSettings final : public QObject {
 public:
     enum class CloseAction { Ask, Tray, Quit };
     Q_ENUM(CloseAction)
+    enum class UpdateMode { Auto, NotifyOnly, Manual };
+    Q_ENUM(UpdateMode)
     // How JDownloader is reached: not used, the one of this computer (local API) or one reached
     // through MyJDownloader. Only with it are MP4Upload and 1Fichier downloaded. The values the
     // earlier Click'n'Load and MyJDownloader sending saved keep their meaning, and so does an
@@ -109,6 +112,8 @@ public:
     void setStartWithWindows(bool enabled);
     [[nodiscard]] CloseAction closeAction() const;
     void setCloseAction(CloseAction action);
+    [[nodiscard]] UpdateMode updateMode() const;
+    void setUpdateMode(UpdateMode mode);
     [[nodiscard]] JDownloader jdownloader() const;
     // Turning it off brings the preferred of MEGA and Pixeldrain back when neither was on.
     void setJdownloader(JDownloader mode);

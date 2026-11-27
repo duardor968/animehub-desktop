@@ -1,3 +1,30 @@
+add_library(animehub-monocypher STATIC
+  ../../third_party/monocypher/monocypher.c
+  ../../third_party/monocypher/monocypher-ed25519.c
+)
+set_target_properties(animehub-monocypher PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+target_include_directories(animehub-monocypher PUBLIC
+  "${PROJECT_SOURCE_DIR}/third_party/monocypher"
+)
+if(MSVC)
+  target_compile_options(animehub-monocypher PRIVATE /W0)
+else()
+  target_compile_options(animehub-monocypher PRIVATE -w)
+endif()
+
+add_library(animehub-zstd-dec STATIC
+  ../../third_party/zstd/zstddeclib.c
+)
+set_target_properties(animehub-zstd-dec PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+target_include_directories(animehub-zstd-dec PUBLIC
+  "${PROJECT_SOURCE_DIR}/third_party/zstd"
+)
+if(MSVC)
+  target_compile_options(animehub-zstd-dec PRIVATE /W0)
+else()
+  target_compile_options(animehub-zstd-dec PRIVATE -w)
+endif()
+
 qt_add_library(animehub-core STATIC
   api/api_client.cpp
   api/api_client.h
@@ -46,6 +73,18 @@ qt_add_library(animehub-core STATIC
   remote/remote_service.h
   storage/database.cpp
   storage/database.h
+  update/ahpack.cpp
+  update/ahpack.h
+  update/update_http.cpp
+  update/update_http.h
+  update/update_keys.h
+  update/update_manifest.cpp
+  update/update_manifest.h
+  update/update_service.cpp
+  update/update_service.h
+  update/update_types.h
+  update/zsync_delta.cpp
+  update/zsync_delta.h
   util/file_names.cpp
   util/file_names.h
 )
@@ -78,6 +117,9 @@ target_link_libraries(animehub-core
     Qt6::Core
     Qt6::Network
     Qt6::Sql
+  PRIVATE
+    animehub-monocypher
+    animehub-zstd-dec
 )
 target_compile_definitions(animehub-core PUBLIC
   ANIMEHUB_VERSION="${PROJECT_VERSION}"

@@ -265,6 +265,58 @@ private slots:
         QCOMPARE(corrupt.scheduleViewMode(), QStringLiteral("day"));
         QVERIFY(corrupt.scheduleFollowingOnly());
     }
+
+    void updateModePersistsSanitizesAndRespectsIsolation() {
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        const auto path = root.filePath(QStringLiteral("settings.ini"));
+        AppSettings settings(path, root.path());
+        QSignalSpy changed_spy(&settings, &AppSettings::changed);
+
+        // Default is Auto.
+        QCOMPARE(settings.updateMode(), AppSettings::UpdateMode::Auto);
+
+        // Persist NotifyOnly and Manual.
+        settings.setUpdateMode(AppSettings::UpdateMode::NotifyOnly);
+        QCOMPARE(settings.updateMode(), AppSettings::UpdateMode::NotifyOnly);
+        QCOMPARE(changed_spy.size(), 1);
+        // Redundant write emits no signal.
+        settings.setUpdateMode(AppSettings::UpdateMode::NotifyOnly);
+        QCOMPARE(changed_spy.size(), 1);
+
+        {
+            const AppSettings reloaded(path, root.path());
+            QCOMPARE(reloaded.updateMode(), AppSettings::UpdateMode::NotifyOnly);
+        }
+
+        settings.setUpdateMode(AppSettings::UpdateMode::Manual);
+        QCOMPARE(settings.updateMode(), AppSettings::UpdateMode::Manual);
+        QCOMPARE(changed_spy.size(), 2);
+
+        {
+            const AppSettings reloaded(path, root.path());
+            QCOMPARE(reloaded.updateMode(), AppSettings::UpdateMode::Manual);
+        }
+
+        // Isolated profile always reports Auto and ignores writes.
+        settings.setIsolated(true);
+        QCOMPARE(settings.updateMode(), AppSettings::UpdateMode::Auto);
+        settings.setUpdateMode(AppSettings::UpdateMode::NotifyOnly);
+        QCOMPARE(settings.updateMode(), AppSettings::UpdateMode::Auto);
+        QCOMPARE(changed_spy.size(), 2);
+        settings.setIsolated(false);
+        QCOMPARE(settings.updateMode(), AppSettings::UpdateMode::Manual);
+
+        // Corrupt INI value sanitizes to Auto.
+        const auto corrupt_path = root.filePath(QStringLiteral("corrupt-updates.ini"));
+        QFile file(corrupt_path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("[updates]\nmode=nightly-invalid\n");
+        file.close();
+
+        const AppSettings corrupt(corrupt_path, root.path());
+        QCOMPARE(corrupt.updateMode(), AppSettings::UpdateMode::Auto);
+    }
 };
 
 QTEST_GUILESS_MAIN(AppSettingsTest)

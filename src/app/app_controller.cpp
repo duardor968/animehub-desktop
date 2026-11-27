@@ -70,6 +70,18 @@ QString homepageString() {
 #endif
 }
 
+update::UpdateMode toCoreUpdateMode(AppSettings::UpdateMode mode) {
+    switch (mode) {
+    case AppSettings::UpdateMode::Auto:
+        return update::UpdateMode::Auto;
+    case AppSettings::UpdateMode::NotifyOnly:
+        return update::UpdateMode::NotifyOnly;
+    case AppSettings::UpdateMode::Manual:
+        return update::UpdateMode::Manual;
+    }
+    return update::UpdateMode::Auto;
+}
+
 } // namespace
 
 QString AppController::version() {
@@ -299,6 +311,46 @@ AppController::AppController(AppPaths paths, QObject* parent)
     library_anime_ = std::make_unique<AnimeView>(services);
     catalog_anime_ = std::make_unique<AnimeView>(services);
 
+    update::InstallContext update_ctx;
+    update_ctx.installDir = QCoreApplication::applicationDirPath();
+    update_ctx.dataDir = paths_.data;
+#ifdef Q_OS_LINUX
+    const auto appimage_env = qEnvironmentVariable("APPIMAGE");
+    update_ctx.executablePath =
+        !appimage_env.isEmpty() ? appimage_env : QCoreApplication::applicationFilePath();
+#else
+    const QString appimage_env;
+    update_ctx.executablePath = QCoreApplication::applicationFilePath();
+#endif
+    update_ctx.currentVersion = update::SemVer::parse(version()).value_or(update::SemVer{0, 4, 0});
+    update_ctx.installMode = update::UpdateService::detectInstallMode(
+        update_ctx.installDir, update_ctx.executablePath, appimage_env);
+    update_ctx.apiBaseUrl = api_options.baseUrl;
+    update_ctx.isolatedProfile = paths_.isolated || paths_.smoke;
+    update_ctx.hooks.requestAppQuit = [this] { quit(); };
+
+    update_service_ = std::make_unique<update::UpdateService>(network_, std::move(update_ctx));
+    update_service_->setUpdateMode(toCoreUpdateMode(settings_->updateMode()));
+    update_view_ = std::make_unique<UpdateView>(
+        *update_service_, *settings_,
+        [this](const QUrl& url) {
+            if (!paths_.isolated && !paths_.smoke) {
+                QDesktopServices::openUrl(url);
+            }
+        },
+        [this] { return downloads_view_ ? downloads_view_->activeTaskCount() : 0; });
+    connect(downloads_view_.get(), &DownloadsView::summaryChanged, update_view_.get(),
+            &UpdateView::notifyActiveDownloadsChanged);
+    connect(settings_.get(), &AppSettings::changed, this, [this] {
+        const auto prev_mode = update_service_->updateMode();
+        const auto next_mode = toCoreUpdateMode(settings_->updateMode());
+        update_service_->setUpdateMode(next_mode);
+        if (prev_mode == update::UpdateMode::Manual && next_mode != update::UpdateMode::Manual &&
+            !paths_.isolated && !paths_.smoke) {
+            update_service_->startBackgroundChecks();
+        }
+    });
+
     connect(library_.get(), &library::LibraryService::newEpisodes, this,
             &AppController::notifyNewEpisodes);
     connect(library_.get(), &library::LibraryService::newFranchiseMembers, this,
@@ -394,6 +446,35 @@ void AppController::start() {
         });
 #endif
     }
+    if (!paths_.smoke && !paths_.isolated && update_service_) {
+        update_service_->consumePendingEnginesOnStartup();
+        if (settings_->updateMode() != AppSettings::UpdateMode::Manual) {
+            update_service_->startBackgroundChecks();
+        }
+    }
+    if (!paths_.smoke && update_service_) {
+        if (!paths_.postUpdateVerifyToken.isEmpty()) {
+            update_service_->confirmPostUpdateHealthy(paths_.postUpdateVerifyToken);
+        }
+        if (update_service_->lastAppliedVersion() == version()) {
+            const QString applied = version();
+            update_service_->acknowledgeLastAppliedVersion();
+            QMetaObject::invokeMethod(
+                this, [this, applied] { emit postUpdateReady(applied); }, Qt::QueuedConnection);
+        }
+        if (!update_service_->lastRollbackVersion().isEmpty()) {
+            const QString failed = update_service_->lastRollbackVersion();
+            update_service_->acknowledgeRollback();
+            QMetaObject::invokeMethod(
+                this,
+                [this, failed] {
+                    emit message(QStringLiteral("No se pudo iniciar la versión %1; se restauró %2")
+                                     .arg(failed, version()),
+                                 true);
+                },
+                Qt::QueuedConnection);
+        }
+    }
 }
 
 void AppController::publishRemoteProfiles() {
@@ -434,6 +515,18 @@ bool AppController::handOffToRunningInstance(const QString& data_directory, bool
     return true;
 }
 
+bool AppController::handOffQuitToRunningInstance(const QString& data_directory) {
+    QLocalSocket socket;
+    socket.connectToServer(instanceName(data_directory));
+    if (!socket.waitForConnected(500)) {
+        return false;
+    }
+    socket.write("quit\n");
+    socket.waitForBytesWritten(500);
+    socket.waitForDisconnected(1000);
+    return true;
+}
+
 void AppController::listenForOtherInstances(const QString& data_directory) {
     const auto name = instanceName(data_directory);
     QLocalServer::removeServer(name); // a crashed instance may have left its name behind
@@ -441,11 +534,14 @@ void AppController::listenForOtherInstances(const QString& data_directory) {
     if (!instance_server_.listen(name)) {
         return;
     }
-    // Another start says "show"; one started in the tray only checks this one is here.
+    // Another start says "show"; `--quit` says "quit"; a tray start only checks this one is here.
     connect(&instance_server_, &QLocalServer::newConnection, this, [this] {
         while (auto* socket = instance_server_.nextPendingConnection()) {
             const auto read = [this, socket] {
-                if (socket->readAll().contains("show")) {
+                const auto payload = socket->readAll();
+                if (payload.contains("quit")) {
+                    quit();
+                } else if (payload.contains("show")) {
                     emit showRequested();
                 }
             };
@@ -473,10 +569,30 @@ void AppController::setupTray() {
             downloads_view_->resumeAll();
         }
     });
-    connect(tray_menu_.get(), &QMenu::aboutToShow, this, [this, pause] {
+    auto* update_action = tray_menu_->addAction(QString());
+    update_action->setVisible(false);
+    connect(update_action, &QAction::triggered, this, [this] {
+        if (!update_service_ || !update_service_->isReadyToApply() || !update_view_) {
+            return;
+        }
+        if (downloads_view_ && downloads_view_->activeTaskCount() > 0) {
+            emit showRequested();
+            update_view_->requestRestartConfirmation();
+        } else {
+            update_view_->applyAndRestart();
+        }
+    });
+    connect(tray_menu_.get(), &QMenu::aboutToShow, this, [this, pause, update_action] {
         pause->setText(downloads_view_->canPauseAll() ? QStringLiteral("Pausar las descargas")
                                                       : QStringLiteral("Reanudar las descargas"));
         pause->setEnabled(downloads_view_->canPauseAll() || downloads_view_->canResumeAll());
+        const bool ready = update_service_ && update_service_->isReadyToApply() &&
+                           !update_service_->availableVersion().isEmpty();
+        update_action->setVisible(ready);
+        if (ready) {
+            update_action->setText(
+                QStringLiteral("Actualizar a %1").arg(update_service_->availableVersion()));
+        }
     });
     tray_menu_->addSeparator();
     tray_menu_->addAction(QStringLiteral("Salir"), this, &AppController::quit);
@@ -625,6 +741,7 @@ void AppController::quit() {
         return;
     }
     quitting_ = true;
+    emit quittingChanged();
     instance_server_.close();
     emit hideRequested();
     if (tray_) {
@@ -634,7 +751,12 @@ void AppController::quit() {
         QCoreApplication::quit();
         return;
     }
-    downloads_->shutdown([] { QCoreApplication::quit(); });
+    downloads_->shutdown([this] {
+        if (update_service_) {
+            update_service_->applyOnQuitIfReady();
+        }
+        QCoreApplication::quit();
+    });
 }
 
 void AppController::openDownloadFolder() {

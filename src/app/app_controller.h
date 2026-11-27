@@ -8,6 +8,8 @@
 #include "jdownloader_view.h"
 #include "library_model.h"
 #include "remote_view.h"
+#include "update/update_service.h"
+#include "update_view.h"
 
 #include <QLocalServer>
 #include <QNetworkAccessManager>
@@ -36,6 +38,7 @@ struct AppPaths {
     bool smoke = false;
     // A capture of JDownloader's setup as on a PC without it.
     bool detectJDownloader = true;
+    QString postUpdateVerifyToken;
 };
 
 // Builds and owns everything the window shows, and the app's life outside it: tray icon,
@@ -51,8 +54,10 @@ class AppController final : public QObject {
     Q_PROPERTY(DownloadsView* downloads READ downloads CONSTANT)
     Q_PROPERTY(JDownloaderView* jdownloader READ jdownloader CONSTANT)
     Q_PROPERTY(RemoteView* remote READ remote CONSTANT)
+    Q_PROPERTY(UpdateView* updater READ updater CONSTANT)
     Q_PROPERTY(AnimeView* libraryAnime READ libraryAnime CONSTANT)
     Q_PROPERTY(AnimeView* catalogAnime READ catalogAnime CONSTANT)
+    Q_PROPERTY(bool quitting READ quitting NOTIFY quittingChanged)
     Q_PROPERTY(QString version READ version CONSTANT)
     Q_PROPERTY(QString qtVersion READ qtVersion CONSTANT)
     Q_PROPERTY(QString platformLabel READ platformLabel CONSTANT)
@@ -85,6 +90,8 @@ public:
     }
     // Another AnimeHub with this library already runs: it shows its window, if asked to.
     [[nodiscard]] static bool handOffToRunningInstance(const QString& data_directory, bool show);
+    // Asks a running AnimeHub instance for this library to quit cleanly; false if none runs.
+    [[nodiscard]] static bool handOffQuitToRunningInstance(const QString& data_directory);
     void listenForOtherInstances(const QString& data_directory);
 
     [[nodiscard]] AppSettings* settings() {
@@ -104,6 +111,12 @@ public:
     }
     RemoteView* remote() {
         return remote_view_.get();
+    }
+    [[nodiscard]] UpdateView* updater() {
+        return update_view_.get();
+    }
+    [[nodiscard]] bool quitting() const {
+        return quitting_;
     }
     [[nodiscard]] AnimeView* libraryAnime() {
         return library_anime_.get();
@@ -145,6 +158,8 @@ signals:
     void showRequested();
     void hideRequested();
     void closeDecisionNeeded();
+    void quittingChanged();
+    void postUpdateReady(const QString& version);
     // A notification was clicked: the window shows this anime in the library.
     void animeRequested(const QString& slug);
     void message(const QString& text, bool problem);
@@ -178,6 +193,8 @@ private:
     std::unique_ptr<DownloadsView> downloads_view_;
     std::unique_ptr<AnimeView> library_anime_;
     std::unique_ptr<AnimeView> catalog_anime_;
+    std::unique_ptr<update::UpdateService> update_service_;
+    std::unique_ptr<UpdateView> update_view_;
     std::unique_ptr<QMenu> tray_menu_;
     std::unique_ptr<QSystemTrayIcon> tray_;
 #ifdef Q_OS_LINUX

@@ -1,8 +1,8 @@
 name: Release
 
 # A tag vX.Y.Z (annotated; its message is the release notes) builds the Windows and Linux
-# packages on GitHub, checks them, and publishes them with one SHA256SUMS.txt. Run by hand, it
-# checks without publishing.
+# packages on GitHub, checks them, and publishes them atomically with one SHA256SUMS.txt.
+# Run by hand, it checks without publishing.
 on:
   push:
     tags: ["v*"]
@@ -42,6 +42,10 @@ jobs:
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
+      - name: Install updater packaging dependencies
+        if: hashFiles('scripts/update-tool.py') != ''
+        shell: pwsh
+        run: python -m pip install --quiet zstandard cryptography
       - name: Build
         shell: pwsh
         run: |
@@ -50,8 +54,15 @@ jobs:
           cmake --build --preset windows-release
       - name: Package
         shell: pwsh
-        run: ./scripts/package.ps1 -Smoke
-      - name: Check the installer
+        env:
+          UPDATER_SIGNING_KEY: ${{ secrets.UPDATER_SIGNING_KEY }}
+        run: |
+          $args = @("-Smoke")
+          if (Test-Path -LiteralPath "scripts/update-tool.py") {
+            $args += "-BuildUpdatePack"
+          }
+          ./scripts/package.ps1 @args
+      - name: Check the installer (fresh, upgrade/reinstall, uninstall)
         shell: pwsh
         run: |
           $setup = Get-Item out/package/AnimeHub-*-setup.exe
@@ -59,22 +70,49 @@ jobs:
           $install = Start-Process -FilePath $setup -Wait -PassThru `
             -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$dir`""
           if ($install.ExitCode -ne 0) { throw "The installer failed with exit code $($install.ExitCode)." }
-          foreach ($file in "AnimeHub.exe", "LICENSE.txt", "THIRD-PARTY.txt", "engines\aria2\aria2c.exe", "engines\mpv\mpv.exe") {
-            if (-not (Test-Path (Join-Path $dir $file))) { throw "The installer left out $file." }
+          $expected = @("AnimeHub.exe", "LICENSE.txt", "THIRD-PARTY.txt", "engines\.pins", "engines\aria2\aria2c.exe", "engines\mpv\mpv.exe")
+          if (Test-Path -LiteralPath "out/package/AnimeHub/AnimeHubUpdater.exe") {
+            $expected += "AnimeHubUpdater.exe"
           }
+          foreach ($file in $expected) {
+            if (-not (Test-Path -LiteralPath (Join-Path $dir $file))) { throw "The installer left out $file." }
+          }
+
+          # Install a second time over the existing copy (upgrade/reinstall path): verify clean
+          # exit, files preserved, mpv skipped when .pins matches, and autostart stays off.
+          $mpvBefore = (Get-Item -LiteralPath (Join-Path $dir "engines\mpv\mpv.exe")).LastWriteTimeUtc
+          $reinstall = Start-Process -FilePath $setup -Wait -PassThru `
+            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          if ($reinstall.ExitCode -ne 0) { throw "The second install over itself failed with exit code $($reinstall.ExitCode)." }
+          foreach ($file in $expected) {
+            if (-not (Test-Path -LiteralPath (Join-Path $dir $file))) { throw "The second install left out $file." }
+          }
+          $mpvAfter = (Get-Item -LiteralPath (Join-Path $dir "engines\mpv\mpv.exe")).LastWriteTimeUtc
+          if ($mpvAfter -ne $mpvBefore) { throw "NeedsMpvUpdate re-extracted mpv.exe despite identical engines\.pins." }
+          $runEntry = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "AnimeHub" -ErrorAction SilentlyContinue).AnimeHub
+          if ($runEntry) { throw "Silent upgrade/reinstall unexpectedly created Run\AnimeHub." }
+
+          # Stage a synthetic .update folder to verify [UninstallDelete] removes updater leftovers.
+          $updateDir = Join-Path $dir ".update"
+          New-Item -ItemType Directory -Path $updateDir -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $updateDir "staged.tmp") -Value "test"
+
           $uninstall = Start-Process -FilePath (Join-Path $dir "unins000.exe") -Wait -PassThru `
             -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
           if ($uninstall.ExitCode -ne 0) { throw "The uninstaller failed with exit code $($uninstall.ExitCode)." }
           # The uninstaller finishes in a copy of itself; give it a moment to remove the files.
           $deadline = (Get-Date).AddSeconds(30)
-          while ((Test-Path (Join-Path $dir "AnimeHub.exe")) -and (Get-Date) -lt $deadline) { Start-Sleep 1 }
-          if (Test-Path (Join-Path $dir "AnimeHub.exe")) { throw "The uninstaller left AnimeHub.exe behind." }
+          while ((Test-Path -LiteralPath (Join-Path $dir "AnimeHub.exe")) -and (Get-Date) -lt $deadline) { Start-Sleep 1 }
+          if (Test-Path -LiteralPath (Join-Path $dir "AnimeHub.exe")) { throw "The uninstaller left AnimeHub.exe behind." }
+          if (Test-Path -LiteralPath $updateDir) { throw "The uninstaller left .update behind." }
       - uses: actions/upload-artifact@v4
         with:
           name: windows
           path: |
             out/package/AnimeHub-*-win64.zip
             out/package/AnimeHub-*-setup.exe
+            out/package/AnimeHub-*-win64.ahpack
+            out/package/update-win64.json
           if-no-files-found: error
 
   linux:
@@ -84,10 +122,11 @@ jobs:
       - name: Install the compiler, the libraries and the packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends g++-14 ninja-build pkg-config patchelf \
-            dpkg-dev file libgl-dev libegl-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 \
-            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
-            libxcb-shape0 libxcb-xkb1 libssl-dev libsecret-1-dev fonts-dejavu-core xvfb x11-utils
+          sudo apt-get install -y --no-install-recommends g++-14 gcc-14 ninja-build pkg-config patchelf \
+            dpkg-dev file zsync libgl-dev libegl-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xkb1 libssl-dev libsecret-1-dev \
+            fonts-dejavu-core xvfb x11-utils
       - uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: 4.4.1
@@ -110,17 +149,42 @@ jobs:
           fi
       - name: Build
         run: |
-          CXX=g++-14 QT_ROOT="$QT_ROOT_DIR" cmake --fresh --preset linux-release
+          CC=gcc-14 CXX=g++-14 QT_ROOT="$QT_ROOT_DIR" cmake --fresh --preset linux-release
           cmake --build --preset linux-release
       - name: Package
         # Runners have no FUSE: linuxdeploy and the AppImage's smoke check extract themselves.
-        run: APPIMAGE_EXTRACT_AND_RUN=1 QT_ROOT="$QT_ROOT_DIR" ./scripts/package-linux.sh --smoke
+        run: |
+          APPIMAGE_EXTRACT_AND_RUN=1 QT_ROOT="$QT_ROOT_DIR" ./scripts/package-linux.sh --smoke
+          ls out/package/AnimeHub-*-x86_64.AppImage.zsync
+      - name: Sign Linux update manifest
+        if: hashFiles('scripts/update-tool.py') != ''
+        env:
+          UPDATER_SIGNING_KEY: ${{ secrets.UPDATER_SIGNING_KEY }}
+        run: |
+          if [[ -z "${UPDATER_SIGNING_KEY:-}" ]]; then
+            echo "UPDATER_SIGNING_KEY is not set; skipping update-linux-x64.json."
+            exit 0
+          fi
+          python3 -m venv /tmp/updater-venv
+          /tmp/updater-venv/bin/pip install --quiet cryptography
+          version="$(sed -nE 's/^[[:space:]]+VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' CMakeLists.txt | head -1)"
+          base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}"
+          /tmp/updater-venv/bin/python scripts/update-tool.py sign-manifest \
+            --platform linux-x64 \
+            --version "$version" \
+            --appimage "out/package/AnimeHub-${version}-x86_64.AppImage" \
+            --zsync "out/package/AnimeHub-${version}-x86_64.AppImage.zsync" \
+            --deb "out/package/animehub_${version}_amd64.deb" \
+            --base-url "$base_url" \
+            --output "out/package/update-linux-x64.json"
       - uses: actions/upload-artifact@v4
         with:
           name: linux
           path: |
             out/package/AnimeHub-*-x86_64.AppImage
+            out/package/AnimeHub-*-x86_64.AppImage.zsync
             out/package/animehub_*_amd64.deb
+            out/package/update-linux-x64.json
           if-no-files-found: error
 
   publish:
@@ -133,7 +197,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Publish
+      - name: Publish atomically
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -143,6 +207,40 @@ jobs:
             echo "$GITHUB_REF_NAME is not an annotated tag." >&2
             exit 1
           fi
-          (cd dist && sha256sum -- * > SHA256SUMS.txt)
-          gh release create "$GITHUB_REF_NAME" --verify-tag --notes-from-tag \
-            --title "AnimeHub ${GITHUB_REF_NAME#v}" dist/*
+          rm -f dist/SHA256SUMS.txt
+          (cd dist && LC_ALL=C sha256sum -- * > SHA256SUMS.txt)
+
+          # Create as a draft, upload and verify every asset, then publish atomically so clients
+          # never observe a partially uploaded release.
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --notes-from-tag \
+            --title "AnimeHub ${GITHUB_REF_NAME#v}"
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+          uploaded="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
+          expected="$(cd dist && ls -1 | LC_ALL=C sort)"
+          if [[ "$uploaded" != "$expected" ]]; then
+            echo "Uploaded assets do not match dist/ contents." >&2
+            diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$uploaded") >&2 || true
+            exit 1
+          fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+      - name: Notify AnimeHub API release sync webhook
+        env:
+          DESKTOP_RELEASE_WEBHOOK_SECRET: ${{ secrets.DESKTOP_RELEASE_WEBHOOK_SECRET }}
+          DESKTOP_RELEASE_WEBHOOK_URL: ${{ secrets.DESKTOP_RELEASE_WEBHOOK_URL }}
+        run: |
+          if [[ -z "${DESKTOP_RELEASE_WEBHOOK_SECRET:-}" || -z "${DESKTOP_RELEASE_WEBHOOK_URL:-}" ]]; then
+            echo "Webhook secrets not configured; periodic API reconciliation will pick up ${GITHUB_REF_NAME}."
+            exit 0
+          fi
+          webhook_url="${DESKTOP_RELEASE_WEBHOOK_URL%/}"
+          case "$webhook_url" in
+            */api/v1/desktop/releases/sync) ;;
+            *) webhook_url="${webhook_url}/api/v1/desktop/releases/sync" ;;
+          esac
+          if ! curl -fsS --max-time 15 -X POST "$webhook_url" \
+            -H "Authorization: Bearer ${DESKTOP_RELEASE_WEBHOOK_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag\":\"${GITHUB_REF_NAME}\"}"; then
+            echo "::warning::Desktop release sync webhook failed; periodic API reconciliation will pick up ${GITHUB_REF_NAME}."
+          fi

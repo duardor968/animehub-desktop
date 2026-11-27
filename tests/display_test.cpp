@@ -191,6 +191,16 @@ private slots:
         QCOMPARE(fall_next->at.time(), QTime(15, 30));
         QCOMPARE(fall.basisPublishedAt.secsTo(fall_next->at), 7LL * 86400 + 3600);
     }
+
+    void bytesFormattingUsesSpanishDecimalsForSmallMegabytesAndGigabytes() {
+        QCOMPARE(display::bytes(0), QStringLiteral("0 KB"));
+        QCOMPARE(display::bytes(500'000), QStringLiteral("500 KB"));
+        QCOMPARE(display::bytes(1'100'000), QStringLiteral("1,1 MB"));
+        QCOMPARE(display::bytes(1'400'000), QStringLiteral("1,4 MB"));
+        QCOMPARE(display::bytes(10'000'000), QStringLiteral("10 MB"));
+        QCOMPARE(display::bytes(286'000'000), QStringLiteral("286 MB"));
+        QCOMPARE(display::bytes(2'000'000'000), QStringLiteral("2,0 GB"));
+    }
 };
 
 QTEST_GUILESS_MAIN(DisplayTest)

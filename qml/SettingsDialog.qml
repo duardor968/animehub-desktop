@@ -78,6 +78,7 @@ ModalDialog {
     onClosed: {
         diagnosticsCopied = false
         aboutEnginesExpanded = false
+        updateSection.notesExpanded = false
     }
 
     // A category's rows; only the page scrolls when the dialog is shorter than they are.
@@ -375,6 +376,18 @@ ModalDialog {
                             currentIndex: Math.max(0, keys.indexOf(dialog.settings.downloadEpisodesStyle))
                             onActivated: index => dialog.settings.downloadEpisodesStyle = keys[index]
                             Accessible.name: "Episodios en Descargas"
+                        }
+                    }
+
+                    SettingRow {
+                        label: "Actualizaciones"
+                        unavailable: dialog.isolatedReason
+
+                        Choice {
+                            model: ["Automáticas", "Solo avisar", "Manuales"]
+                            currentIndex: dialog.settings.updateMode
+                            onActivated: index => dialog.settings.updateMode = index
+                            Accessible.name: "Actualizaciones"
                         }
                     }
                 }
@@ -698,6 +711,19 @@ ModalDialog {
                                         copiedTimer.restart()
                                     }
                                 }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 10
+                                Layout.bottomMargin: 10
+                                Layout.preferredHeight: 1
+                                color: Qt.rgba(1, 1, 1, 0.07)
+                            }
+
+                            UpdateSection {
+                                id: updateSection
+                                updater: dialog.app.updater
                             }
                         }
 

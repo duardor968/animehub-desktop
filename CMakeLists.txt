@@ -2,10 +2,10 @@ cmake_minimum_required(VERSION 4.0)
 
 project(
   AnimeHubDesktop
-  VERSION 0.4.0
+  VERSION 0.5.0
   DESCRIPTION "Native AnimeHub desktop application"
   HOMEPAGE_URL "https://github.com/duardor968/animehub-desktop"
-  LANGUAGES CXX
+  LANGUAGES C CXX
 )
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -36,9 +36,13 @@ qt_standard_project_setup(REQUIRES 6.11)
 
 if(ANIMEHUB_ENABLE_CLANG_TIDY)
   find_program(CLANG_TIDY_EXECUTABLE NAMES clang-tidy REQUIRED)
-  set(ANIMEHUB_CLANG_TIDY_COMMAND
-    "${CLANG_TIDY_EXECUTABLE};--extra-arg-before=/std:c++latest;--extra-arg-before=/Zc:__cplusplus"
-  )
+  if(MSVC)
+    set(ANIMEHUB_CLANG_TIDY_COMMAND
+      "${CLANG_TIDY_EXECUTABLE};--extra-arg-before=/std:c++latest;--extra-arg-before=/Zc:__cplusplus"
+    )
+  else()
+    set(ANIMEHUB_CLANG_TIDY_COMMAND "${CLANG_TIDY_EXECUTABLE}")
+  endif()
 endif()
 
 function(animehub_configure_target target)
@@ -63,6 +67,10 @@ function(animehub_configure_target target)
 endfunction()
 
 add_subdirectory(src/core)
+
+if(WIN32)
+  add_subdirectory(src/updater)
+endif()
 
 if(ANIMEHUB_BUNDLE_ENGINES AND WIN32)
   include(cmake/Engines.cmake)
@@ -107,9 +115,12 @@ qt_add_executable(animehub-desktop WIN32
   src/app/shell.h
   src/app/speed_graph_item.cpp
   src/app/speed_graph_item.h
+  src/app/update_view.cpp
+  src/app/update_view.h
 )
 if(WIN32)
-  target_sources(animehub-desktop PRIVATE src/app/animehub.rc)
+  configure_file(src/app/animehub.rc.in "${CMAKE_CURRENT_BINARY_DIR}/animehub.rc" @ONLY)
+  target_sources(animehub-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/animehub.rc")
 endif()
 
 set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
@@ -122,6 +133,7 @@ qt_add_qml_module(animehub-desktop
     qml/Theme.qml
     qml/CloseDialog.qml
     qml/SettingsDialog.qml
+    qml/UpdateRestartDialog.qml
     qml/anime/ActionBar.qml
     qml/anime/AnimeHeader.qml
     qml/anime/AnimePage.qml
@@ -175,6 +187,7 @@ qt_add_qml_module(animehub-desktop
     qml/settings/LinkedDevicesPage.qml
     qml/settings/NativeSpeedLimit.qml
     qml/settings/SettingRow.qml
+    qml/settings/UpdateSection.qml
   RESOURCES
     assets/animehub.png
 )

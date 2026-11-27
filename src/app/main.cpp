@@ -19,6 +19,7 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QRegularExpression>
+#include <QSessionManager>
 #include <QStandardPaths>
 #include <QStyleHints>
 #include <QSystemTrayIcon>
@@ -199,6 +200,12 @@ int main(int argc, char* argv[]) {
         QStringLiteral("Capturas sucesivas, 350 ms entre ellas (archivo-2.png, archivo-3.png…)."),
         QStringLiteral("n"), QStringLiteral("1"));
     parser.addOption(smoke_frames);
+    const QCommandLineOption smoke_update_state(
+        QStringLiteral("smoke-update-state"),
+        QStringLiteral("Estado del actualizador para captura: uptodate, available, downloading, "
+                       "ready, error, notify-available, notify-downloading o confirm-restart."),
+        QStringLiteral("estado"));
+    parser.addOption(smoke_update_state);
     parser.addOptions({api_base, smoke_image, smoke_size, smoke_page, smoke_settings,
                        profile_transfers, smoke_hidden_native, smoke_view, smoke_archive,
                        smoke_franchise, smoke_anime});
@@ -206,6 +213,13 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption tray(QStringLiteral("tray"),
                                   QStringLiteral("Empezar en la bandeja, sin abrir la ventana."));
     parser.addOption(tray);
+    const QCommandLineOption quit_opt(
+        QStringLiteral("quit"), QStringLiteral("Cerrar la instancia de AnimeHub en ejecución."));
+    parser.addOption(quit_opt);
+    const QCommandLineOption post_update_verify(
+        QStringLiteral("post-update-verify"),
+        QStringLiteral("Confirmar el arranque tras una actualización."), QStringLiteral("token"));
+    parser.addOption(post_update_verify);
     parser.process(app);
     const bool smoke = parser.isSet(smoke_image);
     const bool smokeHidden = parser.isSet(smoke_hidden_native);
@@ -250,6 +264,19 @@ int main(int argc, char* argv[]) {
         QStringLiteral("setup-test-error")};
     if (parser.isSet(smoke_dialog) &&
         (!smoke || !smokeDialogs.contains(parser.value(smoke_dialog))))
+        return 2;
+    const QStringList smokeUpdateStates{QStringLiteral("uptodate"),
+                                        QStringLiteral("available"),
+                                        QStringLiteral("downloading"),
+                                        QStringLiteral("ready"),
+                                        QStringLiteral("error"),
+                                        QStringLiteral("notify-available"),
+                                        QStringLiteral("notify-downloading"),
+                                        QStringLiteral("confirm-restart")};
+    if (parser.isSet(smoke_update_state) &&
+        (!smoke || !smokeUpdateStates.contains(parser.value(smoke_update_state))))
+        return 2;
+    if (parser.isSet(quit_opt) && smoke)
         return 2;
     bool waitValid = false;
     const int smokeWait = parser.value(smoke_wait).toInt(&waitValid);
@@ -308,7 +335,12 @@ int main(int argc, char* argv[]) {
     }
     if (paths.isolated && !selectedCanonical.isEmpty())
         paths.data = selectedCanonical;
+    if (parser.isSet(quit_opt)) {
+        (void)animehub::app::AppController::handOffQuitToRunningInstance(paths.data);
+        return 0;
+    }
     paths.smoke = smoke;
+    paths.postUpdateVerifyToken = parser.value(post_update_verify);
     paths.detectJDownloader = parser.value(smoke_dialog) != u"setup-install";
     paths.transfers = !smoke && (!paths.isolated || parser.isSet(profile_transfers));
     if (paths.isolated)
@@ -337,6 +369,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     controller.listenForOtherInstances(paths.data);
+    // Windows Restart Manager (Inno Setup) and OS logout request a direct clean quit without
+    // showing CloseDialog or hiding to the tray.
+    QObject::connect(
+        &app, &QGuiApplication::commitDataRequest, &controller,
+        [&controller](QSessionManager&) { controller.quit(); }, Qt::DirectConnection);
 
     animehub::app::AmbientPalette::configure(
         &controller.network(),
@@ -354,6 +391,9 @@ int main(int argc, char* argv[]) {
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
         [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("AnimeHub", "Main");
+    if (engine.rootObjects().isEmpty()) {
+        return 1;
+    }
     // Ensure InputModality installs its event filter immediately before the first interaction.
     (void)engine.singletonInstance<animehub::app::InputModality*>(QStringLiteral("AnimeHub"),
                                                                   QStringLiteral("InputModality"));
@@ -377,6 +417,10 @@ int main(int argc, char* argv[]) {
                               : pageName == u"schedule" ? 2
                               : pageName == u"catalog"  ? 1
                                                         : 0;
+        const auto updateStateName = parser.value(smoke_update_state);
+        if (!updateStateName.isEmpty()) {
+            controller.updater()->previewState(updateStateName);
+        }
         QMetaObject::invokeMethod(window, "showPage", Q_ARG(QVariant, QVariant(pageIndex)));
         if (parser.value(smoke_page).startsWith(u"library")) {
             if (parser.isSet(smoke_view))
@@ -446,6 +490,16 @@ int main(int argc, char* argv[]) {
         auto* dialog = dialogName.isEmpty()               ? nullptr
                        : dialogName.startsWith(u"offer-") ? offer
                                                           : setup;
+        if (updateStateName == u"confirm-restart") {
+            auto* restartDialog =
+                window->findChild<QObject*>(QStringLiteral("updateRestartDialog"));
+            if (!restartDialog)
+                return 5;
+            if (!dialog)
+                dialog = restartDialog;
+            QTimer::singleShot(
+                300, &app, [&controller] { controller.updater()->requestRestartConfirmation(); });
+        }
         QTimer::singleShot(smokeWait, &app, [&controller, setup, dialogName] {
             if (dialogName.startsWith(u"offer-")) {
                 using animehub::api::Provider;

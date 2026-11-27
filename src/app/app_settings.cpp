@@ -33,6 +33,7 @@ const auto kPlayer = QStringLiteral("playback/player");
 const auto kSystemPlayer = QStringLiteral("playback/systemPlayer");
 const auto kNotifications = QStringLiteral("notifications/enabled");
 const auto kCloseAction = QStringLiteral("window/closeAction");
+const auto kUpdateMode = QStringLiteral("updates/mode");
 const auto kTrayNoticeShown = QStringLiteral("window/trayNoticeShown");
 const auto kJdOfferHidden = QStringLiteral("notices/jdownloaderOfferHidden");
 const auto kServersOfferHidden = QStringLiteral("notices/serversOfferHidden");
@@ -233,6 +234,29 @@ void AppSettings::setCloseAction(CloseAction action) {
     write(kCloseAction, action == CloseAction::Tray   ? QStringLiteral("tray")
                         : action == CloseAction::Quit ? QStringLiteral("quit")
                                                       : QStringLiteral("ask"));
+}
+
+AppSettings::UpdateMode AppSettings::updateMode() const {
+    if (isolated_) {
+        return UpdateMode::Auto;
+    }
+    const auto value = settings_.value(kUpdateMode).toString();
+    if (value == u"notify") {
+        return UpdateMode::NotifyOnly;
+    }
+    if (value == u"manual") {
+        return UpdateMode::Manual;
+    }
+    return UpdateMode::Auto;
+}
+
+void AppSettings::setUpdateMode(UpdateMode mode) {
+    if (isolated_) {
+        return;
+    }
+    write(kUpdateMode, mode == UpdateMode::NotifyOnly ? QStringLiteral("notify")
+                       : mode == UpdateMode::Manual   ? QStringLiteral("manual")
+                                                      : QStringLiteral("auto"));
 }
 
 bool AppSettings::trayNoticeShown() const {

@@ -34,6 +34,9 @@ QString bytes(qint64 value) {
     if (value < 1000 * 1000) {
         return spanish().toString(std::max<qint64>(value, 0) / 1000) + QStringLiteral(" KB");
     }
+    if (value < 10 * 1000 * 1000) {
+        return spanish().toString(static_cast<double>(value) / 1e6, 'f', 1) + QStringLiteral(" MB");
+    }
     if (value < 1000LL * 1000 * 1000) {
         return spanish().toString(value / (1000 * 1000)) + QStringLiteral(" MB");
     }

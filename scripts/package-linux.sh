@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Packs the Linux Release build into what a release publishes, in out/package (or OUT_DIR):
-#   AnimeHub-<version>-x86_64.AppImage   the app with Qt and every library a desktop may lack
-#                                        (built on Ubuntu 24.04: glibc 2.39 or newer);
-#   animehub_<version>_amd64.deb         for Ubuntu 24.04 and later: Qt in /opt/animehub, the
-#                                        rest from the system's packages (mpv and aria2 too);
-#   SHA256SUMS.txt                       checksums of both.
+#   AnimeHub-<version>-x86_64.AppImage        the app with Qt and every library a desktop may lack
+#                                             (built on Ubuntu 24.04: glibc 2.39 or newer);
+#   AnimeHub-<version>-x86_64.AppImage.zsync  delta-update metadata (when zsyncmake is installed);
+#   animehub_<version>_amd64.deb              for Ubuntu 24.04 and later: Qt in /opt/animehub, the
+#                                             rest from the system's packages (mpv and aria2 too);
+#   SHA256SUMS.txt                            checksums of the generated packages.
 # Run on Ubuntu 24.04 after `cmake --preset linux-release && cmake --build --preset
 # linux-release`, with QT_ROOT set to Qt's linux_gcc_64 kit; needs patchelf, dpkg-dev and, for
 # --smoke, xvfb and x11-utils. linuxdeploy and its Qt plugin are pinned by SHA-256 and cached in
@@ -178,10 +179,26 @@ for library in "$usr"/lib/*.so*; do
   fi
 done
 appimage="$out/AnimeHub-$version-x86_64.AppImage"
-LDAI_OUTPUT="$appimage" "$linuxdeploy" --appdir "$appdir" \
+zsync="$appimage.zsync"
+LDAI_OUTPUT="$appimage" \
+LDAI_UPDATE_INFORMATION="gh-releases-zsync|duardor968|animehub-desktop|latest|AnimeHub-*-x86_64.AppImage.zsync" \
+  "$linuxdeploy" --appdir "$appdir" \
   --exclude-library 'libcrypto.so*' --exclude-library 'libssl.so*' --output appimage >/dev/null
 
-(cd "$out" && sha256sum "$(basename "$appimage")" "$(basename "$deb")" > SHA256SUMS.txt)
+# appimagetool generates the .zsync when zsyncmake is on PATH; normalize its location or generate
+# it explicitly if linuxdeploy wrote it to the current working directory or skipped it.
+if [[ ! -f "$zsync" && -f "$(basename "$zsync")" ]]; then
+  mv "$(basename "$zsync")" "$zsync"
+fi
+if [[ ! -f "$zsync" ]] && command -v zsyncmake >/dev/null 2>&1; then
+  zsyncmake -u "$(basename "$appimage")" -o "$zsync" "$appimage"
+fi
+
+outputs=("$appimage" "$deb")
+if [[ -f "$zsync" ]]; then
+  outputs+=("$zsync")
+fi
+(cd "$out" && sha256sum "${outputs[@]##*/}" > SHA256SUMS.txt)
 
 if $smoke; then
   data="$(mktemp -d)"
@@ -244,6 +261,6 @@ if $smoke; then
 fi
 
 rm -rf "$stage"
-for file in "$appimage" "$deb"; do
+for file in "${outputs[@]}"; do
   printf '%s  %s\n' "$(basename "$file")" "$(du -h "$file" | cut -f1)"
 done

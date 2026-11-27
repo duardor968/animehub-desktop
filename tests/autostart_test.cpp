@@ -1,18 +1,55 @@
 #include "platform/autostart.h"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTest>
 
+#ifdef Q_OS_WIN
+#include <array>
+
+#include <windows.h>
+#endif
+
 using namespace animehub;
 
 namespace {
 
 #ifdef Q_OS_WIN
-// A key of the tests' own: the user's real Run entries stay untouched.
+// Keys of the tests' own: the user's real Run and StartupApproved entries stay untouched.
 const auto kTestKey = QStringLiteral(R"(HKEY_CURRENT_USER\Software\AnimeHubTests\Run)");
+constexpr const wchar_t* kTestApprovedSubkey =
+    LR"(Software\AnimeHubTests\Explorer\StartupApproved\Run)";
+constexpr const wchar_t* kEntryWide = L"AnimeHub";
+
+bool writeStartupApprovedByte(BYTE first_byte) {
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kTestApprovedSubkey, 0, nullptr, 0, KEY_SET_VALUE,
+                        nullptr, &key, nullptr) != ERROR_SUCCESS) {
+        return false;
+    }
+    std::array<BYTE, 12> data{};
+    data[0] = first_byte;
+    const auto status = RegSetValueExW(key, kEntryWide, 0, REG_BINARY, data.data(),
+                                       static_cast<DWORD>(data.size()));
+    RegCloseKey(key);
+    return status == ERROR_SUCCESS;
+}
+
+bool hasStartupApprovedEntry() {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kTestApprovedSubkey, 0, KEY_QUERY_VALUE, &key) !=
+        ERROR_SUCCESS) {
+        return false;
+    }
+    DWORD type = 0;
+    DWORD size = 0;
+    const auto status = RegQueryValueExW(key, kEntryWide, nullptr, &type, nullptr, &size);
+    RegCloseKey(key);
+    return status == ERROR_SUCCESS;
+}
 #endif
 
 } // namespace
@@ -39,6 +76,52 @@ private slots:
         QCOMPARE(run.value(QStringLiteral("AnimeHub")).toString(), command);
 
         QVERIFY(platform::setAutostartCommand(QString(), kTestKey));
+        QVERIFY(platform::autostartCommand(kTestKey).isEmpty());
+    }
+
+    void honorsStartupApprovedDisableAndClearsOverrideOnEnable() {
+        const auto command =
+            QStringLiteral(R"("C:\Users\u\AppData\Local\Programs\AnimeHub\AnimeHub.exe" --tray)");
+        QVERIFY(platform::setAutostartCommand(command, kTestKey));
+        QCOMPARE(platform::autostartCommand(kTestKey), command);
+
+        // Even first byte (0x02) means enabled in Task Manager.
+        QVERIFY(writeStartupApprovedByte(0x02U));
+        QCOMPARE(platform::autostartCommand(kTestKey), command);
+
+        // Odd first byte (0x03 or 0x07) means disabled in Task Manager: must report disabled.
+        QVERIFY(writeStartupApprovedByte(0x03U));
+        QVERIFY(platform::autostartCommand(kTestKey).isEmpty());
+
+        QVERIFY(writeStartupApprovedByte(0x07U));
+        QVERIFY(platform::autostartCommand(kTestKey).isEmpty());
+
+        // Re-enabling from AnimeHub Settings clears the disabled override so Windows runs it again.
+        QVERIFY(platform::setAutostartCommand(command, kTestKey));
+        QVERIFY(!hasStartupApprovedEntry());
+        QCOMPARE(platform::autostartCommand(kTestKey), command);
+    }
+
+    void refusesDevAndTempPathsWithoutOverwritingRealEntry() {
+        const auto real_command =
+            QStringLiteral(R"("C:\Users\u\AppData\Local\Programs\AnimeHub\AnimeHub.exe" --tray)");
+        QVERIFY(platform::setAutostartCommand(real_command, kTestKey));
+
+        const auto dev_command = QStringLiteral(
+            R"("D:\Proyectos\AnimeHub\animehub-desktop\out\build\windows-debug\AnimeHub.exe" --tray)");
+        QVERIFY(!platform::setAutostartCommand(dev_command, kTestKey));
+        QCOMPARE(platform::autostartCommand(kTestKey), real_command);
+
+        const auto temp_exe = QDir::toNativeSeparators(
+            QDir(QDir::tempPath()).filePath(QStringLiteral("AnimeHub.exe")));
+        const auto temp_command = QLatin1Char('"') + temp_exe + QStringLiteral("\" --tray");
+        QVERIFY(!platform::setAutostartCommand(temp_command, kTestKey));
+        QCOMPARE(platform::autostartCommand(kTestKey), real_command);
+
+        // Even when no entry exists yet, dev/temp paths must not register in Windows Startup.
+        QVERIFY(platform::setAutostartCommand(QString(), kTestKey));
+        QVERIFY(!platform::setAutostartCommand(dev_command, kTestKey));
+        QVERIFY(!platform::setAutostartCommand(temp_command, kTestKey));
         QVERIFY(platform::autostartCommand(kTestKey).isEmpty());
     }
 #else

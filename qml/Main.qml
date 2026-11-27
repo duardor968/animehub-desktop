@@ -187,12 +187,16 @@ ApplicationWindow {
     }
 
     onClosing: close => {
-        close.accepted = false
         app.settings.setValue("window/maximized", visibility === Window.Maximized)
         if (visibility !== Window.Maximized) {
             app.settings.setValue("window/width", width)
             app.settings.setValue("window/height", height)
         }
+        if (app.quitting) {
+            close.accepted = true
+            return
+        }
+        close.accepted = false
         app.requestClose()
     }
 
@@ -246,6 +250,77 @@ ApplicationWindow {
             }
 
             Item { Layout.fillWidth: true }
+
+            AbstractButton {
+                id: updateHeaderPill
+                objectName: "updateHeaderPill"
+                visible: window.app.updater.pillVisible
+                Layout.alignment: Qt.AlignVCenter
+                implicitHeight: 28
+                implicitWidth: pillRow.implicitWidth + leftPadding + rightPadding
+                padding: 0
+                leftPadding: 11
+                rightPadding: 12
+                hoverEnabled: true
+                focusPolicy: Qt.StrongFocus
+                activeFocusOnTab: true
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    updateHeaderPill.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    updateHeaderPill.click()
+                }
+                Accessible.role: Accessible.Button
+                Accessible.name: window.app.updater.pillLabel
+                Accessible.onPressAction: click()
+                ToolTip.visible: (hovered || (activeFocus && InputModality.keyboard))
+                                 && window.app.updater.pillTooltip !== ""
+                ToolTip.text: window.app.updater.pillTooltip
+                onClicked: window.app.updater.handlePillClick()
+
+                background: Rectangle {
+                    radius: 14
+                    color: updateHeaderPill.down
+                           ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.28)
+                           : updateHeaderPill.hovered
+                             ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.22)
+                             : Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.13)
+                    border.width: 1
+                    border.color: updateHeaderPill.hovered
+                                  ? Qt.rgba(Theme.accentText.r, Theme.accentText.g, Theme.accentText.b, 0.55)
+                                  : Qt.rgba(Theme.accentText.r, Theme.accentText.g, Theme.accentText.b, 0.30)
+                    Behavior on color { ColorAnimation { duration: 110 } }
+                }
+
+                contentItem: RowLayout {
+                    id: pillRow
+                    spacing: 6
+
+                    Glyph {
+                        Layout.alignment: Qt.AlignVCenter
+                        glyph: window.app.updater.pillIcon
+                        size: 12
+                        color: Theme.accentText
+                    }
+
+                    Label {
+                        Layout.alignment: Qt.AlignVCenter
+                        text: window.app.updater.pillLabel
+                        color: Theme.accentText
+                        font.pixelSize: Theme.caption
+                        font.weight: Font.DemiBold
+                        elide: Text.ElideRight
+                        Accessible.ignored: true
+                    }
+                }
+
+                FocusFrame {
+                    visible: updateHeaderPill.activeFocus && InputModality.keyboard
+                    radiusInside: 14
+                }
+            }
 
             ToolButton {
                 icon.source: Theme.source(Theme.icon.settings)
@@ -349,6 +424,15 @@ ApplicationWindow {
     Connections {
         target: window.app
         function onMessage(text, problem) { toast.show(text, problem) }
+        function onPostUpdateReady(version) {
+            toast.show("AnimeHub se ha actualizado a " + version, false, "Novedades",
+                       () => window.app.openUrl(window.app.releasesUrl))
+        }
+    }
+    Connections {
+        target: window.app.updater
+        function onOpenAboutRequested() { settingsDialog.openAt("about") }
+        function onRestartConfirmationRequested() { updateRestartDialog.open() }
     }
     Connections {
         target: window.app.libraryAnime
@@ -392,6 +476,11 @@ ApplicationWindow {
 
     CloseDialog {
         id: closeDialog
+        app: window.app
+    }
+
+    UpdateRestartDialog {
+        id: updateRestartDialog
         app: window.app
     }
 

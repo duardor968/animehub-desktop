@@ -33,6 +33,19 @@ Biblioteca de ejecución de Microsoft Visual C++
   Microsoft Corporation. Se redistribuye según los términos de redistribución de
   Visual Studio.
 
+Monocypher 4.0.3
+  Loup Vaillant y otros colaboradores.
+  Licencia: licencia dual BSD de 2 cláusulas o CC0 1.0 (licenses/Monocypher/LICENCE.md).
+  Código fuente: https://monocypher.org/download/monocypher-4.0.3.tar.gz
+  Verificación de firmas Ed25519 en los manifiestos de actualización.
+
+Zstandard (zstd) 1.6.0
+  Meta Platforms, Inc. y afiliados.
+  Licencia: licencia dual BSD de 3 cláusulas o GPL-2.0 (licenses/Zstd/LICENSE).
+  Código fuente: https://github.com/facebook/zstd/releases/tag/v1.6.0
+  Biblioteca de descompresión de un solo archivo (zstddeclib.c) usada para extraer los
+  paquetes de actualización .ahpack.
+
 Los paquetes de Linux (AppImage y .deb) no incluyen aria2, mpv ni la biblioteca de
 Visual C++: usan el aria2 y el mpv del sistema. Incluyen en cambio:
 

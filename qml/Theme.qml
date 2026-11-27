@@ -91,5 +91,6 @@ QtObject {
         readonly property string schedule: "e787"
         readonly property string collapseAll: "e70e"
         readonly property string expandAll: "e70d"
+        readonly property string update: "e777"
     }
 }
