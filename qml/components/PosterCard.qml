@@ -15,10 +15,15 @@ AbstractButton {
     property string detail
     property real progress: -1
     property bool fresh: false
-    // In the library: a check on the poster's corner, as Steam marks what one owns.
+    // In the library: a flush vertical bookmark ribbon on the top-right corner of the poster.
     property bool owned: false
-    // "play", "download" or nothing: the button over the poster.
+    // "play", "download" or nothing: the centered frosted action disc over the poster.
     property string quickAction
+
+    readonly property bool cardHovered: root.hovered || cardHover.hovered || actionBtn.hovered
+                                        || ownedHover.hovered
+    readonly property bool showAction: root.quickAction !== ""
+                                       && (cardHovered || (root.activeFocus && InputModality.keyboard))
 
     // The poster's own button was pressed, not the card.
     signal act()
@@ -43,28 +48,47 @@ AbstractButton {
 
     // Two lines of title and the caption, so cards of a row share one height.
     implicitWidth: 156
-    implicitHeight: poster.height + titleLabel.height + captionLabel.height + 14
+    implicitHeight: posterFrame.height + titleLabel.height + captionLabel.height + 14
                     + (detail !== "" ? detailLabel.height + 2 : 0)
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
     Accessible.name: (caption ? text + ", " + caption : text) + (owned ? ", en tu biblioteca" : "")
     Keys.onReturnPressed: clicked()
     Keys.onEnterPressed: clicked()
-    onActiveFocusChanged: if (activeFocus && focusReason !== Qt.MouseFocusReason) reveal()
+    onActiveFocusChanged: if (activeFocus && InputModality.keyboard) reveal()
 
     background: null
-    ToolTip.visible: hovered && titleLabel.truncated
+    ToolTip.visible: root.hovered && !actionBtn.hovered && !ownedHover.hovered && titleLabel.truncated
     ToolTip.delay: 500
     ToolTip.text: text
 
+    HoverHandler { id: cardHover }
+
     contentItem: Item {
-        Poster {
-            id: poster
+        // Clipped poster container so hover zoom stays strictly inside the card bounds
+        // (eliminating left-edge clipping inside GridView).
+        Item {
+            id: posterFrame
             width: parent.width
             height: Math.round(width * 1.42)
-            source: root.posterUrl
-            scale: root.hovered ? 1.03 : 1
-            Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+            clip: true
+
+            Poster {
+                id: poster
+                anchors.fill: parent
+                source: root.posterUrl
+                scale: root.cardHovered ? 1.03 : 1.0
+                Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+            }
+
+            // Gentle dark poster scrim on hover/focus when a quick action is available.
+            Rectangle {
+                anchors.fill: parent
+                color: Qt.rgba(0, 0, 0, 0.34)
+                opacity: root.showAction ? 1 : 0
+                visible: opacity > 0
+                Behavior on opacity { NumberAnimation { duration: 140 } }
+            }
 
             // The new episode stands on the poster, as Steam's badges do.
             Label {
@@ -85,46 +109,90 @@ AbstractButton {
                 }
             }
 
-            // SelectionMark's plate, opaque and with its light edge, so it reads over dark
-            // pictures too; the check in green, not the accent, which marks a choice.
-            Rectangle {
+            // Flush top-right #2f81f7 vertical bookmark ribbon with subtle dark outer contrast shadow.
+            Item {
                 visible: root.owned
-                anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.margins: 6
-                width: 22
-                height: 22
-                radius: 5
-                color: Theme.canvas
-                border.width: 1.5
-                border.color: Qt.rgba(1, 1, 1, 0.75)
+                anchors.right: parent.right
+                anchors.topMargin: -2
+                anchors.rightMargin: 10
+                width: 26
+                height: 32
                 ToolTip.visible: ownedHover.hovered
                 ToolTip.text: "En tu biblioteca"
 
                 HoverHandler { id: ownedHover }
 
-                Glyph {
-                    anchors.centerIn: parent
-                    glyph: Theme.icon.check
-                    size: 14
-                    color: Theme.success
+                Image {
+                    x: 0
+                    y: 1
+                    width: 26
+                    height: 32
+                    sourceSize.width: Math.max(26, Math.ceil(26 * Screen.devicePixelRatio))
+                    sourceSize.height: Math.max(32, Math.ceil(32 * Screen.devicePixelRatio))
+                    smooth: true
+                    opacity: 0.65
+                    source: root.owned ? Theme.source(Theme.icon.bookmarkRibbon + "?color=080b10") : ""
+                    Accessible.ignored: true
+                }
+
+                Image {
+                    x: 1
+                    y: 0
+                    width: 24
+                    height: 30
+                    sourceSize.width: Math.max(24, Math.ceil(24 * Screen.devicePixelRatio))
+                    sourceSize.height: Math.max(30, Math.ceil(30 * Screen.devicePixelRatio))
+                    smooth: true
+                    source: root.owned ? Theme.source(Theme.icon.bookmarkRibbon + "?color=2f81f7") : ""
+                    Accessible.ignored: true
                 }
             }
 
-            RoundButton {
-                visible: root.quickAction !== "" && (root.hovered || root.visualFocus)
-                anchors.left: parent.left
-                anchors.bottom: parent.bottom
-                anchors.margins: 8
-                highlighted: true
-                text: root.quickAction === "play" ? "Ver" : "Descargar"
-                display: AbstractButton.IconOnly
-                icon.source: Theme.source(root.quickAction === "play" ? Theme.icon.play : Theme.icon.download)
+            // Centered 44×44 px translucent frosted play/download disc (Ronda 1 B), transitioning
+            // smoothly to #2f81f7 when directly hovered.
+            AbstractButton {
+                id: actionBtn
+                anchors.centerIn: parent
+                width: 44
+                height: 44
+                opacity: root.showAction ? 1 : 0
+                visible: opacity > 0
+                hoverEnabled: true
                 focusPolicy: Qt.NoFocus
-                onClicked: root.act()
+                text: root.quickAction === "play" ? "Reproducir" : "Descargar"
                 Accessible.name: text + ", " + root.text
                 ToolTip.visible: hovered
                 ToolTip.text: text
+                onClicked: root.act()
+                Behavior on opacity { NumberAnimation { duration: 140 } }
+
+                background: Rectangle {
+                    radius: 22
+                    color: actionBtn.down ? "#246bd1"
+                           : (actionBtn.hovered ? Theme.accent : Qt.rgba(16 / 255, 20 / 255, 28 / 255, 0.78))
+                    border.width: 1
+                    border.color: actionBtn.hovered ? Theme.accent : Qt.rgba(1, 1, 1, 0.22)
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Behavior on border.color { ColorAnimation { duration: 120 } }
+                }
+
+                contentItem: Item {
+                    Image {
+                        anchors.centerIn: parent
+                        width: 18
+                        height: 18
+                        sourceSize.width: Math.max(18, Math.ceil(18 * Screen.devicePixelRatio))
+                        sourceSize.height: Math.max(18, Math.ceil(18 * Screen.devicePixelRatio))
+                        smooth: true
+                        source: root.quickAction !== ""
+                                ? Theme.source((root.quickAction === "play" ? Theme.icon.play
+                                                                            : Theme.icon.download)
+                                               + "?color=ffffff")
+                                : ""
+                        Accessible.ignored: true
+                    }
+                }
             }
 
             ProgressLine {
@@ -135,21 +203,20 @@ AbstractButton {
                 value: root.progress
                 radius: 0
             }
-
         }
 
         // The keyboard's frame, as every control's: around the poster, which is the card's shape.
         // Also when the arrows of a row or a grid bring the keyboard here, which Qt does not
-        // count as visual focus.
+        // count as visual focus; never after a click.
         FocusFrame {
-            target: poster
+            target: posterFrame
             radiusInside: 0
-            visible: root.activeFocus && root.focusReason !== Qt.MouseFocusReason
+            visible: root.activeFocus && InputModality.keyboard
         }
 
         Label {
             id: titleLabel
-            anchors.top: poster.bottom
+            anchors.top: posterFrame.bottom
             anchors.topMargin: 8
             width: parent.width
             text: root.text

@@ -186,11 +186,7 @@ std::optional<downloads::Task> EpisodeModel::task(double number) const {
 }
 
 bool EpisodeModel::missing(const library::EpisodeRecord& episode) const {
-    if (!episode.filePath.isEmpty()) {
-        return false;
-    }
-    const auto it = tasks_.find(episode.number);
-    return it == tasks_.end() || it->state == TaskState::Paused || it->state == TaskState::Failed;
+    return episode.filePath.isEmpty() && !tasks_.contains(episode.number);
 }
 
 int EpisodeModel::selectedMissing() const {

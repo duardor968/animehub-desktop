@@ -1,6 +1,7 @@
 #include "app/app_settings.h"
 
 #include <QFile>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -12,6 +13,54 @@ class AppSettingsTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    void nativeSpeedLimitSurvivesDisablingAndRestart() {
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        const auto path = root.filePath(QStringLiteral("settings.ini"));
+        AppSettings settings(path, root.path());
+        QSignalSpy changed_spy(&settings, &AppSettings::changed);
+        QSignalSpy limit_spy(&settings, &AppSettings::speedLimitChanged);
+
+        QVERIFY(!settings.nativeLimitEnabled());
+        QCOMPARE(settings.nativeLimitKBps(), 2000);
+        QCOMPARE(settings.speedLimitText(), QStringLiteral("2 MB/s"));
+
+        settings.setNativeLimitKBps(750);
+        settings.setNativeLimitEnabled(true);
+        QCOMPARE(limit_spy.size(), 2);
+        QCOMPARE(changed_spy.size(), 0);
+
+        const AppSettings enabled(path, root.path());
+        QCOMPARE(enabled.nativeLimitKBps(), 750);
+        QVERIFY(enabled.nativeLimitEnabled());
+
+        settings.setNativeLimitEnabled(false);
+        QCOMPARE(limit_spy.size(), 3);
+        QCOMPARE(changed_spy.size(), 0);
+        const AppSettings disabled(path, root.path());
+        QCOMPARE(disabled.nativeLimitKBps(), 750);
+        QVERIFY(!disabled.nativeLimitEnabled());
+
+        // Redundant write emits no signal.
+        settings.setNativeLimitEnabled(false);
+        QCOMPARE(limit_spy.size(), 3);
+
+        // Formatting and clamping.
+        settings.setNativeLimitKBps(500);
+        QCOMPARE(settings.speedLimitText(), QStringLiteral("500 KB/s"));
+        settings.setNativeLimitKBps(2000);
+        QCOMPARE(settings.speedLimitText(), QStringLiteral("2 MB/s"));
+        settings.setNativeLimitKBps(2500);
+        QCOMPARE(settings.speedLimitText(), QStringLiteral("2,5 MB/s"));
+        settings.setNativeLimitKBps(0);
+        QCOMPARE(settings.nativeLimitKBps(), 1);
+        QCOMPARE(settings.speedLimitText(), QStringLiteral("1 KB/s"));
+        settings.setNativeLimitKBps(2'000'000);
+        QCOMPARE(settings.nativeLimitKBps(), 1'000'000);
+        QCOMPARE(settings.speedLimitText(), QStringLiteral("1000 MB/s"));
+        QCOMPARE(changed_spy.size(), 0);
+    }
+
     // settings.ini as the version with "Enviar a JDownloader" left it: what it chose for the
     // servers AnimeHub does not download now downloads them, followed, the same way.
     void earlierSendingBecomesTheJDownloaderForTheOtherServers_data() {
@@ -159,6 +208,62 @@ private slots:
                                        QStringLiteral("TRANSFERIT"), QStringLiteral("MP4UPLOAD"),
                                        QStringLiteral("ONE_FICHIER")});
         QCOMPARE(settings.providers(), QList<api::Provider>{api::Provider::Pixeldrain});
+    }
+
+    void uiPreferencesPersistAndSanitizeInvalidValues() {
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        const auto path = root.filePath(QStringLiteral("settings.ini"));
+        AppSettings settings(path, root.path());
+        QSignalSpy changed_spy(&settings, &AppSettings::changed);
+
+        // Defaults.
+        QCOMPARE(settings.downloadEpisodesStyle(), QStringLiteral("cards"));
+        QCOMPARE(settings.scheduleViewMode(), QStringLiteral("day"));
+        QVERIFY(!settings.scheduleFollowingOnly());
+
+        // Persist non-default values.
+        settings.setDownloadEpisodesStyle(QStringLiteral("compact"));
+        settings.setScheduleViewMode(QStringLiteral("week"));
+        settings.setScheduleFollowingOnly(true);
+        QCOMPARE(changed_spy.size(), 3);
+
+        // Redundant writes emit no signal.
+        settings.setDownloadEpisodesStyle(QStringLiteral("compact"));
+        settings.setScheduleViewMode(QStringLiteral("week"));
+        settings.setScheduleFollowingOnly(true);
+        QCOMPARE(changed_spy.size(), 3);
+
+        const AppSettings reloaded(path, root.path());
+        QCOMPARE(reloaded.downloadEpisodesStyle(), QStringLiteral("compact"));
+        QCOMPARE(reloaded.scheduleViewMode(), QStringLiteral("week"));
+        QVERIFY(reloaded.scheduleFollowingOnly());
+
+        // Invalid values fall back to defaults and persist sanitized values.
+        settings.setDownloadEpisodesStyle(QStringLiteral("grid"));
+        settings.setScheduleViewMode(QStringLiteral("month"));
+        settings.setScheduleFollowingOnly(false);
+        QCOMPARE(settings.downloadEpisodesStyle(), QStringLiteral("cards"));
+        QCOMPARE(settings.scheduleViewMode(), QStringLiteral("day"));
+        QVERIFY(!settings.scheduleFollowingOnly());
+
+        const AppSettings sanitized(path, root.path());
+        QCOMPARE(sanitized.downloadEpisodesStyle(), QStringLiteral("cards"));
+        QCOMPARE(sanitized.scheduleViewMode(), QStringLiteral("day"));
+        QVERIFY(!sanitized.scheduleFollowingOnly());
+
+        // Corrupt values already in settings.ini also fall back safely on read.
+        const auto corrupt_path = root.filePath(QStringLiteral("corrupt.ini"));
+        QFile file(corrupt_path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("[ui]\ndownloadEpisodesStyle=invalid\nscheduleViewMode=year\n"
+                   "scheduleFollowingOnly=true\n");
+        file.close();
+
+        const AppSettings corrupt(corrupt_path, root.path());
+        QCOMPARE(corrupt.downloadEpisodesStyle(), QStringLiteral("cards"));
+        QCOMPARE(corrupt.scheduleViewMode(), QStringLiteral("day"));
+        QVERIFY(corrupt.scheduleFollowingOnly());
     }
 };
 

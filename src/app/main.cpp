@@ -1,5 +1,7 @@
+#include "ambient_palette.h"
 #include "app_controller.h"
 #include "glyph_provider.h"
+#include "input_modality.h"
 #include "smoke_flow.h"
 
 #include <QApplication>
@@ -146,7 +148,7 @@ int main(int argc, char* argv[]) {
                                         QStringLiteral("tamaño"), QStringLiteral("1280x820"));
     const QCommandLineOption smoke_page(
         QStringLiteral("smoke-page"),
-        QStringLiteral("Página: library, catalog, downloads, settings o linked-devices."),
+        QStringLiteral("Página: library, catalog, schedule, downloads, settings o linked-devices."),
         QStringLiteral("página"), QStringLiteral("library"));
     const QCommandLineOption smoke_settings(
         QStringLiteral("smoke-settings-page"),
@@ -171,10 +173,11 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption smoke_hidden_native(
         QStringLiteral("smoke-hidden-native"),
         QStringLiteral("Capturar con una ventana nativa creada siempre oculta; requiere smoke."));
-    const QCommandLineOption smoke_flow(QStringLiteral("smoke-flow"),
-                                        QStringLiteral("Recorrido Qt: create, archive, settings, "
-                                                       "navigate o catalog."),
-                                        QStringLiteral("caso"));
+    const QCommandLineOption smoke_flow(
+        QStringLiteral("smoke-flow"),
+        QStringLiteral("Recorrido Qt: create, archive, settings, "
+                       "navigate, catalog, offer, setup, speed o speed-editor."),
+        QStringLiteral("caso"));
     parser.addOption(smoke_flow);
     const QCommandLineOption smoke_dialog(
         QStringLiteral("smoke-dialog"),
@@ -210,7 +213,8 @@ int main(int argc, char* argv[]) {
         (!smokeHidden ||
          !QStringList{QStringLiteral("create"), QStringLiteral("archive"),
                       QStringLiteral("settings"), QStringLiteral("navigate"),
-                      QStringLiteral("catalog"), QStringLiteral("offer"), QStringLiteral("setup")}
+                      QStringLiteral("catalog"), QStringLiteral("offer"), QStringLiteral("setup"),
+                      QStringLiteral("speed"), QStringLiteral("speed-editor")}
               .contains(parser.value(smoke_flow))))
         return 2;
     if (smokeHidden &&
@@ -229,9 +233,9 @@ int main(int argc, char* argv[]) {
     }
     const auto sizeMatch = QRegularExpression(QStringLiteral("^([0-9]{3,4})x([0-9]{3,4})$"))
                                .match(parser.value(smoke_size));
-    const QStringList smokePages{QStringLiteral("library"), QStringLiteral("catalog"),
-                                 QStringLiteral("downloads"), QStringLiteral("settings"),
-                                 QStringLiteral("linked-devices")};
+    const QStringList smokePages{QStringLiteral("library"),  QStringLiteral("catalog"),
+                                 QStringLiteral("schedule"), QStringLiteral("downloads"),
+                                 QStringLiteral("settings"), QStringLiteral("linked-devices")};
     if (smoke && (!sizeMatch.hasMatch() || !smokePages.contains(parser.value(smoke_page))))
         return 2;
     const QStringList smokeSettings{QStringLiteral("downloads"), QStringLiteral("general"),
@@ -334,6 +338,10 @@ int main(int argc, char* argv[]) {
     }
     controller.listenForOtherInstances(paths.data);
 
+    animehub::app::AmbientPalette::configure(
+        &controller.network(),
+        QDir(paths.data).filePath(QStringLiteral("cache/ambient-colors.json")));
+
     // Declared before the engine so it outlives it.
     ImageCacheFactory images(QDir(paths.data).filePath(QStringLiteral("cache/images")));
     QQmlApplicationEngine engine;
@@ -346,6 +354,9 @@ int main(int argc, char* argv[]) {
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
         [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("AnimeHub", "Main");
+    // Ensure InputModality installs its event filter immediately before the first interaction.
+    (void)engine.singletonInstance<animehub::app::InputModality*>(QStringLiteral("AnimeHub"),
+                                                                  QStringLiteral("InputModality"));
     controller.start();
     if (smoke) {
         if (engine.rootObjects().isEmpty())
@@ -361,11 +372,12 @@ int main(int argc, char* argv[]) {
                 return 7;
             window->create(); // Creates a hidden HWND; never calls show or activates it.
         }
-        QMetaObject::invokeMethod(
-            window, "showPage",
-            Q_ARG(QVariant, parser.value(smoke_page) == u"downloads" ? QVariant(2)
-                            : parser.value(smoke_page) == u"catalog" ? QVariant(1)
-                                                                     : QVariant(0)));
+        const auto pageName = parser.value(smoke_page);
+        const int pageIndex = pageName == u"downloads"  ? 3
+                              : pageName == u"schedule" ? 2
+                              : pageName == u"catalog"  ? 1
+                                                        : 0;
+        QMetaObject::invokeMethod(window, "showPage", Q_ARG(QVariant, QVariant(pageIndex)));
         if (parser.value(smoke_page).startsWith(u"library")) {
             if (parser.isSet(smoke_view))
                 controller.library()->setGrouped(parser.value(smoke_view) == u"grouped");

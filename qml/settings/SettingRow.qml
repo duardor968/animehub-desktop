@@ -23,8 +23,9 @@ Item {
     // What a name keeps beside a long value.
     readonly property int nameWidth: 180
     readonly property bool stacked: width < 520
+    readonly property string shownDetail: detail !== "" ? detail : unavailable
     // Rows taller than one control line keep the name level with their first line.
-    readonly property bool tall: end.implicitHeight > 40 && detail === ""
+    readonly property bool tall: end.implicitHeight > 40 && shownDetail === ""
     readonly property real nameLine: title.height / Math.max(1, title.lineCount)
 
     Layout.fillWidth: true
@@ -42,7 +43,7 @@ Item {
             id: title
             width: Math.min(implicitWidth, name.width - (mark.visible ? mark.width + 6 : 0))
             text: row.label
-            color: Theme.ink
+            color: row.unavailable === "" ? Theme.ink : Theme.muted
             wrapMode: Text.Wrap
             maximumLineCount: 2
             elide: Text.ElideRight
@@ -62,9 +63,9 @@ Item {
             id: detailLabel
             y: title.height + 2
             width: name.width
-            visible: row.detail !== ""
-            text: row.detail
-            color: Theme.muted
+            visible: row.shownDetail !== ""
+            text: row.shownDetail
+            color: row.detail !== "" ? Theme.muted : Theme.faint
             font.pixelSize: Theme.caption
             elide: Text.ElideMiddle
             ToolTip.visible: detailHover.hovered && truncated

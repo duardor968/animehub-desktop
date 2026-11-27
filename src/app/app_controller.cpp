@@ -8,6 +8,7 @@
 #include "util/file_names.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDir>
@@ -18,6 +19,7 @@
 #include <QLocalSocket>
 #include <QMenu>
 #include <QProcess>
+#include <QSysInfo>
 
 #ifdef Q_OS_LINUX
 #include "notifications_linux.h"
@@ -60,10 +62,74 @@ const QIcon& appIcon() {
     return kIcon;
 }
 
+QString homepageString() {
+#ifdef ANIMEHUB_HOMEPAGE_URL
+    return QStringLiteral(ANIMEHUB_HOMEPAGE_URL);
+#else
+    return QStringLiteral("https://github.com/duardor968/animehub-desktop");
+#endif
+}
+
 } // namespace
 
 QString AppController::version() {
     return QStringLiteral(ANIMEHUB_VERSION);
+}
+
+QString AppController::qtVersion() {
+    return QString::fromLatin1(qVersion());
+}
+
+QString AppController::platformLabel() {
+#if defined(Q_OS_WIN)
+    const auto os = QStringLiteral("Windows");
+#elif defined(Q_OS_LINUX)
+    const auto os = QStringLiteral("Linux");
+#elif defined(Q_OS_MACOS)
+    const auto os = QStringLiteral("macOS");
+#else
+    const auto os = QSysInfo::kernelType();
+#endif
+    const auto cpu = QSysInfo::buildCpuArchitecture();
+    if (cpu == u"x86_64") {
+        return os + QStringLiteral(" x64");
+    }
+    if (cpu == u"arm64") {
+        return os + QStringLiteral(" ARM64");
+    }
+    return cpu.isEmpty() ? os : os + QLatin1Char(' ') + cpu;
+}
+
+QString AppController::aria2Version() {
+#ifdef ANIMEHUB_ARIA2_VERSION
+    return QStringLiteral(ANIMEHUB_ARIA2_VERSION);
+#else
+    return {};
+#endif
+}
+
+QString AppController::mpvVersion() {
+#ifdef ANIMEHUB_MPV_VERSION
+    return QStringLiteral(ANIMEHUB_MPV_VERSION);
+#else
+    return {};
+#endif
+}
+
+QString AppController::sqliteVersion() const {
+    return sqlite_version_.isEmpty() ? QStringLiteral("3") : sqlite_version_;
+}
+
+QUrl AppController::homepageUrl() {
+    return QUrl(homepageString());
+}
+
+QUrl AppController::releasesUrl() {
+    return QUrl(homepageString() + QStringLiteral("/releases/tag/v") + version());
+}
+
+QUrl AppController::issuesUrl() {
+    return QUrl(homepageString() + QStringLiteral("/issues"));
 }
 
 AppController::AppController(AppPaths paths, QObject* parent)
@@ -79,6 +145,9 @@ AppController::AppController(AppPaths paths, QObject* parent)
         return;
     }
     database_ = std::move(*database);
+    if (auto ver = database_->run(QStringLiteral("SELECT sqlite_version()")); ver && ver->next()) {
+        sqlite_version_ = ver->value(0).toString().trimmed();
+    }
     library_repository_ = std::make_unique<library::LibraryRepository>(*database_);
     download_repository_ = std::make_unique<downloads::DownloadRepository>(*database_);
     if (paths_.isolated && paths_.transfers) {
@@ -103,7 +172,6 @@ AppController::AppController(AppPaths paths, QObject* parent)
     if (!paths_.apiBase.isEmpty())
         api_options.baseUrl = paths_.apiBase;
     api_ = std::make_unique<api::ApiClient>(network_, api_options);
-    api::ResponseCache(api_options.cacheDirectory).prune(std::chrono::hours(24 * 30));
     library_ = std::make_unique<library::LibraryService>(
         *library_repository_, *api_, nullptr,
         [this](const QString& path) -> std::optional<QString> {
@@ -117,6 +185,15 @@ AppController::AppController(AppPaths paths, QObject* parent)
 
     aria2_ = std::make_unique<downloads::Aria2>(network_, aria2Executable(paths_.engines),
                                                 api_options.userAgent);
+    const auto applyLimit = [this] {
+        aria2_->setSpeedLimit(
+            settings_->nativeLimitEnabled() ? settings_->nativeLimitKBps() * 1000LL : 0);
+    };
+    applyLimit();
+    connect(settings_.get(), &AppSettings::speedLimitChanged, this, applyLimit);
+    connect(aria2_.get(), &downloads::Aria2::speedLimitFailed, this, [this](const QString& error) {
+        emit message(QStringLiteral("No se pudo aplicar el límite de velocidad: ") + error, true);
+    });
     mega_ = std::make_unique<downloads::mega::Api>(network_);
     pixeldrain_ = std::make_unique<downloads::pixeldrain::Api>(network_);
     myjd_ = std::make_unique<downloads::myjd::Client>(network_);
@@ -215,6 +292,8 @@ AppController::AppController(AppPaths paths, QObject* parent)
     library_model_ = std::make_unique<LibraryModel>(*library_, *downloads_, *api_);
     catalog_view_ = std::make_unique<CatalogView>(*api_, *library_model_);
     downloads_view_ = std::make_unique<DownloadsView>(*downloads_, *library_, *player_, *settings_);
+    connect(downloads_view_.get(), &DownloadsView::windowShownChanged, this,
+            [this] { library_model_->setWindowShown(downloads_view_->windowShown()); });
     connect(jdownloader_view_.get(), &JDownloaderView::connectionReady, downloads_view_.get(),
             &DownloadsView::retryWithJdownloader);
     library_anime_ = std::make_unique<AnimeView>(services);
@@ -276,6 +355,10 @@ void AppController::start() {
     if (!ready()) {
         return;
     }
+    if (!paths_.smoke) {
+        api::ResponseCache::pruneAsync(QDir(paths_.data).filePath(QStringLiteral("cache/api")),
+                                       std::chrono::hours(24 * 30));
+    }
     if (!paths_.smoke && paths_.transfers) {
         // Before the queue starts: folders named by slug take their work's title. A test profile
         // only renames inside itself.
@@ -289,8 +372,8 @@ void AppController::start() {
                     qWarning("work folder %s kept: %s", qPrintable(skip.folder),
                              qPrintable(skip.reason));
         }
-        library_->verifyFiles();
-        library_->startWatching();
+        library_->verifyFilesAsync();
+        library_->startWatching(std::chrono::milliseconds(2000));
     }
     downloads_->start(paths_.transfers);
     if (!paths_.smoke)
@@ -542,6 +625,7 @@ void AppController::quit() {
         return;
     }
     quitting_ = true;
+    instance_server_.close();
     emit hideRequested();
     if (tray_) {
         tray_->hide();
@@ -557,6 +641,31 @@ void AppController::openDownloadFolder() {
     const auto folder = settings_->downloadDirectory();
     QDir().mkpath(folder);
     shell::open(folder);
+}
+
+void AppController::openDataDirectory() {
+    QDir().mkpath(paths_.data);
+    shell::open(paths_.data);
+}
+
+QString AppController::diagnosticsText() const {
+    QStringList lines;
+    lines.append(QStringLiteral("AnimeHub Desktop %1 (%2)").arg(version(), platformLabel()));
+    lines.append(QStringLiteral("Qt %1").arg(qtVersion()));
+    const auto aria2 = aria2Version();
+    lines.append(
+        QStringLiteral("aria2 %1").arg(aria2.isEmpty() ? QStringLiteral("system") : aria2));
+    const auto mpv = mpvVersion();
+    lines.append(QStringLiteral("mpv %1").arg(mpv.isEmpty() ? QStringLiteral("system") : mpv));
+    lines.append(QStringLiteral("SQLite %1").arg(sqliteVersion()));
+    lines.append(QStringLiteral("OS: %1").arg(QSysInfo::prettyProductName()));
+    return lines.join(QLatin1Char('\n'));
+}
+
+void AppController::copyToClipboard(const QString& text) {
+    if (auto* clipboard = QGuiApplication::clipboard()) {
+        clipboard->setText(text);
+    }
 }
 
 void AppController::openUrl(const QUrl& url) {

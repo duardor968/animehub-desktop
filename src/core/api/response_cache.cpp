@@ -6,13 +6,31 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
+#include <QThreadPool>
 #include <QTimeZone>
 
 namespace animehub::api {
 
 namespace {
 constexpr qint64 kMaxEntryBytes = 8 * 1024 * 1024;
+
+int pruneDirectory(const QString& directory, std::chrono::hours age) {
+    if (directory.isEmpty()) {
+        return 0;
+    }
+    const auto limit = QDateTime::currentDateTimeUtc().addSecs(
+        -std::chrono::duration_cast<std::chrono::seconds>(age).count());
+    int removed = 0;
+    QDirIterator it(directory, {QStringLiteral("*.json")}, QDir::Files);
+    while (it.hasNext()) {
+        const auto info = it.nextFileInfo();
+        if (info.lastModified(QTimeZone::UTC) < limit && QFile::remove(info.filePath())) {
+            ++removed;
+        }
+    }
+    return removed;
 }
+} // namespace
 
 ResponseCache::ResponseCache(QString directory) : directory_(std::move(directory)) {
     if (!directory_.isEmpty()) {
@@ -49,20 +67,15 @@ void ResponseCache::write(const QUrl& url, const QByteArray& body) const {
 }
 
 int ResponseCache::prune(std::chrono::hours age) const {
-    if (directory_.isEmpty()) {
-        return 0;
+    return pruneDirectory(directory_, age);
+}
+
+void ResponseCache::pruneAsync(const QString& directory, std::chrono::hours max_age) {
+    if (directory.isEmpty()) {
+        return;
     }
-    const auto limit = QDateTime::currentDateTimeUtc().addSecs(
-        -std::chrono::duration_cast<std::chrono::seconds>(age).count());
-    int removed = 0;
-    QDirIterator it(directory_, {QStringLiteral("*.json")}, QDir::Files);
-    while (it.hasNext()) {
-        const auto info = it.nextFileInfo();
-        if (info.lastModified(QTimeZone::UTC) < limit && QFile::remove(info.filePath())) {
-            ++removed;
-        }
-    }
-    return removed;
+    QThreadPool::globalInstance()->start(
+        [directory, max_age] { static_cast<void>(pruneDirectory(directory, max_age)); });
 }
 
 } // namespace animehub::api

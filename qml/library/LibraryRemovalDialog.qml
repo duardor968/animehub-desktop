@@ -44,8 +44,8 @@ ModalDialog {
         }
         Label {
             Layout.fillWidth: true
-            visible: dialog.model.error !== ""
-            text: dialog.model.error
+            visible: dialog.model ? dialog.model.error !== "" : false
+            text: dialog.model ? dialog.model.error : ""
             color: Theme.muted
             wrapMode: Text.Wrap
         }

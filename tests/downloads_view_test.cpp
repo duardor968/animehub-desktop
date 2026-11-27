@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocale>
+#include <QMetaProperty>
 #include <QNetworkAccessManager>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -123,15 +124,31 @@ struct Fixture {
     std::optional<downloads::Task>
     add(double number, downloads::TaskState state,
         downloads::DownloadEngine engine = downloads::DownloadEngine::Native) {
-        auto task = queue->create(anime.slug, number, anime.title, api::Audio::Sub,
-                                  downloads::TaskOrigin::Manual,
-                                  root.filePath(QStringLiteral("Anime/a/A - %1").arg(number)),
-                                  engine, QStringLiteral("http://127.0.0.1:1"));
+        return addFor(anime.slug, anime.title, number, state, engine);
+    }
+
+    std::optional<downloads::Task>
+    addFor(const QString& slug, const QString& title, double number, downloads::TaskState state,
+           downloads::DownloadEngine engine = downloads::DownloadEngine::Native) {
+        auto task = queue->create(
+            slug, number, title, api::Audio::Sub, downloads::TaskOrigin::Manual,
+            root.filePath(QStringLiteral("Anime/%1/%1 - %2").arg(slug, QString::number(number))),
+            engine, QStringLiteral("http://127.0.0.1:1"));
         if (!task) {
             return std::nullopt;
         }
         task->state = state;
         return queue->save(*task) ? std::optional(*task) : std::nullopt;
+    }
+
+    void reloadManager(bool transfers = false) {
+        if (manager) {
+            manager->shutdown([] {});
+        }
+        manager = std::make_unique<downloads::DownloadManager>(
+            downloads::DownloadManager::Services{*api, *aria, *mega, *pixeldrain, *queue, *repo},
+            [this] { return downloads::DownloadSettings{.providers = providers}; });
+        manager->start(transfers);
     }
 
     ~Fixture() {
@@ -388,8 +405,8 @@ private slots:
         QCOMPARE(view.current()->rows().first().episodes.at(1).detail, QStringLiteral("En cola"));
     }
 
-    // The bar counts the episode on view among the whole line, finished ones of series still
-    // in line included, as Steam's: "Descargando 2 de 3 · A ep. 2".
+    // The bar shows unambiguous active copy (never counting already-completed episodes as "X de
+    // Y").
     void barCountsTheLineAsSteam() {
         Fixture f;
         f.anime.posterUrl = QUrl(QStringLiteral("https://img.test/poster.webp"));
@@ -408,8 +425,19 @@ private slots:
         app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
         QVERIFY(view.barVisible());
         QCOMPARE(view.barMode(), app::DownloadsView::Mode::Active);
-        QCOMPARE(view.barText(), QStringLiteral("Descargando 2 de 3 · A ep. 2"));
+        QCOMPARE(view.barState(), QStringLiteral("active"));
+        QVERIFY(!view.barPaused());
+        QVERIFY(!view.barError());
+        QCOMPARE(view.barText(), QStringLiteral("Descargando A · Ep. 2"));
+        QVERIFY(!view.barText().contains(QStringLiteral(" de ")));
+        QCOMPARE(view.barProgress(), 0.45);
         QCOMPARE(view.barPercent(), QStringLiteral("45 %"));
+        QCOMPARE(view.barPercentText(), QStringLiteral("45 %"));
+        QCOMPARE(view.activeSeriesCount(), 1);
+        QCOMPARE(view.activeTaskCount(), 1);
+        QCOMPARE(view.pendingTaskCount(), 2);
+        QCOMPARE(view.headerTaskCount(), 3);
+        QCOMPARE(view.headerTasks()->rowCount(), 3);
         // The top of the page: the series' figures on its line, the episode's under the bar,
         // each named once.
         QVERIFY2(view.headerEpisode().startsWith(QStringLiteral("1 de 3 descargados")),
@@ -529,6 +557,381 @@ private slots:
         g.manager->forget(second->id);
         later.setWindowShown(true);
         QCOMPARE(later.offer(), QString());
+    }
+
+    // Speed samples track native vs total separately, clamp JD speed >= 0, keep totalChanged
+    // separate from speedChanged, and clear jdActive as soon as JD stops contributing.
+    void speedSamplesClampedJdSpeedAndSignalSplit() {
+        Fixture f;
+        QVERIFY(f.open());
+        f.manager->start(false);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
+
+        const auto* meta = view.metaObject();
+        const auto notify_name = [meta](const char* prop) {
+            return meta->property(meta->indexOfProperty(prop)).notifySignal().name();
+        };
+        QCOMPARE(notify_name("totalText"), QByteArray("totalChanged"));
+        QCOMPARE(notify_name("speedText"), QByteArray("speedChanged"));
+        QCOMPARE(notify_name("nativeSpeedSamples"), QByteArray("speedChanged"));
+        QCOMPARE(notify_name("nativeSpeedText"), QByteArray("speedChanged"));
+        QCOMPARE(notify_name("jdSpeedText"), QByteArray("speedChanged"));
+        QCOMPARE(notify_name("jdActive"), QByteArray("summaryChanged"));
+        QCOMPARE(notify_name("headerSingleEpisode"), QByteArray("summaryChanged"));
+
+        QCOMPARE(view.speedSamples().size(), 60);
+        QCOMPARE(view.nativeSpeedSamples().size(), 60);
+        QVERIFY(!view.jdActive());
+        QVERIFY(!view.headerSingleEpisode());
+
+        QSignalSpy speed_spy(&view, &app::DownloadsView::speedChanged);
+        QSignalSpy total_spy(&view, &app::DownloadsView::totalChanged);
+        QSignalSpy summary_spy(&view, &app::DownloadsView::summaryChanged);
+
+        view.recordSpeedSample(3'500'000, 1'500'000);
+        QCOMPARE(speed_spy.size(), 1);
+        QCOMPARE(total_spy.size(), 0);
+        QCOMPARE(summary_spy.size(), 1);
+        QVERIFY(view.jdActive());
+        QCOMPARE(view.speedSamples().last(), 3'500'000.0);
+        QCOMPARE(view.nativeSpeedSamples().last(), 1'500'000.0);
+        QCOMPARE(view.speedText(), QStringLiteral("3,5 MB/s"));
+        QCOMPARE(view.nativeSpeedText(), QStringLiteral("1,5 MB/s"));
+        QCOMPARE(view.jdSpeedText(), QStringLiteral("2,0 MB/s"));
+
+        // Even if native exceeds total on an out-of-sync sample, JD speed clamps at 0 KB/s
+        // and jdActive clears immediately.
+        view.recordSpeedSample(1'000'000, 2'500'000);
+        QCOMPARE(speed_spy.size(), 2);
+        QCOMPARE(total_spy.size(), 0);
+        QCOMPARE(summary_spy.size(), 2);
+        QCOMPARE(view.jdSpeedText(), QStringLiteral("0 KB/s"));
+        QVERIFY(!view.jdActive());
+    }
+
+    void headerSingleEpisodeAndJdActiveFromTasks() {
+        Fixture single;
+        QVERIFY(single.open());
+        QVERIFY(single.add(1, downloads::TaskState::Downloading));
+        single.manager->start(false);
+        app::DownloadsView single_view(*single.manager, *single.library, *single.player,
+                                       *single.settings);
+        QVERIFY(single_view.headerSingleEpisode());
+        QVERIFY(!single_view.jdActive());
+
+        Fixture mixed;
+        QVERIFY(mixed.open());
+        QVERIFY(mixed.add(1, downloads::TaskState::Downloading));
+        QVERIFY(mixed.add(2, downloads::TaskState::Downloading,
+                          downloads::DownloadEngine::JDownloaderLocal));
+        mixed.manager->start(false);
+        app::DownloadsView mixed_view(*mixed.manager, *mixed.library, *mixed.player,
+                                      *mixed.settings);
+        QVERIFY(!mixed_view.headerSingleEpisode());
+        QVERIFY(mixed_view.jdActive());
+    }
+
+    // 1 anime, 1 active episode: clean bar copy, backdrop exposure, hero summary and rich
+    // per-episode expansion roles for both card and compact table views.
+    void singleAnimeSingleActiveEpisodeAndHeroMetadata() {
+        Fixture f;
+        f.anime.posterUrl = QUrl(QStringLiteral("https://img.test/poster.webp"));
+        f.anime.backdropUrl = QUrl(QStringLiteral("https://img.test/backdrop.webp"));
+        QVERIFY(f.open());
+        const QUrl still1(QStringLiteral("https://img.test/ep1.webp"));
+        const QUrl still6(QStringLiteral("https://img.test/ep6.webp"));
+        QVERIFY(f.repo->syncEpisodes(f.anime.slug,
+                                     {api::Episode{.id = QStringLiteral("e1"),
+                                                   .number = 1,
+                                                   .title = QStringLiteral("El inicio"),
+                                                   .imageUrl = still1},
+                                      api::Episode{.id = QStringLiteral("e6"),
+                                                   .number = 6,
+                                                   .title = QStringLiteral("El viaje"),
+                                                   .imageUrl = still6}},
+                                     false));
+        QVERIFY(f.addOnDisk(1, 442'000'000));
+        auto running = f.add(6, downloads::TaskState::Downloading);
+        QVERIFY(running);
+        running->provider = api::Provider::Mega;
+        running->bytesDone = 288'000'000;
+        running->bytesTotal = 450'000'000;
+        QVERIFY(f.queue->save(*running));
+        f.manager->start(false);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
+
+        QCOMPARE(view.barState(), QStringLiteral("active"));
+        QCOMPARE(view.barText(), QStringLiteral("Descargando A · Ep. 6"));
+        QVERIFY(!view.barText().contains(QStringLiteral(" de ")));
+        QCOMPARE(view.barProgress(), 288.0 / 450.0);
+        QCOMPARE(view.barPercentText(), QStringLiteral("64 %"));
+        QCOMPARE(view.barPercent(), QStringLiteral("64 %"));
+        QCOMPARE(view.activeSeriesCount(), 1);
+        QCOMPARE(view.activeTaskCount(), 1);
+        QCOMPARE(view.pendingTaskCount(), 1);
+        QCOMPARE(view.headerBackdrop(), QStringLiteral("https://img.test/backdrop.webp"));
+        QCOMPARE(view.headerTaskCount(), 2);
+        QCOMPARE(view.headerActiveSummary(), QStringLiteral("Ep. 6 · 64 % · 288 MB de 450 MB"));
+
+        view.recordSpeedSample(6'800'000, 6'800'000);
+        QCOMPARE(view.barSpeedText(), QStringLiteral("6,8 MB/s"));
+        QCOMPARE(view.totalSpeedText(), QStringLiteral("6,8 MB/s"));
+
+        auto* tasks = view.headerTasks();
+        QCOMPARE(tasks->rowCount(), 2);
+        using Role = app::DownloadEpisodesModel::Role;
+        const auto ep1 = tasks->index(0);
+        QCOMPARE(tasks->data(ep1, Role::EpisodeRole).toString(), QStringLiteral("1"));
+        QCOMPARE(tasks->data(ep1, Role::TitleRole).toString(), QStringLiteral("El inicio"));
+        QCOMPARE(tasks->data(ep1, Role::StillUrlRole).toUrl(), still1);
+        QCOMPARE(tasks->data(ep1, Role::StateGroupRole).toString(), QStringLiteral("completed"));
+        QCOMPARE(tasks->data(ep1, Role::StateTextRole).toString(), QStringLiteral("Completado"));
+        QCOMPARE(tasks->data(ep1, Role::PercentTextRole).toString(), QStringLiteral("100 %"));
+        QCOMPARE(tasks->data(ep1, Role::SpeedTextRole).toString(), QStringLiteral("—"));
+        QCOMPARE(tasks->data(ep1, Role::SizeTextRole).toString(),
+                 QStringLiteral("442 MB · En disco"));
+        QVERIFY(tasks->data(ep1, Role::CanPlayRole).toBool());
+        QVERIFY(!tasks->data(ep1, Role::FilePathRole).toString().isEmpty());
+        QVERIFY(!tasks->data(ep1, Role::CanCancelRole).toBool());
+
+        const auto ep6 = tasks->index(1);
+        QCOMPARE(tasks->data(ep6, Role::EpisodeRole).toString(), QStringLiteral("6"));
+        QCOMPARE(tasks->data(ep6, Role::TitleRole).toString(), QStringLiteral("El viaje"));
+        QCOMPARE(tasks->data(ep6, Role::StillUrlRole).toUrl(), still6);
+        QCOMPARE(tasks->data(ep6, Role::StateGroupRole).toString(), QStringLiteral("running"));
+        QCOMPARE(tasks->data(ep6, Role::StateTextRole).toString(), QStringLiteral("Descargando"));
+        QCOMPARE(tasks->data(ep6, Role::PercentTextRole).toString(), QStringLiteral("64 %"));
+        QCOMPARE(tasks->data(ep6, Role::SizeTextRole).toString(),
+                 QStringLiteral("288 MB de 450 MB"));
+        QCOMPARE(tasks->data(ep6, Role::ProviderRole).toString(), QStringLiteral("MEGA"));
+        QVERIFY(!tasks->data(ep6, Role::CanPlayRole).toBool());
+        QVERIFY(tasks->data(ep6, Role::FilePathRole).toString().isEmpty());
+        QVERIFY(tasks->data(ep6, Role::CanPauseRole).toBool());
+        QVERIFY(tasks->data(ep6, Role::CanCancelRole).toBool());
+
+        // Without a dedicated backdrop, headerBackdrop stays empty so QML blurs headerPoster.
+        Fixture poster_only;
+        poster_only.anime.posterUrl = QUrl(QStringLiteral("https://img.test/poster-only.webp"));
+        QVERIFY(poster_only.open());
+        QVERIFY(poster_only.add(1, downloads::TaskState::Downloading));
+        poster_only.manager->start(false);
+        app::DownloadsView poster_view(*poster_only.manager, *poster_only.library,
+                                       *poster_only.player, *poster_only.settings);
+        QCOMPARE(poster_view.headerBackdrop(), QString());
+        QCOMPARE(poster_view.headerPoster(), poster_only.anime.posterUrl);
+    }
+
+    // 1 anime, 2 parallel active episodes: Hero summary names both episodes with percents,
+    // and the bottom bar shows "2 eps activos" with combined progress.
+    void singleAnimeParallelActiveEpisodes() {
+        Fixture f;
+        QVERIFY(f.open());
+        auto done = f.addFor(QStringLiteral("frieren"), QStringLiteral("Frieren"), 1,
+                             downloads::TaskState::Completed);
+        auto ep4 = f.addFor(QStringLiteral("frieren"), QStringLiteral("Frieren"), 4,
+                            downloads::TaskState::Downloading);
+        auto ep5 = f.addFor(QStringLiteral("frieren"), QStringLiteral("Frieren"), 5,
+                            downloads::TaskState::Downloading);
+        auto ep6 = f.addFor(QStringLiteral("frieren"), QStringLiteral("Frieren"), 6,
+                            downloads::TaskState::Queued);
+        QVERIFY(done && ep4 && ep5 && ep6);
+        ep4->bytesDone = 64;
+        ep4->bytesTotal = 100;
+        ep5->bytesDone = 29;
+        ep5->bytesTotal = 100;
+        QVERIFY(f.queue->save(*ep4) && f.queue->save(*ep5));
+        f.manager->start(false);
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
+
+        QCOMPARE(view.barState(), QStringLiteral("active"));
+        QCOMPARE(view.activeSeriesCount(), 1);
+        QCOMPARE(view.activeTaskCount(), 2);
+        QCOMPARE(view.pendingTaskCount(), 3);
+        QCOMPARE(view.barText(), QStringLiteral("Descargando Frieren · 2 eps activos · Ep. 4"));
+        QCOMPARE(view.barProgress(), 0.465);
+        QCOMPARE(view.barPercentText(), QStringLiteral("47 %"));
+        QCOMPARE(view.headerProgress(), 0.465);
+        QCOMPARE(view.headerTaskCount(), 4);
+        QCOMPARE(view.headerTasks()->rowCount(), 4);
+        QCOMPARE(view.headerActiveSummary(),
+                 QStringLiteral("Ep. 4 (64 %) y Ep. 5 (29 %) · 1 de 4 completados"));
+    }
+
+    // 2 animes downloading in parallel: activeSeriesCount == 2, barText leads with
+    // "Descargando 2 animes", the 2nd anime sits in `active` with full expandable tasks, and
+    // finishing Anime 1 strictly decreases pending counts without jumping backwards.
+    void parallelAnimesAndCompletionNeverJumpsBackwards() {
+        Fixture f;
+        QVERIFY(f.open());
+        const auto title1 = QStringLiteral("Frieren: Beyond Journey's End");
+        const auto title2 = QStringLiteral("Solo Leveling");
+        auto a1_ep1 =
+            f.addFor(QStringLiteral("frieren"), title1, 1, downloads::TaskState::Completed);
+        auto a1_ep2 =
+            f.addFor(QStringLiteral("frieren"), title1, 2, downloads::TaskState::Downloading);
+        auto a2_ep1 =
+            f.addFor(QStringLiteral("solo-leveling"), title2, 1, downloads::TaskState::Downloading);
+        auto a2_ep2 =
+            f.addFor(QStringLiteral("solo-leveling"), title2, 2, downloads::TaskState::Queued);
+        QVERIFY(a1_ep1 && a1_ep2 && a2_ep1 && a2_ep2);
+        a1_ep2->bytesDone = 60;
+        a1_ep2->bytesTotal = 100;
+        a2_ep1->bytesDone = 20;
+        a2_ep1->bytesTotal = 100;
+        a2_ep1->provider = api::Provider::Pixeldrain;
+        QVERIFY(f.queue->save(*a1_ep2) && f.queue->save(*a2_ep1));
+        f.manager->start(false);
+        {
+            app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings);
+
+            QCOMPARE(view.barState(), QStringLiteral("active"));
+            QCOMPARE(view.activeSeriesCount(), 2);
+            QCOMPARE(view.activeTaskCount(), 2);
+            QCOMPARE(view.pendingTaskCount(), 3);
+            QVERIFY2(view.barText().startsWith(QStringLiteral("Descargando 2 animes")),
+                     qPrintable(view.barText()));
+            QCOMPARE(view.barText(),
+                     QStringLiteral("Descargando 2 animes · 2 eps activos · Frieren ep. 2"));
+            QCOMPARE(view.barProgress(), 0.40);
+            QCOMPARE(view.barPercentText(), QStringLiteral("40 %"));
+            QCOMPARE(view.current()->rowCount(), 1);
+            QCOMPARE(view.current()->rows().first().slug, QStringLiteral("frieren"));
+            QCOMPARE(view.active()->rowCount(), 1);
+            QCOMPARE(view.active()->rows().first().slug, QStringLiteral("solo-leveling"));
+
+            // Expanding the parallel anime under "También descargando" exposes the full episode
+            // model.
+            using SRole = app::DownloadSeriesModel::Role;
+            using ERole = app::DownloadEpisodesModel::Role;
+            const auto active_idx = view.active()->index(0);
+            QCOMPARE(view.active()->data(active_idx, SRole::TaskCountRole).toInt(), 2);
+            QCOMPARE(view.active()->data(active_idx, SRole::ActiveCountRole).toInt(), 1);
+            auto* active_tasks = view.active()
+                                     ->data(active_idx, SRole::TasksRole)
+                                     .value<app::DownloadEpisodesModel*>();
+            auto* active_eps = view.active()
+                                   ->data(active_idx, SRole::EpisodesRole)
+                                   .value<app::DownloadEpisodesModel*>();
+            QVERIFY(active_tasks != nullptr);
+            QCOMPARE(active_tasks, active_eps);
+            QCOMPARE(active_tasks->rowCount(), 2);
+            QCOMPARE(active_tasks->data(active_tasks->index(0), ERole::StateGroupRole).toString(),
+                     QStringLiteral("running"));
+            QCOMPARE(active_tasks->data(active_tasks->index(0), ERole::PercentTextRole).toString(),
+                     QStringLiteral("20 %"));
+            QCOMPARE(active_tasks->data(active_tasks->index(0), ERole::ProviderRole).toString(),
+                     QStringLiteral("Pixeldrain"));
+            QVERIFY(active_tasks->data(active_tasks->index(0), ERole::CanCancelRole).toBool());
+            QCOMPARE(active_tasks->data(active_tasks->index(1), ERole::StateGroupRole).toString(),
+                     QStringLiteral("queued"));
+            QCOMPARE(active_tasks->data(active_tasks->index(1), ERole::PercentTextRole).toString(),
+                     QStringLiteral("En cola"));
+        }
+
+        // Completing Anime 1 moves it to completed and promotes Anime 2 without jumping counters.
+        a1_ep2->state = downloads::TaskState::Completed;
+        a1_ep2->bytesDone = 100;
+        a1_ep2->finishedAt = QDateTime::currentDateTime();
+        QVERIFY(f.queue->save(*a1_ep2));
+        f.reloadManager(false);
+        app::DownloadsView after(*f.manager, *f.library, *f.player, *f.settings);
+
+        QCOMPARE(after.completed()->rowCount(), 1);
+        QCOMPARE(after.completed()->rows().first().slug, QStringLiteral("frieren"));
+        QCOMPARE(after.current()->rowCount(), 1);
+        QCOMPARE(after.current()->rows().first().slug, QStringLiteral("solo-leveling"));
+        QCOMPARE(after.active()->rowCount(), 0);
+        QCOMPARE(after.activeSeriesCount(), 1);
+        QCOMPARE(after.activeTaskCount(), 1);
+        QCOMPARE(after.pendingTaskCount(), 2);
+        QCOMPARE(after.barText(), QStringLiteral("Descargando Solo Leveling · Ep. 1"));
+        QCOMPARE(after.barProgress(), 0.20);
+        QCOMPARE(after.barPercentText(), QStringLiteral("20 %"));
+    }
+
+    // Paused, error and idle states: counts reflect only unfinished tasks and barSpeedText stays
+    // empty whenever nothing is actively running.
+    void pausedErrorAndIdleBarStates() {
+        // Idle.
+        Fixture idle;
+        QVERIFY(idle.open());
+        idle.manager->start(false);
+        app::DownloadsView idle_view(*idle.manager, *idle.library, *idle.player, *idle.settings);
+        QVERIFY(!idle_view.barVisible());
+        QCOMPARE(idle_view.barState(), QStringLiteral("idle"));
+        QVERIFY(!idle_view.barPaused());
+        QVERIFY(!idle_view.barError());
+        QCOMPARE(idle_view.barText(), QString());
+        QCOMPARE(idle_view.pendingTaskCount(), 0);
+        QCOMPARE(idle_view.headerTaskCount(), 0);
+        QCOMPARE(idle_view.headerActiveSummary(), QString());
+
+        // Paused singular (2 completed + 1 paused -> counts only the 1 pending episode).
+        Fixture paused_one;
+        QVERIFY(paused_one.open());
+        QVERIFY(paused_one.add(1, downloads::TaskState::Completed));
+        QVERIFY(paused_one.add(2, downloads::TaskState::Completed));
+        QVERIFY(paused_one.add(3, downloads::TaskState::Paused));
+        paused_one.manager->start(false);
+        app::DownloadsView paused_one_view(*paused_one.manager, *paused_one.library,
+                                           *paused_one.player, *paused_one.settings);
+        QVERIFY(paused_one_view.barVisible());
+        QCOMPARE(paused_one_view.barState(), QStringLiteral("paused"));
+        QVERIFY(paused_one_view.barPaused());
+        QVERIFY(!paused_one_view.barError());
+        QCOMPARE(paused_one_view.barText(), QStringLiteral("En pausa · 1 episodio pendiente"));
+        QCOMPARE(paused_one_view.pendingTaskCount(), 1);
+        QCOMPARE(paused_one_view.activeTaskCount(), 0);
+        QCOMPARE(paused_one_view.activeSeriesCount(), 0);
+        QCOMPARE(paused_one_view.barProgress(), 0.0);
+        QCOMPARE(paused_one_view.barPercentText(), QString());
+        paused_one_view.recordSpeedSample(5'000'000, 5'000'000);
+        QCOMPARE(paused_one_view.barSpeedText(), QString());
+        QCOMPARE(paused_one_view.totalSpeedText(), QStringLiteral("5,0 MB/s"));
+
+        // Paused plural (2 completed + 2 paused + 1 queued -> 3 pendientes).
+        Fixture paused_many;
+        QVERIFY(paused_many.open());
+        QVERIFY(paused_many.add(1, downloads::TaskState::Completed));
+        QVERIFY(paused_many.add(2, downloads::TaskState::Completed));
+        QVERIFY(paused_many.add(3, downloads::TaskState::Paused));
+        QVERIFY(paused_many.add(4, downloads::TaskState::Paused));
+        QVERIFY(paused_many.add(5, downloads::TaskState::Queued));
+        paused_many.manager->start(false);
+        app::DownloadsView paused_many_view(*paused_many.manager, *paused_many.library,
+                                            *paused_many.player, *paused_many.settings);
+        QCOMPARE(paused_many_view.barState(), QStringLiteral("paused"));
+        QVERIFY(paused_many_view.barPaused());
+        QCOMPARE(paused_many_view.barText(), QStringLiteral("En pausa · 3 episodios pendientes"));
+        QCOMPARE(paused_many_view.pendingTaskCount(), 3);
+
+        // Error singular (1 completed + 1 failed).
+        Fixture err_one;
+        QVERIFY(err_one.open());
+        QVERIFY(err_one.add(1, downloads::TaskState::Completed));
+        QVERIFY(err_one.add(2, downloads::TaskState::Failed));
+        err_one.manager->start(false);
+        app::DownloadsView err_one_view(*err_one.manager, *err_one.library, *err_one.player,
+                                        *err_one.settings);
+        QCOMPARE(err_one_view.barState(), QStringLiteral("error"));
+        QVERIFY(err_one_view.barError());
+        QVERIFY(!err_one_view.barPaused());
+        QCOMPARE(err_one_view.barText(), QStringLiteral("1 descarga con error"));
+        QCOMPARE(err_one_view.barProblem(), QString());
+        QCOMPARE(err_one_view.pendingTaskCount(), 1);
+
+        // Error plural (2 failed).
+        Fixture err_many;
+        QVERIFY(err_many.open());
+        QVERIFY(err_many.add(1, downloads::TaskState::Failed));
+        QVERIFY(err_many.add(2, downloads::TaskState::Failed));
+        err_many.manager->start(false);
+        app::DownloadsView err_many_view(*err_many.manager, *err_many.library, *err_many.player,
+                                         *err_many.settings);
+        QCOMPARE(err_many_view.barState(), QStringLiteral("error"));
+        QVERIFY(err_many_view.barError());
+        QCOMPARE(err_many_view.barText(), QStringLiteral("2 descargas con error"));
+        QCOMPARE(err_many_view.pendingTaskCount(), 2);
     }
 };
 QTEST_GUILESS_MAIN(DownloadsViewTest)

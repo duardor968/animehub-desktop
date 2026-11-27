@@ -46,6 +46,7 @@ void reconcile(const QList<Row>& current, const QList<Row>& next, KeyOf key_of, 
 } // namespace
 
 void DownloadEpisodesModel::setRows(const QList<DownloadEpisodeRow>& rows) {
+    const auto count = rows_.size();
     reconcile(
         rows_, rows, [](const DownloadEpisodeRow& row) { return row.id; },
         [this](int i) {
@@ -69,6 +70,9 @@ void DownloadEpisodesModel::setRows(const QList<DownloadEpisodeRow>& rows) {
                 emit dataChanged(index(i), index(i));
             }
         });
+    if (rows_.size() != count) {
+        emit countChanged();
+    }
 }
 
 int DownloadEpisodesModel::rowCount(const QModelIndex& parent) const {
@@ -85,20 +89,42 @@ QVariant DownloadEpisodesModel::data(const QModelIndex& index, int role) const {
         return row.id;
     case NumberRole:
         return row.number;
+    case EpisodeRole:
+        return row.episode;
     case LabelRole:
     case Qt::DisplayRole:
         return row.label;
+    case TitleRole:
+        return row.title;
     case ImageRole:
+    case StillUrlRole:
         return row.image;
     case StateRole:
         return row.state;
+    case StateGroupRole:
+        return row.stateGroup;
+    case StateTextRole:
+        return row.stateText;
     case ProgressRole:
         return row.progress;
+    case PercentTextRole:
+        return row.percentText;
+    case SpeedTextRole:
+        return row.speedText;
+    case SizeTextRole:
+        return row.sizeText;
+    case EtaTextRole:
+        return row.etaText;
+    case ProviderRole:
+        return row.provider;
+    case FilePathRole:
+        return row.filePath;
     case DetailRole:
         return row.detail;
     case ProblemRole:
         return row.problem;
     case HasFileRole:
+    case CanPlayRole:
         return row.hasFile;
     case CanPauseRole:
         return row.canPause;
@@ -108,6 +134,8 @@ QVariant DownloadEpisodesModel::data(const QModelIndex& index, int role) const {
         return row.canRetry;
     case CanRetryNowRole:
         return row.canRetryNow;
+    case CanCancelRole:
+        return row.canCancel;
     case PartialRole:
         return row.partial;
     default:
@@ -118,17 +146,30 @@ QVariant DownloadEpisodesModel::data(const QModelIndex& index, int role) const {
 QHash<int, QByteArray> DownloadEpisodesModel::roleNames() const {
     return {{IdRole, "taskId"},
             {NumberRole, "number"},
+            {EpisodeRole, "episode"},
             {LabelRole, "label"},
+            {TitleRole, "title"},
             {ImageRole, "image"},
+            {StillUrlRole, "stillUrl"},
             {StateRole, "taskState"},
+            {StateGroupRole, "stateGroup"},
+            {StateTextRole, "stateText"},
             {ProgressRole, "progress"},
+            {PercentTextRole, "percentText"},
+            {SpeedTextRole, "speedText"},
+            {SizeTextRole, "sizeText"},
+            {EtaTextRole, "etaText"},
+            {ProviderRole, "provider"},
+            {FilePathRole, "filePath"},
             {DetailRole, "detail"},
             {ProblemRole, "problem"},
             {HasFileRole, "hasFile"},
+            {CanPlayRole, "canPlay"},
             {CanPauseRole, "canPause"},
             {CanResumeRole, "canResume"},
             {CanRetryRole, "canRetry"},
             {CanRetryNowRole, "canRetryNow"},
+            {CanCancelRole, "canCancel"},
             {PartialRole, "partial"}};
 }
 
@@ -199,6 +240,8 @@ QVariant DownloadSeriesModel::data(const QModelIndex& index, int role) const {
         return row.title;
     case PosterRole:
         return row.poster;
+    case BackdropRole:
+        return row.backdrop;
     case SummaryRole:
         return row.summary;
     case ProgressRole:
@@ -231,6 +274,10 @@ QVariant DownloadSeriesModel::data(const QModelIndex& index, int role) const {
         return row.notice;
     case RunningRole:
         return row.running;
+    case ActiveCountRole:
+        return row.activeCount;
+    case RunningSpeedTextRole:
+        return row.runningSpeedText;
     case CancelCountRole:
         return row.cancelCount;
     case FilesGoneRole:
@@ -238,7 +285,10 @@ QVariant DownloadSeriesModel::data(const QModelIndex& index, int role) const {
     case CanRetryNowRole:
         return row.canRetryNow;
     case EpisodesRole:
+    case TasksRole:
         return QVariant::fromValue(episodes_.value(row.slug));
+    case TaskCountRole:
+        return static_cast<int>(row.episodes.size());
     default:
         return {};
     }
@@ -248,6 +298,7 @@ QHash<int, QByteArray> DownloadSeriesModel::roleNames() const {
     return {{SlugRole, "slug"},
             {TitleRole, "title"},
             {PosterRole, "poster"},
+            {BackdropRole, "backdrop"},
             {SummaryRole, "summary"},
             {ProgressRole, "progress"},
             {FailedRole, "failed"},
@@ -264,10 +315,14 @@ QHash<int, QByteArray> DownloadSeriesModel::roleNames() const {
             {HasFolderRole, "hasFolder"},
             {NoticeRole, "notice"},
             {RunningRole, "running"},
+            {ActiveCountRole, "activeCount"},
+            {RunningSpeedTextRole, "runningSpeedText"},
             {CancelCountRole, "cancelCount"},
             {FilesGoneRole, "filesGone"},
             {CanRetryNowRole, "canRetryNow"},
-            {EpisodesRole, "episodes"}};
+            {EpisodesRole, "episodes"},
+            {TasksRole, "tasks"},
+            {TaskCountRole, "taskCount"}};
 }
 
 } // namespace animehub::app

@@ -11,6 +11,7 @@
 #include <QTimeZone>
 
 #include <algorithm>
+#include <cmath>
 
 namespace animehub::library {
 namespace {
@@ -117,6 +118,91 @@ bool isInstallment(api::RelationKind kind) {
         break;
     }
     return false;
+}
+
+struct UnwatchedRow {
+    double number = 0;
+    int state = 0;
+    qint64 positionMs = 0;
+    qint64 durationMs = 0;
+    bool hasStateAt = false;
+    qint64 stateAt = 0;
+    bool hasFile = false;
+};
+
+void applyUnwatched(LibraryEntry& entry, std::optional<double> last_watched,
+                    const QList<UnwatchedRow>& rows) {
+    const UnwatchedRow* best_watching = nullptr;
+    for (const auto& row : rows) {
+        if (row.state != static_cast<int>(WatchState::Watching)) {
+            continue;
+        }
+        if (!best_watching || (row.hasStateAt && (!best_watching->hasStateAt ||
+                                                  row.stateAt > best_watching->stateAt))) {
+            best_watching = &row;
+        }
+    }
+    if (best_watching) {
+        entry.resumeNumber = best_watching->number;
+        entry.resumePositionMs = best_watching->positionMs;
+        entry.resumeDurationMs = best_watching->durationMs;
+    } else {
+        const double threshold = last_watched.value_or(-1.0);
+        for (const auto& row : rows) {
+            if (row.state == static_cast<int>(WatchState::Unwatched) && row.number > threshold) {
+                entry.resumeNumber = row.number;
+                break;
+            }
+        }
+        if (!entry.resumeNumber && !entry.finished()) {
+            // Nothing past the last watched episode, yet the series is not seen: it goes on at
+            // the first whole episode skipped. A recap like 17.5 is not one.
+            for (const auto& row : rows) {
+                if (row.state == static_cast<int>(WatchState::Unwatched) &&
+                    std::isfinite(row.number) && row.number == std::trunc(row.number)) {
+                    entry.resumeNumber = row.number;
+                    break;
+                }
+            }
+        }
+    }
+    if (!entry.resumeNumber) {
+        return;
+    }
+    for (const auto& row : rows) {
+        if (row.number < *entry.resumeNumber) {
+            continue;
+        }
+        if (row.hasFile) {
+            entry.resumeOnDisk = entry.resumeOnDisk || row.number == *entry.resumeNumber;
+            ++entry.unwatchedOnDisk;
+        } else {
+            entry.missingEpisodes.append(row.number);
+        }
+    }
+}
+
+void applyBestLocation(const QList<EpisodeLocation>& locations, EpisodeRecord& episode) {
+    episode.filePath.clear();
+    episode.fileSize = 0;
+    if (locations.isEmpty()) {
+        return;
+    }
+    if (locations.size() == 1) {
+        episode.filePath = locations.first().path;
+        episode.fileSize = locations.first().size;
+        return;
+    }
+    // Multiple stored copies for one episode: prefer an existing file on disk, else the first.
+    episode.filePath = locations.first().path;
+    episode.fileSize = locations.first().size;
+    for (const auto& location : locations) {
+        if (QFileInfo::exists(location.path)) {
+            episode.filePath = location.path;
+            episode.fileSize = location.size;
+            return;
+        }
+    }
 }
 
 } // namespace
@@ -297,6 +383,29 @@ Stored<QList<LibraryEntry>> LibraryRepository::followedEntries() const {
     return queryEntries(QStringLiteral("in_library = 1 AND (notify = 1 OR auto_download = 1)"));
 }
 
+Stored<QSet<QString>> LibraryRepository::followedSlugs() const {
+    auto query = database_.run(QStringLiteral(
+        "SELECT slug FROM anime WHERE in_library = 1 AND (notify = 1 OR auto_download = 1)"));
+    if (!query) {
+        return std::unexpected(query.error());
+    }
+    QSet<QString> slugs;
+    while (query->next()) {
+        slugs.insert(query->value(0).toString());
+    }
+    return slugs;
+}
+
+Stored<bool> LibraryRepository::hasEpisode(const QString& slug, double number) const {
+    auto query =
+        database_.run(QStringLiteral("SELECT 1 FROM episode WHERE slug = ? AND number = ? LIMIT 1"),
+                      {slug, number});
+    if (!query) {
+        return std::unexpected(query.error());
+    }
+    return query->next();
+}
+
 Stored<QList<LibraryEntry>> LibraryRepository::queryEntries(const QString& predicate) const {
     auto query = database_.run(QStringLiteral("SELECT %1 FROM anime WHERE %2 "
                                               "ORDER BY title COLLATE NOCASE")
@@ -305,15 +414,122 @@ Stored<QList<LibraryEntry>> LibraryRepository::queryEntries(const QString& predi
         return std::unexpected(query.error());
     }
     QList<LibraryEntry> entries;
+    QHash<QString, qsizetype> by_slug;
     while (query->next()) {
         LibraryEntry entry;
         static_cast<AnimeRecord&>(entry) = readAnime(*query);
-        auto complete = withProgress(std::move(entry));
-        if (!complete) {
-            return std::unexpected(complete.error());
-        }
-        entries.append(std::move(*complete));
+        by_slug.insert(entry.slug, entries.size());
+        entries.append(std::move(entry));
     }
+    query->finish();
+    if (entries.isEmpty()) {
+        return entries;
+    }
+
+    // Aggregate episode counts and last watched number per anime in one bulk query.
+    auto counts = database_.run(QStringLiteral(R"sql(
+SELECT e.slug,
+       COUNT(*),
+       COALESCE(SUM(e.state = 2), 0),
+       COALESCE(SUM(EXISTS(SELECT 1 FROM episode_file f WHERE f.slug = e.slug AND f.number = e.number)), 0),
+       COALESCE(SUM(e.is_new), 0),
+       MAX(CASE WHEN e.state = 2 THEN e.number END)
+FROM episode e
+WHERE e.slug IN (SELECT slug FROM anime WHERE %1)
+GROUP BY e.slug
+)sql")
+                                    .arg(predicate));
+    if (!counts) {
+        return std::unexpected(counts.error());
+    }
+    QHash<QString, double> last_watched;
+    while (counts->next()) {
+        const auto slug = counts->value(0).toString();
+        const auto found = by_slug.constFind(slug);
+        if (found == by_slug.cend()) {
+            continue;
+        }
+        auto& entry = entries[*found];
+        entry.knownEpisodes = counts->value(1).toInt();
+        entry.watchedEpisodes = counts->value(2).toInt();
+        entry.downloadedEpisodes = counts->value(3).toInt();
+        entry.newEpisodes = counts->value(4).toInt();
+        if (!counts->value(5).isNull()) {
+            last_watched.insert(slug, counts->value(5).toDouble());
+        }
+    }
+    counts->finish();
+
+    // Sum distinct media files per anime so shared multi-episode files count once per work.
+    auto bytes = database_.run(QStringLiteral(R"sql(
+SELECT d.slug, COALESCE(SUM(m.size), 0)
+FROM (SELECT DISTINCT ef.slug, ef.file_id
+      FROM episode_file ef
+      WHERE ef.slug IN (SELECT slug FROM anime WHERE %1)) d
+JOIN media_file m ON m.id = d.file_id
+GROUP BY d.slug
+)sql")
+                                   .arg(predicate));
+    if (!bytes) {
+        return std::unexpected(bytes.error());
+    }
+    while (bytes->next()) {
+        const auto found = by_slug.constFind(bytes->value(0).toString());
+        if (found != by_slug.cend()) {
+            entries[*found].downloadedBytes = bytes->value(1).toLongLong();
+        }
+    }
+    bytes->finish();
+
+    // Stream remaining unwatched/in-progress episodes grouped by slug to compute resume state.
+    auto unwatched = database_.run(QStringLiteral(R"sql(
+SELECT e.slug,
+       e.number,
+       e.state,
+       e.position_ms,
+       e.duration_ms,
+       e.state_at,
+       EXISTS(SELECT 1 FROM episode_file f WHERE f.slug = e.slug AND f.number = e.number)
+FROM episode e
+WHERE e.slug IN (SELECT slug FROM anime WHERE %1)
+  AND e.state <> 2
+ORDER BY e.slug, e.number
+)sql")
+                                       .arg(predicate));
+    if (!unwatched) {
+        return std::unexpected(unwatched.error());
+    }
+    QString current_slug;
+    QList<UnwatchedRow> current_rows;
+    const auto flush_slug = [&] {
+        if (current_slug.isEmpty()) {
+            return;
+        }
+        if (const auto found = by_slug.constFind(current_slug); found != by_slug.cend()) {
+            const auto last = last_watched.constFind(current_slug);
+            applyUnwatched(entries[*found],
+                           last != last_watched.cend() ? std::optional<double>(*last)
+                                                       : std::nullopt,
+                           current_rows);
+        }
+        current_rows.clear();
+    };
+    while (unwatched->next()) {
+        const auto slug = unwatched->value(0).toString();
+        if (slug != current_slug) {
+            flush_slug();
+            current_slug = slug;
+        }
+        const auto state_at = unwatched->value(5);
+        current_rows.append(UnwatchedRow{.number = unwatched->value(1).toDouble(),
+                                         .state = unwatched->value(2).toInt(),
+                                         .positionMs = unwatched->value(3).toLongLong(),
+                                         .durationMs = unwatched->value(4).toLongLong(),
+                                         .hasStateAt = !state_at.isNull(),
+                                         .stateAt = state_at.isNull() ? 0 : state_at.toLongLong(),
+                                         .hasFile = unwatched->value(6).toBool()});
+    }
+    flush_slug();
     return entries;
 }
 
@@ -391,11 +607,41 @@ Stored<QList<EpisodeRecord>> LibraryRepository::episodes(const QString& slug) co
     }
     QList<EpisodeRecord> episodes;
     while (query->next()) {
-        auto record = readEpisode(*query);
-        if (auto best = selectBestFile(slug, record); !best) {
-            return std::unexpected(best.error());
+        episodes.append(readEpisode(*query));
+    }
+    query->finish();
+    if (episodes.isEmpty()) {
+        return episodes;
+    }
+    auto files = database_.run(
+        QStringLiteral("SELECT e.number, f.path, f.size FROM episode_file e JOIN media_file f ON "
+                       "f.id = e.file_id WHERE e.slug = ? ORDER BY e.number, f.id"),
+        {slug});
+    if (!files) {
+        return std::unexpected(files.error());
+    }
+    QList<std::pair<double, QList<EpisodeLocation>>> grouped_files;
+    while (files->next()) {
+        const auto number = files->value(0).toDouble();
+        EpisodeLocation location{files->value(1).toString(), files->value(2).toLongLong()};
+        if (grouped_files.isEmpty() || grouped_files.last().first != number) {
+            grouped_files.append({number, {std::move(location)}});
+        } else {
+            grouped_files.last().second.append(std::move(location));
         }
-        episodes.append(std::move(record));
+    }
+    qsizetype file_index = 0;
+    for (auto& record : episodes) {
+        while (file_index < grouped_files.size() &&
+               grouped_files[file_index].first < record.number) {
+            ++file_index;
+        }
+        if (file_index < grouped_files.size() && grouped_files[file_index].first == record.number) {
+            applyBestLocation(grouped_files[file_index].second, record);
+        } else {
+            record.filePath.clear();
+            record.fileSize = 0;
+        }
     }
     return episodes;
 }
@@ -965,16 +1211,7 @@ Stored<void> LibraryRepository::selectBestFile(const QString& slug, EpisodeRecor
     auto locations = episodeLocations(slug, episode.number);
     if (!locations)
         return std::unexpected(locations.error());
-    episode.filePath.clear();
-    episode.fileSize = 0;
-    for (const auto& location : *locations) {
-        if (episode.filePath.isEmpty() || QFileInfo::exists(location.path)) {
-            episode.filePath = location.path;
-            episode.fileSize = location.size;
-            if (QFileInfo::exists(location.path))
-                break;
-        }
-    }
+    applyBestLocation(*locations, episode);
     return {};
 }
 

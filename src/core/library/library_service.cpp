@@ -2,9 +2,12 @@
 
 #include "platform/trash.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QMetaObject>
 #include <QPointer>
+#include <QThreadPool>
 
 namespace animehub::library {
 namespace {
@@ -20,11 +23,16 @@ LibraryService::LibraryService(LibraryRepository& repository, api::ApiClient& ap
     : QObject(parent), repository_(repository), api_(api),
       move_to_trash_(move_to_trash ? std::move(move_to_trash) : platform::moveToTrash),
       restore_from_trash_(restore_from_trash ? std::move(restore_from_trash)
-                                             : platform::restoreFromTrash) {
-    recent_timer_.setInterval(20min);
+                                             : platform::restoreFromTrash),
+      alive_(std::make_shared<LibraryService*>(this)) {
+    recent_timer_.setInterval(3min);
     connect(&recent_timer_, &QTimer::timeout, this, &LibraryService::checkNow);
     sweep_timer_.setInterval(6h);
     connect(&sweep_timer_, &QTimer::timeout, this, &LibraryService::sweep);
+}
+
+LibraryService::~LibraryService() {
+    alive_.reset();
 }
 
 Stored<void> LibraryService::changed(Stored<void> result, const QString& slug, bool list) {
@@ -412,34 +420,44 @@ void LibraryService::finishRefresh(const QString& slug, bool flag_new, const QLi
     }
 }
 
-void LibraryService::startWatching() {
+void LibraryService::startWatching(std::chrono::milliseconds initial_delay) {
     recent_timer_.start();
     sweep_timer_.start();
-    QTimer::singleShot(15s, this, &LibraryService::checkNow);
+    if (initial_delay.count() <= 0) {
+        checkNow();
+    } else {
+        QTimer::singleShot(initial_delay, this, &LibraryService::checkNow);
+    }
     QTimer::singleShot(2min, this, &LibraryService::sweep);
 }
 
 void LibraryService::checkNow() {
+    if (checking_recent_) {
+        return;
+    }
+    checking_recent_ = true;
     // The home's recent episodes cover the whole catalog in one request.
     api_.home(
         this,
         [this](const api::Result<api::Home>& home) {
+            checking_recent_ = false;
             if (!home) {
                 return;
             }
-            const auto entries = repository_.followedEntries();
-            if (!entries) {
+            const auto followed = repository_.followedSlugs();
+            if (!followed || followed->isEmpty()) {
                 return;
             }
+            QSet<QString> refreshed;
             for (const auto& recent : home->value.recentEpisodes) {
-                const auto entry =
-                    std::ranges::find(*entries, recent.anime.slug, &LibraryEntry::slug);
-                if (entry == entries->end() || (!entry->notify && !entry->autoDownload)) {
+                const auto& slug = recent.anime.slug;
+                if (!followed->contains(slug) || refreshed.contains(slug)) {
                     continue;
                 }
-                const auto known = repository_.episode(entry->slug, recent.episode.number);
+                const auto known = repository_.hasEpisode(slug, recent.episode.number);
                 if (known && !*known) {
-                    refresh(entry->slug, true);
+                    refreshed.insert(slug);
+                    refresh(slug, true);
                 }
             }
         },
@@ -457,16 +475,20 @@ void LibraryService::sweep() {
         return;
     }
     int delay = 0;
-    QStringList grouped;
+    QSet<QString> grouped;
     const auto groups = repository_.franchises();
     if (groups) {
-        for (const auto& group : *groups)
-            grouped.append(group.members);
+        for (const auto& group : *groups) {
+            for (const auto& member : group.members) {
+                grouped.insert(member);
+            }
+        }
     }
     QStringList finished;
     for (const auto& entry : *entries) {
         if (entry.status != api::AnimeStatus::Airing &&
-            entry.status != api::AnimeStatus::Upcoming) {
+            entry.status != api::AnimeStatus::Upcoming &&
+            entry.status != api::AnimeStatus::Paused) {
             if (grouped.contains(entry.slug))
                 finished.append(entry.slug);
             continue;
@@ -513,6 +535,61 @@ void LibraryService::verifyFiles() {
     if (!touched.isEmpty()) {
         emit listChanged();
     }
+}
+
+void LibraryService::verifyFilesAsync() {
+    if (verifying_files_) {
+        return;
+    }
+    const auto files = repository_.episodeFiles();
+    if (!files || files->isEmpty()) {
+        return;
+    }
+    auto* app = QCoreApplication::instance();
+    if (!app) {
+        verifyFiles();
+        return;
+    }
+    verifying_files_ = true;
+    using FileTuple = std::tuple<QString, double, QString>;
+    auto snapshot = *files;
+    QPointer<LibraryService> self(this);
+    std::weak_ptr<LibraryService*> token(alive_);
+    QThreadPool::globalInstance()->start([app, self, token, snapshot = std::move(snapshot)] {
+        QList<FileTuple> missing;
+        for (const auto& item : snapshot) {
+            if (token.expired()) {
+                return;
+            }
+            if (!QFileInfo::exists(std::get<2>(item))) {
+                missing.append(item);
+            }
+        }
+        QMetaObject::invokeMethod(
+            app,
+            [self, token, missing = std::move(missing)] {
+                if (!self || token.expired()) {
+                    return;
+                }
+                self->verifying_files_ = false;
+                if (missing.isEmpty()) {
+                    return;
+                }
+                QSet<QString> touched;
+                for (const auto& [slug, number, path] : missing) {
+                    if (self->repository_.removeEpisodeFile(slug, number, path)) {
+                        touched.insert(slug);
+                    }
+                }
+                for (const auto& slug : touched) {
+                    emit self->animeChanged(slug);
+                }
+                if (!touched.isEmpty()) {
+                    emit self->listChanged();
+                }
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 } // namespace animehub::library

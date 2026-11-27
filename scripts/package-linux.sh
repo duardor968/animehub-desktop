@@ -195,12 +195,21 @@ if $smoke; then
   fi
   echo "The .deb's AnimeHub rendered its window offscreen."
 
-  Xvfb -displayfd 3 -screen 0 1280x800x24 -nolisten tcp 3>"$data/display" 2>/dev/null &
+  Xvfb -displayfd 3 -screen 0 1280x800x24 -nolisten tcp 3>"$data/display" 2>"$data/xvfb.log" &
   xvfb=$!
-  for _ in $(seq 1 50); do
+  for _ in $(seq 1 300); do
     [[ -s "$data/display" ]] && break
+    kill -0 "$xvfb" 2>/dev/null || break
     sleep 0.1
   done
+  if [[ ! -s "$data/display" ]]; then
+    tail -n 30 "$data/xvfb.log" >&2 || true
+    kill "$xvfb" 2>/dev/null || true
+    wait "$xvfb" 2>/dev/null || true
+    rm -rf "$data"
+    echo "Xvfb did not become ready within 30 seconds." >&2
+    exit 1
+  fi
   display=":$(cat "$data/display")"
   # Its own session, to end everything it starts.
   DISPLAY="$display" env -u LD_LIBRARY_PATH setsid "$appimage" --data-dir "$data/appimage" \

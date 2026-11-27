@@ -70,6 +70,8 @@ if(ANIMEHUB_BUNDLE_ENGINES AND WIN32)
 endif()
 
 qt_add_executable(animehub-desktop WIN32
+  src/app/ambient_palette.cpp
+  src/app/ambient_palette.h
   src/app/anime_view.cpp
   src/app/anime_view.h
   src/app/app_controller.cpp
@@ -90,6 +92,8 @@ qt_add_executable(animehub-desktop WIN32
   src/app/episode_model.h
   src/app/glyph_provider.cpp
   src/app/glyph_provider.h
+  src/app/input_modality.cpp
+  src/app/input_modality.h
   src/app/jdownloader_view.cpp
   src/app/jdownloader_view.h
   src/app/library_model.cpp
@@ -101,6 +105,8 @@ qt_add_executable(animehub-desktop WIN32
   src/app/schedule.h
   src/app/shell.cpp
   src/app/shell.h
+  src/app/speed_graph_item.cpp
+  src/app/speed_graph_item.h
 )
 if(WIN32)
   target_sources(animehub-desktop PRIVATE src/app/animehub.rc)
@@ -128,7 +134,9 @@ qt_add_qml_module(animehub-desktop
     qml/anime/RangeDialog.qml
     qml/anime/SelectionBar.qml
     qml/catalog/CatalogPage.qml
+    qml/components/AccentButton.qml
     qml/components/ActionMenu.qml
+    qml/components/AmbientBackdrop.qml
     qml/components/Breadcrumb.qml
     qml/components/FocusFrame.qml
     qml/components/Glyph.qml
@@ -159,7 +167,13 @@ qt_add_qml_module(animehub-desktop
     qml/library/LibraryPage.qml
     qml/library/SearchBox.qml
     qml/library/UpcomingAgenda.qml
+    qml/schedule/DayUnderlinePivot.qml
+    qml/schedule/SchedulePage.qml
+    qml/schedule/SchedulePosterCard.qml
+    qml/schedule/ScheduleStateChip.qml
+    qml/schedule/SegmentedScopeControl.qml
     qml/settings/LinkedDevicesPage.qml
+    qml/settings/NativeSpeedLimit.qml
     qml/settings/SettingRow.qml
   RESOURCES
     assets/animehub.png
@@ -185,6 +199,19 @@ target_link_libraries(animehub-desktop
     Qt6::Widgets
 )
 animehub_configure_target(animehub-desktop)
+target_compile_definitions(animehub-desktop PRIVATE
+  ANIMEHUB_HOMEPAGE_URL="${PROJECT_HOMEPAGE_URL}"
+)
+if(DEFINED ANIMEHUB_ARIA2_VERSION)
+  target_compile_definitions(animehub-desktop PRIVATE
+    ANIMEHUB_ARIA2_VERSION="${ANIMEHUB_ARIA2_VERSION}"
+  )
+endif()
+if(DEFINED ANIMEHUB_MPV_VERSION)
+  target_compile_definitions(animehub-desktop PRIVATE
+    ANIMEHUB_MPV_VERSION="${ANIMEHUB_MPV_VERSION}"
+  )
+endif()
 if(WIN32)
   set_target_properties(animehub-desktop PROPERTIES OUTPUT_NAME "AnimeHub")
 else()

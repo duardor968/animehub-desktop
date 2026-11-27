@@ -3,9 +3,10 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// One anime, as Steam shows a game: the header, the bar with the main action and the figures
-// (it stays at the top once it gets there), the synopsis, the episodes in pages of fifty and,
-// last, related anime.
+// One anime, as Steam shows a game: the compact hero header, the sticky single-row action bar,
+// the episodes in pages of fifty beside a sticky right detail column (Sinopsis, Contenido sensible,
+// Detalles with AnimeAV1 attribution, trailer & source links) that stays cleanly below ActionBar
+// while scrolling and clears the Relacionados shelf at the foot.
 Item {
     id: page
 
@@ -15,17 +16,274 @@ Item {
 
     // Esc goes back as the window's ← does; ← and → go anywhere it has been.
     signal back()
+    // Clicking a genre chip routes to Catálogo filtered by that genre slug.
+    signal genreSelected(string slug)
 
-    // "Elegir episodios": every row shows its check box until the selection is used or emptied.
+    // "Elegir episodios": every row shows its selection mark hint until the selection ends.
     property bool choosing: false
     readonly property bool selecting: choosing || view.episodes.selectedCount > 0
-    // One column from the left margin for everything under the header's art, so all of it ends
-    // at one right edge, as on a franchise's page.
-    readonly property real contentWidth: list.width - 2 * Theme.section
+    // One column from the left margin capped at 1280 px, so the header, action bar, episodes,
+    // detail column and related shelf share one crisp right edge even on ultrawide displays.
+    readonly property real contentWidth: Math.max(0, Math.min(list.width - 2 * Theme.section, 1280))
+    // From 960 px, two columns as on a store page: the episodes, and beside them Sinopsis + Detalles.
+    readonly property bool twoColumns: !view.single && list.width >= 960
+    readonly property real sideWidth: list.width >= 1100 ? 320 : 296
+    readonly property real sideGap: list.width >= 1100 ? 40 : 32
+    readonly property real mainWidth: twoColumns ? contentWidth - sideWidth - sideGap
+                                                 : contentWidth
+    readonly property bool hasLinks: view.trailerUrl.toString() !== "" || view.sourceUrl !== ""
+    readonly property bool hasSideInfo: view.synopsis !== "" || view.mature
+                                        || view.hasDetails || hasLinks
+    // Natural bottom of the side column in ListView content coordinates at scroll 0, so the
+    // Relacionados shelf always starts cleanly underneath even on anime with few episodes.
+    readonly property real sideNaturalBottom: list.headerItem && twoColumns && hasSideInfo
+                                              ? list.headerItem.y + list.headerItem.barY
+                                                + actionBar.unpinnedHeight + 20
+                                                + sideContent.implicitHeight
+                                              : 0
+
+    // System font probe for selectable TextEdits so Windows and Linux match Fluent's UI font.
+    Label {
+        id: fontProbe
+        visible: false
+    }
+
+    // Selectable synopsis: collapsed to `lines` when very long, genuinely mouse-selectable in all states.
+    component Synopsis: ColumnLayout {
+        id: about
+
+        property int lines: 3
+        property bool expanded: false
+        // Each anime opens collapsed.
+        readonly property var paragraphs: page.view.synopsis.split(/\n\s*\n/)
+        readonly property string shownText: about.expanded ? page.view.synopsis : about.paragraphs[0]
+        readonly property real singleLineH: synopsisEdit.lineCount > 0
+                                            ? synopsisEdit.contentHeight / synopsisEdit.lineCount
+                                            : 18
+        readonly property bool lineOverflow: !about.expanded && synopsisEdit.lineCount > about.lines
+        readonly property bool canExpand: about.expanded || about.lineOverflow
+                                          || about.paragraphs.length > 1
+
+        onParagraphsChanged: expanded = false
+
+        spacing: 4
+        visible: page.view.synopsis !== ""
+
+        Item {
+            Layout.fillWidth: true
+            Layout.maximumWidth: 900
+            Layout.preferredHeight: width > 0
+                                    ? (about.lineOverflow
+                                       ? Math.ceil(about.singleLineH * about.lines)
+                                       : Math.ceil(synopsisEdit.contentHeight))
+                                    : 0
+            clip: about.lineOverflow
+
+            TextEdit {
+                id: synopsisEdit
+                width: parent.width
+                readOnly: true
+                selectByMouse: true
+                activeFocusOnTab: false
+                selectionColor: Theme.accent
+                selectedTextColor: "#ffffff"
+                text: about.shownText
+                color: Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.88)
+                font.family: fontProbe.font.family
+                font.pixelSize: 13
+                wrapMode: Text.Wrap
+                padding: 0
+                leftPadding: 0
+                rightPadding: 0
+                topPadding: 0
+                bottomPadding: 0
+
+                HoverHandler { cursorShape: Qt.IBeamCursor }
+            }
+
+            // Soft bottom fade when clamped so users immediately see more text awaits expansion.
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 22
+                visible: about.lineOverflow
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 1.0; color: Theme.canvas }
+                }
+            }
+        }
+
+        Button {
+            visible: about.canExpand
+            flat: true
+            text: about.expanded ? "Mostrar menos" : "Mostrar más"
+            onClicked: about.expanded = !about.expanded
+            // Its text in the synopsis column; the hover background may overhang, as in WinUI.
+            Layout.leftMargin: -leftPadding
+        }
+    }
+
+    // Rich detail block: selectable Sinopsis, optional Contenido sensible badge, borderless
+    // Detalles key-value rows (including Puntuación (AnimeAV1)), and direct trailer/AnimeAV1 buttons.
+    component DetailsColumn: ColumnLayout {
+        id: detailsRoot
+
+        property int synopsisLines: 10
+        readonly property bool hasTop: page.view.synopsis !== "" || page.view.mature
+        readonly property bool hasBottom: page.view.hasDetails || page.hasLinks
+        readonly property var detailCells: {
+            const cells = []
+            const rows = page.view.details || []
+            for (let i = 0; i < rows.length; ++i) {
+                cells.push({ isValue: false, text: rows[i].label ?? "" })
+                cells.push({ isValue: true, text: rows[i].value ?? "" })
+            }
+            return cells
+        }
+
+        spacing: 16
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            visible: page.view.synopsis !== ""
+            spacing: 6
+
+            Label {
+                text: "Sinopsis"
+                color: Theme.ink
+                font.pixelSize: Theme.body
+                font.weight: Font.DemiBold
+                Accessible.role: Accessible.Heading
+            }
+
+            Synopsis {
+                Layout.fillWidth: true
+                lines: detailsRoot.synopsisLines
+            }
+        }
+
+        // Soft warning badge shown ONLY when the API marks the anime as mature.
+        Rectangle {
+            visible: page.view.mature
+            implicitWidth: matureRow.implicitWidth + 16
+            implicitHeight: 24
+            radius: 4
+            color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.14)
+            border.width: 1
+            border.color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.30)
+            Accessible.role: Accessible.StaticText
+            Accessible.name: "Contenido sensible"
+
+            RowLayout {
+                id: matureRow
+                anchors.centerIn: parent
+                spacing: 6
+
+                Glyph {
+                    glyph: Theme.icon.warning
+                    size: 12
+                    color: Theme.warning
+                }
+
+                Label {
+                    text: "Contenido sensible"
+                    color: Theme.warning
+                    font.pixelSize: Theme.caption
+                    font.weight: Font.DemiBold
+                    Accessible.ignored: true
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            visible: detailsRoot.hasTop && detailsRoot.hasBottom
+            Layout.preferredHeight: 1
+            color: Theme.stroke
+            opacity: 0.7
+        }
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            visible: detailsRoot.hasBottom
+            spacing: 10
+
+            Label {
+                visible: page.view.hasDetails
+                text: "Detalles"
+                color: Theme.ink
+                font.pixelSize: Theme.body
+                font.weight: Font.DemiBold
+                Accessible.role: Accessible.Heading
+            }
+
+            // Borderless key-value rows aligned on two clean columns (zero box-inside-box).
+            GridLayout {
+                Layout.fillWidth: true
+                visible: page.view.hasDetails
+                columns: 2
+                columnSpacing: 14
+                rowSpacing: 7
+
+                Repeater {
+                    model: detailsRoot.detailCells
+
+                    delegate: Label {
+                        required property var modelData
+                        Layout.fillWidth: modelData.isValue
+                        Layout.minimumWidth: 0
+                        Layout.alignment: Qt.AlignTop
+                        text: modelData.text
+                        color: modelData.isValue ? Theme.ink : Theme.muted
+                        font.pixelSize: 13
+                        font.weight: modelData.isValue ? Font.DemiBold : Font.Normal
+                        wrapMode: modelData.isValue ? Text.Wrap : Text.NoWrap
+                    }
+                }
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                Layout.topMargin: page.view.hasDetails ? 6 : 0
+                visible: page.hasLinks
+                spacing: 8
+
+                AccentButton {
+                    visible: page.view.trailerUrl.toString() !== ""
+                    emphasized: false
+                    glyphCode: Theme.icon.play
+                    iconSize: 11
+                    fontPixelSize: 13
+                    implicitHeight: 30
+                    leftPadding: 12
+                    rightPadding: 12
+                    text: "Ver tráiler"
+                    onClicked: page.view.openTrailer()
+                    Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+                    Keys.onEnterPressed: event => { event.accepted = true; clicked() }
+                }
+
+                Button {
+                    visible: page.view.sourceUrl !== ""
+                    flat: true
+                    implicitHeight: 30
+                    leftPadding: 10
+                    rightPadding: 10
+                    text: "Ver en AnimeAV1"
+                    icon.source: Theme.source(Theme.icon.openExternal)
+                    icon.color: Theme.accentText
+                    font.pixelSize: 13
+                    onClicked: page.view.openSource()
+                }
+            }
+        }
+    }
 
     function focusTitle(reason) {
         if (list.headerItem)
-            list.headerItem.focusTitle(reason)
+            list.headerItem.focusTitle(reason !== undefined ? reason : InputModality.reason)
     }
 
     function clearSelection() {
@@ -37,18 +295,18 @@ Item {
     function chooseEpisodes() {
         choosing = true
         const header = list.headerItem
-        if (header && header.y + header.episodesY - list.contentY < actionBar.height)
+        if (header && header.y + header.episodesY - list.contentY < actionBar.singleRowHeight)
             scrollToEpisodes(true)
     }
 
-    // The head of the episode list at the top of the view, under the bar.
+    // The head of the episode list at the top of the view, under the pinned single-row bar.
     function scrollToEpisodes(animated) {
         const header = list.headerItem
         if (!header)
             return
         // The room kept under the last row counts: with it, no row stays under the selection bar.
         const bottom = list.originY + list.contentHeight + list.bottomMargin - list.height
-        const top = header.y + header.episodesY - actionBar.height - 12
+        const top = header.y + header.episodesY - actionBar.singleRowHeight - 12
         const target = Math.max(list.originY, Math.min(top, bottom))
         page.scrolled = true
         if (animated) {
@@ -83,6 +341,7 @@ Item {
         function onSlugChanged() {
             page.scrolled = false
             page.choosing = false
+            sideFlick.contentY = 0
             list.positionViewAtBeginning()
         }
         function onDownloadConfirmationNeeded(numbers, question, detail, selection) {
@@ -147,6 +406,7 @@ Item {
             function focusTitle(reason) { animeHeader.focusTitle(reason) }
 
             width: list.width
+            onHeightChanged: if (!page.scrolled) Qt.callLater(() => { if (!page.scrolled) list.positionViewAtBeginning() })
 
             readonly property Item titleItem: animeHeader.titleItem
 
@@ -159,27 +419,35 @@ Item {
                 title: page.view.title
                 subtitle: page.view.alternativeTitle
                 score: page.view.score
+                scoreText: page.view.scoreText
+                scoreSource: page.view.scoreSource
                 facts: page.view.facts
+                statusText: page.view.statusText
+                statusTone: page.view.statusTone
+                metaLine: page.view.metaLine
                 genres: page.view.genres
+                genreChips: page.view.genreChips
+                chips: page.view.chips
                 posterUrl: page.view.posterUrl
                 backdropUrl: page.view.backdropUrl
+                onGenreSelected: slug => page.genreSelected(slug)
             }
 
-            // Where the bar sits until it reaches the top.
+            // Reserves the unpinned bar's band so pinning never shifts list.contentY.
             Item {
                 id: barSlot
                 width: parent.width
-                height: actionBar.height
+                height: actionBar.unpinnedHeight
             }
 
             ColumnLayout {
                 x: Theme.section
-                width: page.contentWidth
+                width: page.mainWidth
                 spacing: 12
 
                 // Room above the first line, whichever it is.
                 Item {
-                    Layout.preferredHeight: 12
+                    Layout.preferredHeight: 10
                 }
 
                 RowLayout {
@@ -202,36 +470,18 @@ Item {
                     }
                 }
 
-                Label {
-                    id: synopsis
-                    property bool expanded: false
-                    // Collapsed, two lines of the first paragraph: the episodes stay on the first
-                    // screen.
-                    readonly property var paragraphs: page.view.synopsis.split(/\n\s*\n/)
-                    // Each anime opens collapsed.
-                    onParagraphsChanged: expanded = false
-                    // A line short enough to read, however wide the page.
+                // Single-episode films have no episode list, so Sinopsis + Detalles sit directly
+                // below ActionBar; narrow multi-episode shows place DetailsColumn in footerColumn
+                // so Episodios stays immediately visible above the fold at 820×600.
+                Loader {
                     Layout.fillWidth: true
-                    Layout.maximumWidth: 900
-                    visible: text !== ""
-                    text: expanded ? page.view.synopsis : paragraphs[0]
-                    color: Theme.ink
-                    opacity: 0.88
-                    font.pixelSize: Theme.body
-                    lineHeight: 1.3
-                    wrapMode: Text.Wrap
-                    maximumLineCount: expanded ? 1000 : 2
-                    elide: Text.ElideRight
-                }
-
-                Button {
-                    visible: synopsis.expanded || synopsis.truncated || synopsis.paragraphs.length > 1
-                    flat: true
-                    text: synopsis.expanded ? "Mostrar menos" : "Mostrar más"
-                    onClicked: synopsis.expanded = !synopsis.expanded
-                    // Its text in the synopsis column; the hover background may overhang, as in WinUI.
-                    Layout.leftMargin: -leftPadding
-                    Layout.topMargin: -8
+                    active: !page.twoColumns && page.view.single && page.hasSideInfo
+                    visible: active
+                    sourceComponent: Component {
+                        DetailsColumn {
+                            synopsisLines: 10
+                        }
+                    }
                 }
 
                 // Without episodes yet, where their list goes, what is true of them: on their way,
@@ -245,14 +495,14 @@ Item {
                 }
 
                 Item {
-                    Layout.preferredHeight: 8
+                    Layout.preferredHeight: 4
                 }
             }
 
             EpisodesBar {
                 id: episodesBar
                 x: Theme.section
-                width: page.contentWidth
+                width: page.mainWidth
                 visible: !page.view.single && page.view.episodes.total > 0
                 view: page.view
                 selecting: page.selecting
@@ -261,13 +511,13 @@ Item {
         }
 
         delegate: EpisodeRow {
-            // The list places its rows at its edge: the padding puts the content in the column, and
-            // the hover surface overhangs it a little, as WinUI's list items do.
-            width: list.width
+            // Bound the delegate strictly to the episodes column (+12 px hover overhang) so its
+            // hit box never overlaps the right detail column.
+            width: Theme.section + page.mainWidth + 12
             leftPadding: Theme.section
-            rightPadding: list.width - Theme.section - page.contentWidth
+            rightPadding: 12
             leftInset: Theme.section - 12
-            rightInset: rightPadding - 12
+            rightInset: 0
             view: page.view
             menu: episodeMenu
             selecting: page.selecting
@@ -277,9 +527,14 @@ Item {
             id: footerColumn
 
             readonly property AnimeView view: page.view
+            readonly property bool hasFullWidthFooter: related.visible
+            readonly property real fullWidthTop: y + related.y
 
             width: list.width
-            topPadding: 12
+            // Below the side column when the episodes end before it does.
+            topPadding: page.twoColumns && page.hasSideInfo
+                        ? Math.max(12, page.sideNaturalBottom - y + 24)
+                        : 12
             bottomPadding: Theme.section
             spacing: Theme.section
 
@@ -290,10 +545,24 @@ Item {
 
                 Pager {
                     id: bottomPager
-                    x: Theme.section + page.contentWidth - width
+                    x: Theme.section + page.mainWidth - width
                     visible: !page.view.single && page.view.episodes.pageCount > 1
                     episodes: page.view.episodes
                     onMoved: page.scrollToEpisodes(false)
+                }
+            }
+
+            // Narrow multi-episode fallback: keep Sinopsis, Detalles and links cleanly below
+            // episodes (above Relacionados) so Episodios appears immediately above the fold.
+            Loader {
+                x: Theme.section
+                width: page.mainWidth
+                active: !page.twoColumns && !page.view.single && page.hasSideInfo
+                visible: active
+                sourceComponent: Component {
+                    DetailsColumn {
+                        synopsisLines: 5
+                    }
                 }
             }
 
@@ -314,8 +583,52 @@ Item {
         }
     }
 
+    // Sticky right detail column: sits cleanly 20 px below ActionBar while scrolling episodes
+    // (ZERO overlap or horizontal slicing behind ActionBar), scrolls internally if taller than the
+    // viewport, and slides upward out of the way when the full-width Relacionados shelf arrives.
+    Item {
+        id: sideViewport
+        z: 5
+        visible: page.twoColumns && page.hasSideInfo && list.headerItem !== null
+        x: Theme.section + page.mainWidth + page.sideGap
+        y: actionBar.y + actionBar.height
+        width: page.sideWidth
+        height: Math.max(0, page.height - y - (page.selecting ? selectionBar.height + 24 : 0))
+        clip: true
+
+        readonly property real shelfTopLocal: list.footerItem && list.footerItem.hasFullWidthFooter
+                                              ? (list.footerItem.fullWidthTop - list.contentY) - y
+                                              : height + 10000
+        readonly property real desiredHeight: Math.min(Math.ceil(sideContent.implicitHeight),
+                                                       Math.max(0, height - 36))
+        readonly property real maxYBeforeShelf: shelfTopLocal - desiredHeight - 24
+
+        Flickable {
+            id: sideFlick
+            x: 0
+            y: Math.min(20, sideViewport.maxYBeforeShelf)
+            width: parent.width
+            height: sideViewport.desiredHeight
+            contentWidth: width
+            contentHeight: sideContent.implicitHeight
+            clip: true
+            interactive: contentHeight > height + 1
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar {
+                policy: sideFlick.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+            }
+
+            DetailsColumn {
+                id: sideContent
+                width: sideFlick.width
+                synopsisLines: 10
+            }
+        }
+    }
+
     ActionBar {
         id: actionBar
+        z: 10
 
         // The download figure's only action: "Reintentar ahora".
         onFigureAction: page.view.retryWaiting()
@@ -341,6 +654,7 @@ Item {
             id: primaryActions
             view: page.view
             selecting: page.selecting
+            compact: actionBar.compact
             onChooseRange: rangeDialog.open()
             onChooseEpisodes: page.chooseEpisodes()
         }
@@ -405,9 +719,8 @@ Item {
         property bool folderExists: false
 
         entries: [watchedEntry, unwatchedEntry, positionEntry,
-                  downloadsSeparator, autoEntry, missingEntry, unwatchedMissingEntry, rangeEntry,
-                  chooseEntry, pauseEntry, resumeEntry, retryEntry,
-                  otherSeparator, trailerEntry, folderEntry,
+                  downloadsSeparator, autoEntry, pauseEntry, resumeEntry, retryEntry,
+                  otherSeparator, trailerEntry, sourceEntry, folderEntry,
                   removalSeparator, cancelEntry, trashWatchedEntry, trashFilmEntry, removeEntry]
 
         MenuEntry {
@@ -449,34 +762,6 @@ Item {
                 }
             }
         }
-        // What else to download, while the main button does something other than downloading
-        // (then its ▾ offers these).
-        MenuEntry {
-            id: missingEntry
-            property bool wanted: primaryActions.offersMore && !primaryActions.offersSplit
-            text: "Descargar todos los que faltan (" + page.view.missingCount + ")"
-            onTriggered: page.view.downloadMissing()
-        }
-        MenuEntry {
-            id: unwatchedMissingEntry
-            // Only when it is not all that is missing.
-            property bool wanted: missingEntry.wanted && page.view.unwatchedMissingCount > 0
-                                  && page.view.unwatchedMissingCount < page.view.missingCount
-            text: "Descargar los no vistos (" + page.view.unwatchedMissingCount + ")"
-            onTriggered: page.view.downloadUnwatched()
-        }
-        MenuEntry {
-            id: rangeEntry
-            property bool wanted: missingEntry.wanted
-            text: "Descargar un rango…"
-            onTriggered: rangeDialog.open()
-        }
-        MenuEntry {
-            id: chooseEntry
-            property bool wanted: missingEntry.wanted && !page.selecting
-            text: "Elegir episodios para descargar…"
-            onTriggered: page.chooseEpisodes()
-        }
         // The series' downloads, when the main button does not already pause or resume them.
         MenuEntry {
             id: pauseEntry
@@ -509,6 +794,12 @@ Item {
             property bool wanted: page.view.trailerUrl.toString() !== ""
             text: "Ver el tráiler"
             onTriggered: page.view.openTrailer()
+        }
+        MenuEntry {
+            id: sourceEntry
+            property bool wanted: page.view.sourceUrl !== ""
+            text: "Ver en AnimeAV1"
+            onTriggered: page.view.openSource()
         }
         MenuEntry {
             id: folderEntry
@@ -548,7 +839,7 @@ Item {
 
     LibraryRemovalDialog {
         id: removalDialog
-        model: page.ApplicationWindow.window.app.library
+        model: page.ApplicationWindow.window ? page.ApplicationWindow.window.app.library : null
     }
 
     ModalDialog {
@@ -582,6 +873,7 @@ Item {
 
     SelectionBar {
         id: selectionBar
+        z: 15
         anchors.horizontalCenter: parent.horizontalCenter
         // Rises from the bottom edge.
         y: page.selecting ? page.height - height - 16 : page.height + 8

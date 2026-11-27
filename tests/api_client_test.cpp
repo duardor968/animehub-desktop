@@ -84,17 +84,31 @@ private slots:
 
     void fallsBackToTheSavedCopyWhenTheServerFails() {
         server_->json("/api/v1/schedule", fixture("schedule.json"));
-        Collected<QList<ScheduleEntry>> warm;
+        Collected<Schedule> warm;
         client_->schedule(this, warm.callback());
         QTRY_COMPARE(warm.results.size(), 1);
+        QVERIFY(warm.results[0]);
+        QVERIFY(!warm.results[0]->value.entries.isEmpty());
+        QVERIFY(!warm.results[0]->value.stale);
 
         server_->json("/api/v1/schedule", "{\"title\":\"Down\"}", 500);
-        Collected<QList<ScheduleEntry>> cold;
+        Collected<Schedule> cold;
         client_->schedule(this, cold.callback());
         QTRY_COMPARE(cold.results.size(), 1);
         QVERIFY(cold.results[0]);
         QCOMPARE(cold.results[0]->origin, Origin::Cache);
         QVERIFY(cold.results[0]->savedAt.isValid());
+        QVERIFY(!cold.results[0]->value.entries.isEmpty());
+    }
+
+    void deliversScheduleStaleFlag() {
+        server_->json("/api/v1/schedule", R"({"data":[],"meta":{"stale":true}})");
+        Collected<Schedule> stale;
+        client_->schedule(this, stale.callback(), CachePolicy::NetworkOnly);
+        QTRY_COMPARE(stale.results.size(), 1);
+        QVERIFY(stale.results[0]);
+        QVERIFY(stale.results[0]->value.entries.isEmpty());
+        QVERIFY(stale.results[0]->value.stale);
     }
 
     void reportsOfflineWhenNothingIsSaved() {

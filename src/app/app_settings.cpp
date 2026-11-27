@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QLocale>
 #include <QStandardPaths>
 
 #include <algorithm>
@@ -22,6 +23,11 @@ constexpr std::array kAllProviders{api::Provider::Mega, api::Provider::Pixeldrai
                                    api::Provider::OneFichier};
 const auto kDubbed = QStringLiteral("downloads/dubbed");
 const auto kConcurrent = QStringLiteral("downloads/concurrent");
+const auto kNativeLimitEnabled = QStringLiteral("downloads/nativeLimitEnabled");
+const auto kNativeLimitKBps = QStringLiteral("downloads/nativeLimitKBps");
+constexpr int kDefaultNativeLimitKBps = 2000;
+constexpr int kMinNativeLimitKBps = 1;
+constexpr int kMaxNativeLimitKBps = 1'000'000;
 const auto kPlayer = QStringLiteral("playback/player");
 // Earlier versions only told the system's player from the bundled one.
 const auto kSystemPlayer = QStringLiteral("playback/systemPlayer");
@@ -35,6 +41,9 @@ const auto kJDownloaderDevice = QStringLiteral("jdownloader/device");
 // JDownloader as the engine of every download, and how it was reached then.
 const auto kJDownloaderEngine = QStringLiteral("downloads/jdownloader");
 const auto kJDownloaderCloud = QStringLiteral("jdownloader/cloudEngine");
+const auto kDownloadEpisodesStyle = QStringLiteral("ui/downloadEpisodesStyle");
+const auto kScheduleViewMode = QStringLiteral("ui/scheduleViewMode");
+const auto kScheduleFollowingOnly = QStringLiteral("ui/scheduleFollowingOnly");
 
 } // namespace
 
@@ -102,6 +111,47 @@ int AppSettings::maxConcurrent() const {
 
 void AppSettings::setMaxConcurrent(int count) {
     write(kConcurrent, std::clamp(count, 1, 4));
+}
+
+bool AppSettings::nativeLimitEnabled() const {
+    return settings_.value(kNativeLimitEnabled, false).toBool();
+}
+
+void AppSettings::setNativeLimitEnabled(bool enabled) {
+    if (enabled == nativeLimitEnabled()) {
+        return;
+    }
+    settings_.setValue(kNativeLimitEnabled, enabled);
+    settings_.sync();
+    emit speedLimitChanged();
+}
+
+int AppSettings::nativeLimitKBps() const {
+    return std::clamp(settings_.value(kNativeLimitKBps, kDefaultNativeLimitKBps).toInt(),
+                      kMinNativeLimitKBps, kMaxNativeLimitKBps);
+}
+
+void AppSettings::setNativeLimitKBps(int rate) {
+    const int clamped = std::clamp(rate, kMinNativeLimitKBps, kMaxNativeLimitKBps);
+    if (clamped == nativeLimitKBps()) {
+        return;
+    }
+    settings_.setValue(kNativeLimitKBps, clamped);
+    settings_.sync();
+    emit speedLimitChanged();
+}
+
+QString AppSettings::speedLimitText() const {
+    const int kbps = nativeLimitKBps();
+    if (kbps < 1000) {
+        return QString::number(kbps) + QStringLiteral(" KB/s");
+    }
+    const int tenths = (kbps + 50) / 100;
+    if (tenths % 10 == 0) {
+        return QString::number(tenths / 10) + QStringLiteral(" MB/s");
+    }
+    static const QLocale kSpanish(QLocale::Spanish, QLocale::Spain);
+    return kSpanish.toString(static_cast<double>(tenths) / 10.0, 'f', 1) + QStringLiteral(" MB/s");
 }
 
 QString AppSettings::player() const {
@@ -247,6 +297,33 @@ QString AppSettings::jdownloaderDevice() const {
 
 void AppSettings::setJdownloaderDevice(const QString& id) {
     write(kJDownloaderDevice, id);
+}
+
+QString AppSettings::downloadEpisodesStyle() const {
+    const auto stored = settings_.value(kDownloadEpisodesStyle).toString();
+    return stored == u"compact" ? stored : QStringLiteral("cards");
+}
+
+void AppSettings::setDownloadEpisodesStyle(const QString& style) {
+    write(kDownloadEpisodesStyle,
+          style == u"compact" ? QStringLiteral("compact") : QStringLiteral("cards"));
+}
+
+QString AppSettings::scheduleViewMode() const {
+    const auto stored = settings_.value(kScheduleViewMode).toString();
+    return stored == u"week" ? stored : QStringLiteral("day");
+}
+
+void AppSettings::setScheduleViewMode(const QString& mode) {
+    write(kScheduleViewMode, mode == u"week" ? QStringLiteral("week") : QStringLiteral("day"));
+}
+
+bool AppSettings::scheduleFollowingOnly() const {
+    return settings_.value(kScheduleFollowingOnly, false).toBool();
+}
+
+void AppSettings::setScheduleFollowingOnly(bool followingOnly) {
+    write(kScheduleFollowingOnly, followingOnly);
 }
 
 QStringList AppSettings::disabledProviders() const {

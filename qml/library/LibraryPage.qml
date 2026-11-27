@@ -22,6 +22,8 @@ Item {
     // Esc on a page: the window goes back as its ← does.
     signal back()
     signal showDownloads()
+    signal openSchedule()
+    signal openGenre(string slug)
 
     // The breadcrumb over an anime: the place it was opened from, and its franchise in the
     // library. Read again when the library changes.
@@ -59,6 +61,13 @@ Item {
             page.app.settings.setValue("library/onDiskOnly", page.app.library.onDiskOnly)
             page.app.settings.setValue("library/grouped", page.app.library.grouped)
         }
+    }
+
+    Connections {
+        target: animePage
+        ignoreUnknownSignals: true
+        function onGenreSelected(slug) { page.openGenre(slug) }
+        function onOpenGenre(slug) { page.openGenre(slug) }
     }
 
     // An anime's page, opened from `origin` ("library" unless said). Unless `quiet` (the list's
@@ -175,6 +184,7 @@ Item {
                 app: page.app
                 onActivated: slug => page.select(slug)
                 onBrowseCatalog: page.browseCatalog()
+                onOpenSchedule: page.openSchedule()
             }
 
             AnimePage {
@@ -232,7 +242,7 @@ Item {
             }
         }
         // The anime's title is a suggestion: typing replaces it.
-        onAboutToShow: { failure = ""; groupTitle.forceActiveFocus(); groupTitle.selectAll() }
+        onAboutToShow: { failure = ""; groupTitle.forceActiveFocus(InputModality.reason); groupTitle.selectAll() }
         ColumnLayout {
             width: 432
             TextField { id: groupTitle; objectName: "createFranchiseTitle"; Layout.fillWidth: true; placeholderText: "Nombre de la franquicia"; Accessible.name: "Nombre de la franquicia"; onAccepted: createGroup.submit() }

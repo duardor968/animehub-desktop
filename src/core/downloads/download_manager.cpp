@@ -107,8 +107,8 @@ DownloadManager::DownloadManager(Services services, std::function<DownloadSettin
             }
         }
         QTimer::singleShot(5s, this, [this] {
-            if (!stopping_) {
-                services_.aria2.start();
+            if (!stopping_ && hasPendingNativeWork()) {
+                ensureAria2Started();
             }
         });
     });
@@ -140,6 +140,7 @@ void DownloadManager::start(bool transfers) {
     }
     if (auto all = services_.repository.all()) {
         const auto now = QDateTime::currentDateTimeUtc();
+        QList<Task> woken;
         for (auto task : *all) {
             // Earlier versions called a transfer cut by its server "network", as if AnimeHub had
             // no connection: one with a server was cut by that server.
@@ -154,15 +155,22 @@ void DownloadManager::start(bool transfers) {
                 task.issue = TaskIssue::None;
                 task.issueDetail.clear();
                 task.issueProvider.reset();
-                if (transfers_enabled_)
-                    store(task, false);
+                if (transfers_enabled_) {
+                    woken.append(task);
+                }
             }
             tasks_.insert(task.id, task);
+            syncEpisodeIndex(task);
             // MEGA's quota outlives a restart: what waits for it says until when MEGA is out.
             if (task.state == TaskState::Waiting && task.issue == TaskIssue::Quota &&
                 task.retryAt > now && task.retryAt > mega_until_) {
                 mega_until_ = task.retryAt;
                 mega_until_known_ = task.issueDetail == kMegaStatedTime;
+            }
+        }
+        if (!woken.isEmpty()) {
+            if (auto saved = services_.repository.save(woken); !saved) {
+                qWarning("download queue: %s", qPrintable(saved.error().message));
             }
         }
     }
@@ -172,7 +180,9 @@ void DownloadManager::start(bool transfers) {
     emit loaded();
     if (!transfers_enabled_)
         return;
-    services_.aria2.start();
+    if (hasPendingNativeWork()) {
+        ensureAria2Started();
+    }
     pump();
 }
 
@@ -186,17 +196,30 @@ void DownloadManager::shutdown(std::function<void()> done) {
     poll_timer_.stop();
     jd_poll_timer_.stop();
     wake_timer_.stop();
+    QList<Task> requeued;
+    bool had_native_transfer = false;
     for (auto it = tasks_.begin(); it != tasks_.end(); ++it) {
-        if (auto live = live_.find(it.key()); live != live_.end() && live->cancel) {
+        const auto live = live_.find(it.key());
+        if (live != live_.end() && live->cancel) {
             live->cancel->store(true);
+        }
+        if (it->engine == DownloadEngine::Native &&
+            (it->state == TaskState::Downloading ||
+             (it->state == TaskState::Paused && live != live_.end() && !live->gid.isEmpty()))) {
+            had_native_transfer = true;
         }
         if (it->state == TaskState::Downloading || it->state == TaskState::Resolving ||
             it->state == TaskState::Verifying) {
             it->state = TaskState::Queued; // picked up again on the next start
-            store(*it, false);
+            requeued.append(*it);
         }
     }
-    services_.aria2.shutdown(std::move(done));
+    if (!requeued.isEmpty()) {
+        if (auto saved = services_.repository.save(requeued); !saved) {
+            qWarning("download queue: %s", qPrintable(saved.error().message));
+        }
+    }
+    services_.aria2.shutdown(std::move(done), had_native_transfer);
 }
 
 QList<Task> DownloadManager::tasks() const {
@@ -279,11 +302,71 @@ std::optional<Task> DownloadManager::task(qint64 id) const {
     return it == tasks_.end() ? std::nullopt : std::optional<Task>(*it);
 }
 
+bool DownloadManager::hasPendingNativeWork() const {
+    return std::ranges::any_of(tasks_, [](const Task& task) {
+        if (task.engine != DownloadEngine::Native) {
+            return false;
+        }
+        return task.state == TaskState::Queued || task.state == TaskState::Waiting ||
+               task.state == TaskState::Resolving || task.state == TaskState::Downloading ||
+               task.state == TaskState::Verifying;
+    });
+}
+
+void DownloadManager::ensureAria2Started() {
+    if (!transfers_enabled_ || stopping_) {
+        return;
+    }
+    if (!services_.aria2.isActive()) {
+        services_.aria2.start();
+    }
+}
+
+void DownloadManager::syncEpisodeIndex(const Task& task) {
+    const double key = task.number == 0.0 ? 0.0 : task.number;
+    if (inLine(task)) {
+        auto& ids = active_by_episode_[task.slug][key];
+        if (!ids.contains(task.id)) {
+            ids.append(task.id);
+        }
+    } else {
+        removeFromEpisodeIndex(task);
+    }
+}
+
+void DownloadManager::removeFromEpisodeIndex(const Task& task) {
+    const auto by_slug = active_by_episode_.find(task.slug);
+    if (by_slug == active_by_episode_.end()) {
+        return;
+    }
+    const double key = task.number == 0.0 ? 0.0 : task.number;
+    const auto by_number = by_slug->find(key);
+    if (by_number == by_slug->end()) {
+        return;
+    }
+    by_number->removeAll(task.id);
+    if (by_number->isEmpty()) {
+        by_slug->erase(by_number);
+        if (by_slug->isEmpty()) {
+            active_by_episode_.erase(by_slug);
+        }
+    }
+}
+
 std::optional<Task> DownloadManager::activeTaskFor(const QString& slug, double number) const {
-    for (const auto& task : tasks_) {
-        if (task.slug == slug && task.number == number && task.state != TaskState::Completed &&
-            task.state != TaskState::Cancelled) {
-            return task;
+    const auto by_slug = active_by_episode_.constFind(slug);
+    if (by_slug == active_by_episode_.cend()) {
+        return std::nullopt;
+    }
+    const double key = number == 0.0 ? 0.0 : number;
+    const auto by_number = by_slug->constFind(key);
+    if (by_number == by_slug->cend()) {
+        return std::nullopt;
+    }
+    for (const auto id : *by_number) {
+        const auto it = tasks_.constFind(id);
+        if (it != tasks_.cend() && inLine(*it)) {
+            return *it;
         }
     }
     return std::nullopt;
@@ -360,6 +443,7 @@ std::expected<qint64, QString> DownloadManager::enqueue(const QString& slug, dou
         return std::unexpected(created.error().message);
     }
     tasks_.insert(created->id, *created);
+    syncEpisodeIndex(*created);
     emit taskAdded(created->id);
     pump();
     return created->id;
@@ -401,6 +485,7 @@ DownloadManager::enqueueMany(const QString& slug, const QList<double>& numbers,
                 return std::unexpected(saved.error().message);
             if (*saved) {
                 tasks_.insert(id, **saved);
+                syncEpisodeIndex(**saved);
                 emit taskAdded(id);
             }
         }
@@ -438,6 +523,7 @@ DownloadManager::enqueueMany(const QString& slug, const QList<double>& numbers,
         }
         for (auto& task : *created) {
             tasks_.insert(task.id, task);
+            syncEpisodeIndex(task);
             emit taskAdded(task.id);
         }
         result.added = static_cast<int>(created->size());
@@ -506,7 +592,11 @@ void DownloadManager::pump() {
         // to JDownloader, nor the other way round.
         for (const auto& task : queued) {
             const bool native = task.engine == DownloadEngine::Native;
-            if (running(native) >= limit || (native && !services_.aria2.isReady())) {
+            if (native && !services_.aria2.isReady()) {
+                ensureAria2Started();
+                continue;
+            }
+            if (running(native) >= limit) {
                 continue;
             }
             resolve(task.id);
@@ -1201,6 +1291,7 @@ void DownloadManager::setState(qint64 id, TaskState state) {
 }
 
 void DownloadManager::store(const Task& task, bool announce) {
+    syncEpisodeIndex(task);
     if (auto saved = services_.repository.save(task); !saved) {
         qWarning("download queue: %s", qPrintable(saved.error().message));
     }
@@ -1444,6 +1535,7 @@ void DownloadManager::forget(qint64 id) {
         qWarning("download queue: %s", qPrintable(removed.error().message));
         return;
     }
+    removeFromEpisodeIndex(*it);
     tasks_.erase(it);
     live_.remove(id);
     emit taskRemoved(id);

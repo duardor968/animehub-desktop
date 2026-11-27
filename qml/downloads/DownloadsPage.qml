@@ -3,9 +3,10 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// Downloads, by series as in Steam: the series on view and the speed at the top, then the other
-// series transferring with it, the series in line and the completed ones, each section folded as
-// it was left. With nothing in line, what the library has to download is one click away.
+// Downloads, by series as in Steam: compact free-scrolling Hero at the top (scrolling cleanly out
+// of view inside the Flickable), configurable episode expansion ("cards" / "compact") for the Hero
+// and every series row, then "También descargando", "Pendientes en tu biblioteca",
+// "A continuación" and "Completadas".
 Item {
     id: page
 
@@ -14,6 +15,8 @@ Item {
     readonly property LibraryModel library: app.library
     readonly property bool empty: downloads.current.count === 0 && downloads.active.count === 0
                                   && downloads.queue.count === 0 && downloads.completed.count === 0
+    readonly property bool compactEpisodes: app.settings.downloadEpisodesStyle === "compact"
+    readonly property bool narrow: width < 920
 
     signal browseCatalog()
     signal openAnime(string slug)
@@ -22,12 +25,12 @@ Item {
     property bool queueFolded: String(app.settings.value("downloads/queueFolded", false)) === "true"
     property bool completedFolded: String(app.settings.value("downloads/completedFolded", false)) === "true"
     property bool activeFolded: String(app.settings.value("downloads/activeFolded", false)) === "true"
+    property bool pendingFolded: false
     onActiveFoldedChanged: app.settings.setValue("downloads/activeFolded", activeFolded)
     onQueueFoldedChanged: app.settings.setValue("downloads/queueFolded", queueFolded)
     onCompletedFoldedChanged: app.settings.setValue("downloads/completedFolded", completedFolded)
 
-    // A section's body: it folds into its heading and opens out of it. Only the opening is
-    // animated, so its rows unfold and move at their own pace; folded, nothing in it takes focus.
+    // A section's body: it folds into its heading and opens out of it. Folded, nothing takes focus.
     component Fold: Item {
         property bool open
         property real shown: open ? 1 : 0
@@ -79,7 +82,7 @@ Item {
         expanded = next
     }
 
-    // Width of the progress column of every row.
+    // Width of the progress column of queued/completed rows.
     readonly property int barWidth: width >= 1400 ? 280 : width >= 1100 ? 220 : width >= 900 ? 160 : 136
 
     // Dragging a series in line: the place it would take; the rows between make room for it.
@@ -108,7 +111,6 @@ Item {
         if (to >= 0 && to !== from)
             downloads.moveSeries(from, to)
     }
-    // How far a row steps aside while another is dragged over it.
     function displacement(index) {
         if (dragFrom < 0 || index === dragFrom)
             return 0
@@ -119,12 +121,10 @@ Item {
         return 0
     }
 
-    // "Cancelar 7 episodios", "Cancelar el episodio 3": what a cancel reaches, said the same way
-    // for a series and for one of its episodes.
+    // "Cancelar 7 episodios", "Cancelar el episodio 3": consistent scope phrasing.
     function cancelScope(count) {
         return count === 1 ? "Cancelar 1 episodio" : "Cancelar " + count + " episodios"
     }
-    // Both cancel at once when nothing on disk goes, and ask first when bytes would.
     function askCancel(slug, title, consequence, count) {
         if (consequence === "") {
             downloads.cancelSeries(slug)
@@ -159,92 +159,224 @@ Item {
         removeDialog.open()
     }
 
-    DownloadsHeader {
-        id: header
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        downloads: page.downloads
-        expanded: page.expanded[page.downloads.headerSlug] === true
-        onToggled: slug => page.toggle(slug)
-        onMenuRequested: (row, anchor) => queueMenu.showFor(row, anchor, true)
-        onFolderRequested: page.app.openDownloadFolder()
-    }
-
     Flickable {
         id: scroll
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: header.bottom
-        anchors.bottom: parent.bottom
+        anchors.fill: parent
         clip: true
         contentWidth: width
-        contentHeight: sections.implicitHeight
+        contentHeight: sections.implicitHeight + 16
         boundsBehavior: Flickable.StopAtBounds
         // A mouse drag moves a series in line, not the page; the wheel scrolls it.
         acceptedButtons: Qt.NoButton
         ScrollBar.vertical: ScrollBar {}
-
-        // The edge the list passes under once scrolled.
-        Rectangle {
-            parent: scroll
-            z: 1
-            width: scroll.width
-            height: 1
-            color: Theme.stroke
-            opacity: scroll.contentY > 0 ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 150 } }
-        }
 
         ColumnLayout {
             id: sections
             width: scroll.width
             spacing: 0
 
-            // The episodes of the series on view, unfolded from the header.
-            Repeater {
-                model: page.downloads.current
+            // Compact free-scrolling Steam Hero (scrolls upward with the page).
+            DownloadsHeader {
+                id: header
+                Layout.fillWidth: true
+                downloads: page.downloads
+                settings: page.app.settings
+                expanded: page.expanded[page.downloads.headerSlug] === true
+                onToggled: slug => page.toggle(slug)
+                onAnimeRequested: slug => page.openAnime(slug)
+                onMenuRequested: (row, anchor) => queueMenu.showFor(row, anchor, true)
+                onFolderRequested: page.app.openDownloadFolder()
+            }
+
+            // Expanded episodes of the Hero anime, directly from downloads.headerTasks.
+            Item {
+                id: heroEpisodesBox
+
+                readonly property bool open: page.downloads.headerMode !== DownloadsView.Idle
+                                             && page.downloads.headerTaskCount > 0
+                                             && page.expanded[page.downloads.headerSlug] === true
+                property real shown: open ? 1 : 0
+
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.round(heroExpansionWrap.implicitHeight * shown)
+                implicitHeight: Layout.preferredHeight
+                visible: shown > 0
+                opacity: shown
+                clip: true
+                Behavior on shown { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
                 Item {
-                    id: unfolded
+                    id: heroExpansionWrap
+                    width: parent.width
+                    implicitHeight: page.compactEpisodes ? (heroCompactPanel.implicitHeight + 16)
+                                                         : (heroCardsPanel.implicitHeight + 20)
 
-                    required property string slug
-                    required property string title
-                    required property var episodes
-                    readonly property bool open: page.expanded[slug] === true
+                    // OPTION B ("cards", default): Elevated Theme.raised panel + 2 px #2f81f7 left guide.
+                    Rectangle {
+                        id: heroCardsPanel
+                        visible: !page.compactEpisodes
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.leftMargin: 32
+                        anchors.rightMargin: 32
+                        anchors.topMargin: 12
+                        implicitHeight: heroCardsColumn.implicitHeight + 12
+                        height: implicitHeight
+                        radius: Theme.radius
+                        color: Theme.raised
+                        border.width: 1
+                        border.color: Theme.stroke
+                        clip: true
 
-                    Layout.fillWidth: true
-                    implicitHeight: open ? currentColumn.implicitHeight : 0
-                    clip: true
-                    opacity: open ? 1 : 0
-                    Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-                    Behavior on opacity { NumberAnimation { duration: 200 } }
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 1
+                            anchors.top: parent.top
+                            anchors.topMargin: 6
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            width: 2
+                            radius: 1
+                            color: Theme.accent
+                        }
 
+                        Column {
+                            id: heroCardsColumn
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.leftMargin: 4
+                            anchors.topMargin: 6
+
+                            Repeater {
+                                model: !page.compactEpisodes && (heroEpisodesBox.open || heroEpisodesBox.shown > 0)
+                                       ? page.downloads.headerTasks : null
+
+                                EpisodeLine {
+                                    width: heroCardsColumn.width
+                                    downloads: page.downloads
+                                    compactMode: false
+                                    narrow: page.narrow
+                                    showDivider: index < page.downloads.headerTaskCount - 1
+                                    onCancelRequested: (taskId, label, partial) =>
+                                        page.askCancelEpisode(taskId, label, page.downloads.headerTitle, partial)
+                                }
+                            }
+                        }
+                    }
+
+                    // OPTION C ("compact"): Dense 36 px 1-line table with column header.
                     Column {
-                        id: currentColumn
-                        width: parent.width
-                        topPadding: 8
-                        bottomPadding: 8
+                        id: heroCompactPanel
+                        visible: page.compactEpisodes
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.leftMargin: 32
+                        anchors.rightMargin: 32
+                        anchors.topMargin: 8
+
+                        Item {
+                            width: parent.width
+                            height: 24
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: page.narrow ? 10 : 12
+
+                                Label {
+                                    Layout.fillWidth: false
+                                    Layout.preferredWidth: 68
+                                    Layout.minimumWidth: 68
+                                    Layout.maximumWidth: 68
+                                    text: "EP."
+                                    color: Theme.faint
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                }
+                                Label {
+                                    Layout.fillWidth: false
+                                    Layout.preferredWidth: page.narrow ? 132 : 210
+                                    Layout.minimumWidth: page.narrow ? 132 : 210
+                                    Layout.maximumWidth: page.narrow ? 132 : 210
+                                    text: "PROGRESO"
+                                    color: Theme.faint
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                }
+                                Label {
+                                    Layout.fillWidth: false
+                                    Layout.preferredWidth: page.narrow ? 92 : 120
+                                    Layout.minimumWidth: page.narrow ? 92 : 120
+                                    Layout.maximumWidth: page.narrow ? 92 : 120
+                                    text: "ESTADO"
+                                    color: Theme.faint
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                }
+                                Label {
+                                    visible: !page.narrow
+                                    Layout.fillWidth: false
+                                    Layout.preferredWidth: 96
+                                    Layout.minimumWidth: 96
+                                    Layout.maximumWidth: 96
+                                    text: "VELOCIDAD"
+                                    color: Theme.faint
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    text: "TAMAÑO · RESTANTE"
+                                    color: Theme.faint
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                    elide: Text.ElideRight
+                                }
+                                Item {
+                                    Layout.preferredWidth: 112
+                                    Layout.minimumWidth: 112
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: Theme.stroke
+                            opacity: 0.7
+                        }
 
                         Repeater {
-                            model: unfolded.open || unfolded.height > 0 ? unfolded.episodes : null
+                            model: page.compactEpisodes && (heroEpisodesBox.open || heroEpisodesBox.shown > 0)
+                                   ? page.downloads.headerTasks : null
 
                             EpisodeLine {
-                                width: currentColumn.width
+                                width: heroCompactPanel.width
                                 downloads: page.downloads
-                                indent: 32
-                                barWidth: page.barWidth
-                                actionsWidth: 84
-                                trailing: 24
+                                compactMode: true
+                                narrow: page.narrow
+                                showDivider: index < page.downloads.headerTaskCount - 1
                                 onCancelRequested: (taskId, label, partial) =>
-                                    page.askCancelEpisode(taskId, label, unfolded.title, partial)
+                                    page.askCancelEpisode(taskId, label, page.downloads.headerTitle, partial)
                             }
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: Theme.stroke
+                            opacity: 0.8
                         }
                     }
                 }
             }
 
-            // Other series transferring at the same time: they already run, so they are not next.
+            // Other series transferring in parallel right below the Hero's expanded episodes.
             SectionHeading {
                 Layout.fillWidth: true
                 Layout.topMargin: 16
@@ -252,7 +384,7 @@ Item {
                 Layout.rightMargin: 32
                 Layout.bottomMargin: 8
                 visible: page.downloads.active.count > 0
-                text: "Descargando"
+                text: "También descargando"
                 count: page.downloads.active.count
                 folded: page.activeFolded
                 onClicked: page.activeFolded = !page.activeFolded
@@ -266,7 +398,7 @@ Item {
                     Layout.preferredHeight: contentHeight
                     interactive: false
                     model: page.downloads.active
-                    Accessible.name: "Descargando"
+                    Accessible.name: "También descargando"
 
                     displaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
                     add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 } }
@@ -275,8 +407,10 @@ Item {
                     delegate: SeriesRow {
                         id: activeRow
                         downloads: page.downloads
+                        activeSection: true
                         queued: true
                         draggable: false
+                        compactEpisodes: page.compactEpisodes
                         expanded: page.expanded[slug] === true
                         barWidth: page.barWidth
                         onToggled: page.toggle(slug)
@@ -287,12 +421,141 @@ Item {
                 }
             }
 
+            // Nothing after the series on view, but episodes the library is missing: shown under
+            // its own heading with the pending series rows instead of an empty void.
             SectionHeading {
                 Layout.fillWidth: true
                 Layout.topMargin: 16
                 Layout.leftMargin: 32
                 Layout.rightMargin: 32
                 Layout.bottomMargin: 8
+                visible: page.downloads.queue.count === 0 && page.library.pendingCount > 0
+                text: "Pendientes en tu biblioteca"
+                count: page.library.downloadCount
+                folded: page.pendingFolded
+                onClicked: page.pendingFolded = !page.pendingFolded
+
+                AccentButton {
+                    visible: page.library.pendingCount > 1
+                    text: "Descargar " + page.library.pendingCount + " episodios"
+                    glyphCode: Theme.icon.download
+                    onClicked: page.downloadPending()
+                }
+            }
+
+            Fold {
+                open: !page.pendingFolded && page.downloads.queue.count === 0
+                      && page.library.pendingCount > 0
+
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: contentHeight
+                    interactive: false
+                    model: page.library.downloadShelf
+                    Accessible.name: "Pendientes en tu biblioteca"
+
+                    delegate: Item {
+                        id: pendingItem
+
+                        required property string slug
+                        required property string title
+                        required property url posterUrl
+                        required property string caption
+
+                        width: ListView.view ? ListView.view.width : 0
+                        height: 84
+
+                        AbstractButton {
+                            id: pendingRow
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            focusPolicy: Qt.StrongFocus
+                            Accessible.name: pendingItem.title + ", " + pendingItem.caption
+                            onClicked: page.openAnime(pendingItem.slug)
+
+                            background: Rectangle {
+                                color: pendingRow.down ? Theme.raised
+                                       : pendingRow.hovered ? Theme.hover : "transparent"
+                                FocusFrame { visible: pendingRow.activeFocus && InputModality.keyboard }
+                            }
+
+                            contentItem: Item {
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 32
+                                    anchors.rightMargin: 32
+                                    spacing: 16
+
+                                    Poster {
+                                        Layout.preferredWidth: 48
+                                        Layout.preferredHeight: 68
+                                        Layout.alignment: Qt.AlignVCenter
+                                        source: pendingItem.posterUrl
+                                        Accessible.ignored: true
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Layout.alignment: Qt.AlignVCenter
+                                        spacing: 3
+
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: pendingItem.title
+                                            color: Theme.ink
+                                            font.pixelSize: Theme.body
+                                            font.weight: Font.DemiBold
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: pendingItem.caption
+                                            color: Theme.muted
+                                            font.pixelSize: Theme.caption
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+
+                                    AccentButton {
+                                        Layout.alignment: Qt.AlignVCenter
+                                        text: "Descargar"
+                                        emphasized: page.empty && page.library.pendingCount === 1
+                                        glyphCode: Theme.icon.download
+                                        Accessible.name: "Descargar " + pendingItem.title
+                                        onClicked: {
+                                            const failure = page.library.downloadPendingOf(pendingItem.slug)
+                                            if (failure)
+                                                page.app.message(failure, true)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.leftMargin: 32
+                            anchors.rightMargin: 32
+                            anchors.bottom: parent.bottom
+                            height: 1
+                            color: Theme.stroke
+                            opacity: 0.5
+                        }
+                    }
+                }
+            }
+
+            // Only with something in it, or the empty-state prompt when nothing is pending anywhere.
+            SectionHeading {
+                Layout.fillWidth: true
+                Layout.topMargin: 16
+                Layout.leftMargin: 32
+                Layout.rightMargin: 32
+                Layout.bottomMargin: 8
+                visible: page.downloads.queue.count > 0
+                         || (page.empty && page.library.pendingCount === 0)
                 text: "A continuación"
                 count: page.downloads.queue.count
                 folded: page.queueFolded
@@ -301,19 +564,8 @@ Item {
 
             Fold {
                 open: !page.queueFolded
-
-                // Nothing after the series on view, but episodes the library is missing: where
-                // someone who only downloads starts, with the library's own button.
-                Button {
-                    visible: page.downloads.queue.count === 0 && page.library.pendingCount > 0
-                    Layout.leftMargin: 32
-                    Layout.bottomMargin: 8
-                    text: page.library.pendingCount === 1 ? "Descargar 1 episodio"
-                                                          : "Descargar " + page.library.pendingCount + " episodios"
-                    highlighted: true
-                    icon.source: Theme.source(Theme.icon.download)
-                    onClicked: page.downloadPending()
-                }
+                      && (page.downloads.queue.count > 0
+                          || (page.empty && page.library.pendingCount === 0))
 
                 RowLayout {
                     visible: page.empty && page.library.pendingCount === 0
@@ -327,9 +579,8 @@ Item {
                         font.pixelSize: Theme.body
                     }
 
-                    Button {
+                    AccentButton {
                         text: "Explorar el catálogo"
-                        highlighted: true
                         onClicked: page.browseCatalog()
                     }
                 }
@@ -352,6 +603,7 @@ Item {
                         id: row
                         downloads: page.downloads
                         queued: true
+                        compactEpisodes: page.compactEpisodes
                         expanded: page.expanded[slug] === true
                         barWidth: page.barWidth
                         displacement: page.displacement(index)
@@ -366,12 +618,14 @@ Item {
                 }
             }
 
+            // Only with something in it.
             SectionHeading {
                 Layout.fillWidth: true
                 Layout.topMargin: 24
                 Layout.leftMargin: 32
                 Layout.rightMargin: 32
                 Layout.bottomMargin: 8
+                visible: page.downloads.completed.count > 0
                 text: "Completadas"
                 count: page.downloads.completed.count
                 folded: page.completedFolded
@@ -380,14 +634,13 @@ Item {
                 // The files stay; only the list empties.
                 Button {
                     visible: page.downloads.completed.count > 0
-                    flat: true
                     text: "Quitar todas"
                     onClicked: page.downloads.clearCompleted()
                 }
             }
 
             Fold {
-                open: !page.completedFolded
+                open: !page.completedFolded && page.downloads.completed.count > 0
                 Layout.bottomMargin: 24
 
                 ListView {
@@ -406,10 +659,13 @@ Item {
                         id: done
                         downloads: page.downloads
                         queued: false
+                        compactEpisodes: page.compactEpisodes
                         expanded: page.expanded[slug] === true
                         barWidth: page.barWidth
                         onToggled: page.toggle(slug)
                         onMenuRequested: anchor => completedMenu.showFor(done, anchor)
+                        onEpisodeCancelRequested: (taskId, label, partial) =>
+                            page.askCancelEpisode(taskId, label, title, partial)
                     }
                 }
             }
@@ -558,7 +814,6 @@ Item {
         property string consequence
         property string action: "Cancelar la descarga"
 
-        // Wide enough for the title, which names the series.
         width: Math.min(Math.max(460, implicitHeaderWidth), parent.width - 48)
 
         Label {
@@ -571,7 +826,6 @@ Item {
         footer: DialogButtonBox {
             Button {
                 text: cancelDialog.action
-                // DialogButtonBox clears a `highlighted` set at creation; a binding comes back.
                 highlighted: cancelDialog.visible
                 DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
             }

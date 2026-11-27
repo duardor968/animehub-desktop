@@ -27,6 +27,11 @@ class AppSettings final : public QObject {
     Q_PROPERTY(QVariantList providerSwitches READ providerSwitches NOTIFY changed)
     Q_PROPERTY(bool dubbed READ dubbed WRITE setDubbed NOTIFY changed)
     Q_PROPERTY(int maxConcurrent READ maxConcurrent WRITE setMaxConcurrent NOTIFY changed)
+    Q_PROPERTY(bool nativeLimitEnabled READ nativeLimitEnabled WRITE setNativeLimitEnabled NOTIFY
+                   speedLimitChanged)
+    Q_PROPERTY(
+        int nativeLimitKBps READ nativeLimitKBps WRITE setNativeLimitKBps NOTIFY speedLimitChanged)
+    Q_PROPERTY(QString speedLimitText READ speedLimitText NOTIFY speedLimitChanged)
     // "mpv" (bundled), "potplayer" (only while it is installed) or "system".
     Q_PROPERTY(QString player READ player WRITE setPlayer NOTIFY changed)
     Q_PROPERTY(bool potPlayerFound READ potPlayerFound CONSTANT)
@@ -42,6 +47,12 @@ class AppSettings final : public QObject {
     Q_PROPERTY(JDownloader jdownloader READ jdownloader WRITE setJdownloader NOTIFY changed)
     Q_PROPERTY(
         QString jdownloaderDevice READ jdownloaderDevice WRITE setJdownloaderDevice NOTIFY changed)
+    Q_PROPERTY(QString downloadEpisodesStyle READ downloadEpisodesStyle WRITE
+                   setDownloadEpisodesStyle NOTIFY changed)
+    Q_PROPERTY(
+        QString scheduleViewMode READ scheduleViewMode WRITE setScheduleViewMode NOTIFY changed)
+    Q_PROPERTY(bool scheduleFollowingOnly READ scheduleFollowingOnly WRITE setScheduleFollowingOnly
+                   NOTIFY changed)
 
 public:
     enum class CloseAction { Ask, Tray, Quit };
@@ -81,6 +92,11 @@ public:
     void setDubbed(bool dubbed);
     [[nodiscard]] int maxConcurrent() const;
     void setMaxConcurrent(int count);
+    [[nodiscard]] bool nativeLimitEnabled() const;
+    void setNativeLimitEnabled(bool enabled);
+    [[nodiscard]] int nativeLimitKBps() const;
+    void setNativeLimitKBps(int rate);
+    [[nodiscard]] QString speedLimitText() const;
     [[nodiscard]] QString player() const;
     void setPlayer(const QString& player);
     [[nodiscard]] bool potPlayerFound() const;
@@ -98,6 +114,12 @@ public:
     void setJdownloader(JDownloader mode);
     [[nodiscard]] QString jdownloaderDevice() const;
     void setJdownloaderDevice(const QString& id);
+    [[nodiscard]] QString downloadEpisodesStyle() const;
+    void setDownloadEpisodesStyle(const QString& style);
+    [[nodiscard]] QString scheduleViewMode() const;
+    void setScheduleViewMode(const QString& mode);
+    [[nodiscard]] bool scheduleFollowingOnly() const;
+    void setScheduleFollowingOnly(bool followingOnly);
 
     // Whether Windows already said, once, that the window went on running in the tray.
     [[nodiscard]] bool trayNoticeShown() const;
@@ -125,6 +147,7 @@ public:
 
 signals:
     void changed();
+    void speedLimitChanged();
 
 private:
     void write(const QString& key, const QVariant& value);

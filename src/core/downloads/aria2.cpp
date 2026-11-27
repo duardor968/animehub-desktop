@@ -12,6 +12,8 @@
 #include <QRandomGenerator>
 #include <QTcpServer>
 
+#include <algorithm>
+
 namespace animehub::downloads {
 namespace {
 
@@ -65,13 +67,26 @@ Aria2::Aria2(QNetworkAccessManager& network, QString executable, QByteArray user
     platform::prepareHelperProcess(process_);
     process_.setProcessChannelMode(QProcess::MergedChannels);
     process_.setStandardOutputFile(QProcess::nullDevice());
+    connect(&process_, &QProcess::started, this, [this] {
+        if (stopping_) {
+            return;
+        }
+        job_.assign(process_.processId());
+        waitUntilReady(0);
+    });
     connect(&process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (!stopping_ && error == QProcess::FailedToStart) {
             ready_ = false;
+            starting_ = false;
+            changing_limit_ = false;
+            config_dir_.reset();
             emit failed(QStringLiteral("aria2 could not start: %1").arg(process_.errorString()));
         }
     });
     connect(&process_, &QProcess::finished, this, [this](int code, QProcess::ExitStatus) {
+        starting_ = false;
+        changing_limit_ = false;
+        config_dir_.reset();
         if (!stopping_) {
             ready_ = false;
             emit failed(QStringLiteral("aria2 stopped (exit code %1)").arg(code));
@@ -81,9 +96,11 @@ Aria2::Aria2(QNetworkAccessManager& network, QString executable, QByteArray user
 
 Aria2::~Aria2() {
     stopping_ = true;
+    starting_ = false;
+    ready_ = false;
     if (process_.state() != QProcess::NotRunning) {
         process_.kill();
-        process_.waitForFinished(3000);
+        process_.waitForFinished(500);
     }
 }
 
@@ -97,15 +114,20 @@ QUrl Aria2::endpoint() const {
 }
 
 void Aria2::start() {
-    if (process_.state() != QProcess::NotRunning) {
+    if (process_.state() != QProcess::NotRunning || starting_) {
         return;
     }
     stopping_ = false;
     ready_ = false;
+    starting_ = true;
+    changing_limit_ = false;
+    applied_limit_ = speed_limit_;
     port_ = freeLocalPort();
     secret_ = randomSecret();
     config_dir_ = std::make_unique<QTemporaryDir>();
     if (port_ == 0 || !config_dir_->isValid()) {
+        starting_ = false;
+        config_dir_.reset();
         emit failed(QStringLiteral("no local port or temporary folder for aria2"));
         return;
     }
@@ -114,6 +136,8 @@ void Aria2::start() {
     const auto config_path = config_dir_->filePath(QStringLiteral("aria2.conf"));
     QFile config(config_path);
     if (!config.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        starting_ = false;
+        config_dir_.reset();
         emit failed(QStringLiteral("cannot write the aria2 configuration"));
         return;
     }
@@ -125,6 +149,7 @@ void Aria2::start() {
         QStringLiteral("rpc-max-request-size=4M"),
         QStringLiteral("stop-with-process=%1").arg(QCoreApplication::applicationPid()),
         QStringLiteral("max-concurrent-downloads=8"),
+        QStringLiteral("max-overall-download-limit=%1").arg(applied_limit_),
         QStringLiteral("continue=true"),
         QStringLiteral("auto-file-renaming=false"),
         QStringLiteral("allow-overwrite=false"),
@@ -152,30 +177,72 @@ void Aria2::start() {
     process_.setProgram(executable_);
     process_.setArguments({QStringLiteral("--conf-path=%1").arg(config_path)});
     process_.start();
-    if (!process_.waitForStarted(5000)) {
-        return; // errorOccurred reports it
-    }
-    job_.assign(process_.processId());
-    waitUntilReady(0);
 }
 
 void Aria2::waitUntilReady(int attempt) {
+    const auto session = secret_;
     call(QStringLiteral("aria2.getVersion"), {}, this,
-         [this, attempt](const std::expected<QJsonValue, QString>& result) {
+         [this, attempt, session](const std::expected<QJsonValue, QString>& result) {
+             if (stopping_ || session != secret_) {
+                 return;
+             }
              if (result) {
+                 starting_ = false;
                  ready_ = true;
                  config_dir_.reset();
+                 applySpeedLimit(); // settings may have changed while aria2 was starting
                  emit ready();
                  return;
              }
-             if (stopping_ || process_.state() != QProcess::Running) {
+             if (process_.state() != QProcess::Running) {
+                 starting_ = false;
                  return;
              }
              if (attempt >= kReadyAttempts) {
+                 starting_ = false;
+                 stopping_ = true;
+                 config_dir_.reset();
+                 process_.kill();
                  emit failed(QStringLiteral("aria2 did not answer: %1").arg(result.error()));
                  return;
              }
-             QTimer::singleShot(100, this, [this, attempt] { waitUntilReady(attempt + 1); });
+             QTimer::singleShot(100, this, [this, attempt, session] {
+                 if (!stopping_ && session == secret_) {
+                     waitUntilReady(attempt + 1);
+                 }
+             });
+         });
+}
+
+void Aria2::setSpeedLimit(qint64 bytes_per_second) {
+    speed_limit_ = std::max<qint64>(0, bytes_per_second);
+    applySpeedLimit();
+}
+
+void Aria2::applySpeedLimit() {
+    if (!ready_ || changing_limit_ || speed_limit_ == applied_limit_) {
+        return;
+    }
+    changing_limit_ = true;
+    const auto limit = speed_limit_;
+    const QJsonObject options{
+        {QStringLiteral("max-overall-download-limit"), QString::number(limit)}};
+    call(QStringLiteral("aria2.changeGlobalOption"), {options}, this,
+         [this, limit, session = secret_](const auto& result) {
+             if (!ready_ || session != secret_) {
+                 return;
+             }
+             changing_limit_ = false;
+             if (result) {
+                 applied_limit_ = limit;
+             } else {
+                 // A lost response can leave the engine at either value.
+                 applied_limit_ = -1;
+                 emit speedLimitFailed(result.error());
+             }
+             if (speed_limit_ != limit) {
+                 applySpeedLimit();
+             }
          });
 }
 
@@ -263,27 +330,43 @@ void Aria2::waitStopped(const QString& gid, int attempts_left, std::function<voi
            });
 }
 
-void Aria2::shutdown(std::function<void()> done) {
+void Aria2::shutdown(std::function<void()> done, bool save_session) {
+    const bool was_ready = ready_;
     stopping_ = true;
+    starting_ = false;
     ready_ = false;
+    changing_limit_ = false;
+    config_dir_.reset();
     if (process_.state() == QProcess::NotRunning) {
         done();
         return;
     }
     auto finished = std::make_shared<bool>(false);
-    auto finish = [this, finished, done = std::move(done)] {
+    auto finish = [this, finished, save_session, was_ready, done = std::move(done)] {
         if (*finished) {
             return;
         }
         *finished = true;
         if (process_.state() != QProcess::NotRunning) {
-            qWarning("aria2 did not exit in time; its last progress may not be saved");
+            if (save_session && was_ready) {
+                qWarning("aria2 did not exit in time; its last progress may not be saved");
+            }
             process_.kill();
-            process_.waitForFinished(1000);
+            process_.waitForFinished(500);
         }
         done();
     };
     connect(&process_, &QProcess::finished, this, finish, Qt::SingleShotConnection);
+    if (!was_ready || !save_session) {
+        // Idle or still starting: no resume control files need aria2's 3 s flush delay.
+#ifdef Q_OS_WIN
+        process_.kill();
+#else
+        process_.terminate();
+#endif
+        QTimer::singleShot(500, this, finish);
+        return;
+    }
     // forceShutdown writes the control files that let transfers resume; aria2 then waits three
     // seconds on purpose before exiting.
     call(QStringLiteral("aria2.forceShutdown"), {}, this, [](const auto&) {});

@@ -30,8 +30,9 @@ AbstractButton {
         width: root.width + 32
         radius: Theme.radius
         color: root.hovered ? Theme.hover : "transparent"
-        border.width: root.visualFocus ? 2 : 0
-        border.color: Theme.accent
+
+        // The keyboard's frame, as every control's.
+        FocusFrame { visible: root.activeFocus && InputModality.keyboard }
     }
 
     // The catalog's headings follow the same measures: the count 8 px after the name, the

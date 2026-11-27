@@ -22,6 +22,8 @@ Item {
     signal activated(string slug, real episode)
     // A poster's own button: play the episode or download what it lists.
     signal acted(string slug, real episode, string action)
+    // ← pressed on the first poster when no inline lead card is set.
+    signal reachedStart()
 
     readonly property int gap: Theme.posterGap
     // Columns as if every card were a poster; the lead takes two of them.
@@ -43,7 +45,7 @@ Item {
     // The keyboard on the row of posters, from the lead.
     function focusRow() {
         if (list.count > 0)
-            list.forceActiveFocus(Qt.TabFocusReason)
+            list.forceActiveFocus(InputModality.reason)
     }
 
     onCardWidthChanged: show(first, false)
@@ -160,11 +162,19 @@ Item {
                 else if (currentIndex >= root.first + root.columns)
                     root.show(currentIndex - root.columns + 1, true)
             }
-            // ← from the first poster goes to the lead card.
+            // ← from the first poster goes to the lead card, or tells the caller we hit the start.
             Keys.onLeftPressed: event => {
-                event.accepted = currentIndex <= 0 && leadLoader.item !== null
-                if (event.accepted)
-                    leadLoader.item.forceFocus(Qt.BacktabFocusReason)
+                if (currentIndex <= 0) {
+                    if (leadLoader.item !== null) {
+                        event.accepted = true
+                        leadLoader.item.forceFocus(Qt.BacktabFocusReason)
+                    } else {
+                        event.accepted = true
+                        root.reachedStart()
+                    }
+                } else {
+                    event.accepted = false
+                }
             }
             // A row reached by keyboard starts at the first poster on view.
             onActiveFocusChanged: {

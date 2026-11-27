@@ -27,6 +27,8 @@ public:
     void write(const QUrl& url, const QByteArray& body) const;
     // Drops copies older than `age`; returns how many were removed.
     int prune(std::chrono::hours age) const;
+    // Runs `prune` on the global thread pool so startup never blocks on cache cleanup.
+    static void pruneAsync(const QString& directory, std::chrono::hours max_age);
 
 private:
     [[nodiscard]] QString pathFor(const QUrl& url) const;

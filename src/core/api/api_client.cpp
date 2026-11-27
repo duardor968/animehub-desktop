@@ -193,10 +193,9 @@ void ApiClient::episodes(const QString& slug, int page, QObject* context,
     get(url, policy, context, decodeWith<EpisodePage>(&json::decodeEpisodes, std::move(done)));
 }
 
-void ApiClient::schedule(QObject* context, Callback<QList<ScheduleEntry>> done,
-                         CachePolicy policy) {
+void ApiClient::schedule(QObject* context, Callback<Schedule> done, CachePolicy policy) {
     get(endpoint(QStringLiteral("schedule")), policy, context,
-        decodeWith<QList<ScheduleEntry>>(&json::decodeSchedule, std::move(done)));
+        decodeWith<Schedule>(&json::decodeSchedule, std::move(done)));
 }
 
 void ApiClient::resolve(const QString& slug, const ResolveRequest& request, QObject* context,

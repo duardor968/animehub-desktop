@@ -66,7 +66,8 @@ public:
     }
     [[nodiscard]] std::optional<library::EpisodeRecord> episode(double number) const;
     [[nodiscard]] std::optional<downloads::Task> task(double number) const;
-    // Neither on disk nor on its way: no task, or one that stopped (paused, failed).
+    // Neither on disk nor already in the download queue (no unfinished task, not even paused or
+    // failed).
     [[nodiscard]] bool missing(const library::EpisodeRecord& episode) const;
     [[nodiscard]] int rowOf(double number) const;
 

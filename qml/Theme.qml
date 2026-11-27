@@ -5,6 +5,7 @@ import QtQuick
 QtObject {
     readonly property color canvas: "#111317"
     readonly property color pane: "#16191e"
+    readonly property color surface: "#151922"
     readonly property color raised: "#1d2127"
     readonly property color hover: "#232830"
     readonly property color stroke: "#2a2f37"
@@ -12,13 +13,23 @@ QtObject {
     readonly property color muted: "#9aa1ab"
     readonly property color faint: "#6c737e"
     readonly property color accent: "#2f81f7"
+    // Higher-luminance blue for readable text/chips on dark surfaces (WCAG AA >= 6.8:1).
+    readonly property color accentText: "#6ea8ff"
     readonly property color accentInk: "#ffffff"
     // Fluent's own accent for a disabled control (AccentFillColorDisabled): the brand accent
     // replaces Fluent's in every state, so this one is given back.
     readonly property color accentDisabled: "#28ffffff"
     readonly property color success: "#4cb782"
+    // Final matches Emitido visually (soft green); only the label differs.
+    readonly property color finale: "#4cb782"
     readonly property color warning: "#d8a23a"
     readonly property color danger: "#e5534b"
+    readonly property color limitLine: "#ff9d8f"
+    // SelectionMark's corner, as AnimeHub Web's: at rest and under the pointer.
+    readonly property color mark: "#182235"
+    readonly property color markHover: "#202d44"
+    // A chosen card or row, as the web tints it.
+    readonly property color chosen: "#111e34"
 
     readonly property int pad: 16
     readonly property int section: 32
@@ -49,13 +60,17 @@ QtObject {
     function glyph(code) { return String.fromCharCode(parseInt(code, 16)) }
     function source(code) { return "image://glyph/" + code }
 
-    // Codes of the glyphs AnimeHub uses.
+    // Codes of the glyphs AnimeHub uses. Transport glyphs (play/pause/stop) and the vertical
+    // bookmark ribbon are crisp anti-aliased QPainterPath vectors served by GlyphProvider so
+    // Windows and Linux match identically at every DPI.
     readonly property QtObject icon: QtObject {
         readonly property string library: "e8f1"
         readonly property string download: "e896"
         readonly property string settings: "e713"
-        readonly property string play: "e768"
-        readonly property string pause: "e769"
+        readonly property string play: "pot-play"
+        readonly property string pause: "pot-pause"
+        readonly property string stop: "pot-stop"
+        readonly property string bookmarkRibbon: "bookmark-ribbon"
         readonly property string cancel: "e711"
         readonly property string more: "e712"
         readonly property string star: "e734"
@@ -71,5 +86,10 @@ QtObject {
         readonly property string clock: "e823"
         readonly property string video: "e714"
         readonly property string info: "e946"
+        readonly property string copy: "e8c8"
+        readonly property string openExternal: "e8a7"
+        readonly property string schedule: "e787"
+        readonly property string collapseAll: "e70e"
+        readonly property string expandAll: "e70d"
     }
 }

@@ -9,7 +9,9 @@
 #include <QSet>
 #include <QTimer>
 
+#include <chrono>
 #include <functional>
+#include <memory>
 #include <optional>
 
 namespace animehub::library {
@@ -43,6 +45,7 @@ public:
 
     LibraryService(LibraryRepository& repository, api::ApiClient& api, QObject* parent = nullptr,
                    MoveToTrash move_to_trash = {}, RestoreFromTrash restore_from_trash = {});
+    ~LibraryService() override;
 
     [[nodiscard]] LibraryRepository& repository() const {
         return repository_;
@@ -84,11 +87,13 @@ public:
     }
 
     // Starts periodic checks for new episodes of the library's airing anime.
-    void startWatching();
+    void startWatching(std::chrono::milliseconds initial_delay = std::chrono::milliseconds{0});
     void checkNow();
+    void sweep();
 
     // Forgets files deleted outside AnimeHub.
     void verifyFiles();
+    void verifyFilesAsync();
     // Something outside the service (playback, a finished download) changed this anime.
     void announce(const QString& slug);
 
@@ -117,7 +122,6 @@ private:
     void fetchEpisodes(const QString& slug, int page, bool flag_new, QList<double> added);
     void storeHeld(const QString& slug);
     void finishRefresh(const QString& slug, bool flag_new, const QList<double>& added);
-    void sweep();
     Stored<void> changed(Stored<void> result, const QString& slug, bool list = false);
     Stored<Trashed> trash(const QString& slug,
                           const std::function<bool(const EpisodeRecord&)>& chosen,
@@ -133,6 +137,9 @@ private:
     QTimer recent_timer_;
     QTimer sweep_timer_;
     qsizetype finished_sweep_offset_ = 0;
+    bool checking_recent_ = false;
+    bool verifying_files_ = false;
+    std::shared_ptr<LibraryService*> alive_;
 };
 
 } // namespace animehub::library

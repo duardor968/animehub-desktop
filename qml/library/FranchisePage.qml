@@ -25,7 +25,8 @@ Item {
             return
         // StackLayout can expose the page before assigning its size. Lay out the
         // header at that size before GridView computes its scroll extents.
-        works.headerItem.forceLayout()
+        if (works.headerItem)
+            works.headerItem.forceLayout()
         works.forceLayout()
         works.positionViewAtBeginning()
         positioningOnOpen = false
@@ -36,12 +37,14 @@ Item {
     }
     function focusTitle(reason) {
         if (works.headerItem)
-            works.headerItem.focusTitle(reason)
+            works.headerItem.focusTitle(reason !== undefined ? reason : InputModality.reason)
     }
     Keys.onEscapePressed: root.back()
     // Plays the episode a work goes on with, or downloads it when it is not on disk.
     function continueWith(slug) {
-        ApplicationWindow.window.app.continueWatching(slug)
+        const win = ApplicationWindow.window
+        if (win && win.app)
+            win.app.continueWatching(slug)
     }
     onWidthChanged: if (positioningOnOpen) Qt.callLater(positionBeginningWhenReady)
     onHeightChanged: if (positioningOnOpen) Qt.callLater(positionBeginningWhenReady)
@@ -90,7 +93,7 @@ Item {
             Item {
                 id: barSlot
                 width: parent.width
-                height: bar.height
+                height: bar.unpinnedHeight
             }
             RowLayout {
                 width: parent.width
@@ -145,36 +148,44 @@ Item {
                 onAct: root.continueWith(work.modelData.slug)
                 Accessible.name: work.modelData.title + ", " + work.modelData.facts + ", "
                                  + work.modelData.state + (work.disk !== "" ? ", " + work.disk : "")
-                Keys.onMenuPressed: workMenu.show(card)
-                TapHandler { acceptedButtons: Qt.RightButton; onTapped: workMenu.showAtPointer() }
+                Keys.onMenuPressed: workMenu.openFor(work.modelData, card)
+                TapHandler { acceptedButtons: Qt.RightButton; onTapped: workMenu.openFor(work.modelData, null) }
             }
-            ActionMenu {
-                id: workMenu
-                entries: [open, detach, restore, remove]
-                MenuEntry { id: open; text: "Abrir anime"; onTriggered: root.activated(work.modelData.slug) }
-                MenuEntry {
-                    id: detach
-                    text: "Quitar de esta franquicia"
-                    onTriggered: {
-                        if (!root.model.setFranchiseMember(root.franchise.id, work.modelData.slug, false))
-                            root.actionFailed(root.model.error)
-                    }
-                }
-                MenuEntry {
-                    id: restore
-                    property bool wanted: root.model.archivedOnly
-                    text: "Restaurar a la biblioteca"
-                    onTriggered: {
-                        if (!root.model.archive([work.modelData.slug], false))
-                            root.actionFailed(root.model.error)
-                    }
-                }
-                MenuEntry {
-                    id: remove
-                    text: root.model.archivedOnly ? "Eliminar registro personal…" : "Quitar de la biblioteca…"
-                    onTriggered: root.removeRequested([work.modelData.slug], work.modelData.title)
-                }
+        }
+    }
+    ActionMenu {
+        id: workMenu
+        property var workData: ({})
+        entries: [open, detach, restore, remove]
+        function openFor(data, anchor) {
+            workData = data || ({})
+            if (anchor)
+                show(anchor)
+            else
+                showAtPointer()
+        }
+        MenuEntry { id: open; text: "Abrir anime"; onTriggered: root.activated(workMenu.workData.slug) }
+        MenuEntry {
+            id: detach
+            text: "Quitar de esta franquicia"
+            onTriggered: {
+                if (!root.model.setFranchiseMember(root.franchise.id, workMenu.workData.slug, false))
+                    root.actionFailed(root.model.error)
             }
+        }
+        MenuEntry {
+            id: restore
+            property bool wanted: root.model.archivedOnly
+            text: "Restaurar a la biblioteca"
+            onTriggered: {
+                if (!root.model.archive([workMenu.workData.slug], false))
+                    root.actionFailed(root.model.error)
+            }
+        }
+        MenuEntry {
+            id: remove
+            text: root.model.archivedOnly ? "Eliminar registro personal…" : "Quitar de la biblioteca…"
+            onTriggered: root.removeRequested([workMenu.workData.slug], workMenu.workData.title)
         }
     }
     ActionBar {
@@ -195,20 +206,25 @@ Item {
         figures: root.franchise.figures || []
         // Goes on with the work under way ("Ver ep. 6", "Descargar ep. 6"), named beside it; with
         // everything seen, there is none.
-        Button {
+        AccentButton {
             readonly property string step: root.franchise.nextAction || ""
             visible: (root.franchise.nextSlug || "") !== ""
             // Its download on its way: nothing to press until it is on disk.
             enabled: step !== "busy"
-            // Fluent keeps a disabled accent button blue: only a button that can be pressed is.
-            highlighted: enabled
+            emphasized: enabled
+            implicitHeight: 36
+            height: 36
             // As wide as an anime's main button, in every state.
             implicitWidth: Math.max(200, implicitContentWidth + leftPadding + rightPadding)
             text: root.franchise.nextText || ""
-            icon.source: Theme.source(step === "play" ? Theme.icon.play
-                                      : step === "retry" ? Theme.icon.retry
-                                      : Theme.icon.download)
+            glyphCode: step === "play" ? Theme.icon.play
+                       : step === "retry" ? Theme.icon.retry
+                       : Theme.icon.download
+            iconSize: 14
             onClicked: root.continueWith(root.franchise.nextSlug)
+            Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+            Keys.onEnterPressed: event => { event.accepted = true; clicked() }
+            Keys.onSpacePressed: event => { event.accepted = true; clicked() }
         }
         trailing: [
             ToolButton {
@@ -253,7 +269,7 @@ Item {
         property string failure: ""
         width: 480
         title: "Añadir obra a la franquicia"
-        onAboutToShow: { failure = ""; choices.forceActiveFocus() }
+        onAboutToShow: { failure = ""; choices.forceActiveFocus(InputModality.reason) }
         ColumnLayout {
             width: 432
             ComboBox {

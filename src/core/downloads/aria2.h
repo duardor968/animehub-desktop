@@ -51,8 +51,19 @@ public:
     ~Aria2() override;
 
     void start();
+    // Shared by all native transfers. Zero removes the cap.
+    void setSpeedLimit(qint64 bytes_per_second);
+    [[nodiscard]] qint64 speedLimit() const {
+        return speed_limit_;
+    }
     [[nodiscard]] bool isReady() const {
         return ready_;
+    }
+    [[nodiscard]] bool isStarting() const {
+        return starting_;
+    }
+    [[nodiscard]] bool isActive() const {
+        return ready_ || starting_ || process_.state() != QProcess::NotRunning;
     }
 
     // Answers with the transfer id (gid).
@@ -66,15 +77,19 @@ public:
     using StatusDone = std::function<void(const std::expected<QList<Transfer>, QString>&)>;
     void status(const QStringList& gids, QObject* context, StatusDone done);
     // Asks aria2 to save its control files and exit; `done` runs once it has (or after 6 s).
-    void shutdown(std::function<void()> done);
+    // With `save_session` false (idle engine), stops immediately without waiting for aria2's
+    // three-second shutdown delay.
+    void shutdown(std::function<void()> done, bool save_session = true);
 
 signals:
     void ready();
     void failed(const QString& message);
+    void speedLimitFailed(const QString& message);
 
 private:
     void call(const QString& method, QJsonArray params, QObject* context, Done done);
     void waitUntilReady(int attempt);
+    void applySpeedLimit();
     void waitStopped(const QString& gid, int attempts_left, std::function<void()> stopped);
     [[nodiscard]] QUrl endpoint() const;
 
@@ -88,7 +103,11 @@ private:
     quint16 port_ = 0;
     quint64 next_id_ = 0;
     bool ready_ = false;
+    bool starting_ = false;
     bool stopping_ = false;
+    qint64 speed_limit_ = 0;
+    qint64 applied_limit_ = 0;
+    bool changing_limit_ = false;
 };
 
 } // namespace animehub::downloads

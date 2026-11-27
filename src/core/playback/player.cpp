@@ -11,6 +11,7 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QThreadPool>
 #include <QUrl>
 #include <QUuid>
 
@@ -20,8 +21,6 @@ namespace {
 constexpr int kConnectAttempts = 75; // 15 s for mpv to open its pipe
 constexpr qint64 kSaveIntervalMs = 5000;
 constexpr auto kPotPlayerSampleInterval = std::chrono::seconds(1);
-// How long a replaced PotPlayer gets to close before the next playback starts.
-constexpr auto kPotPlayerCloseWait = std::chrono::seconds(2);
 
 // "/seek=hh:mm:ss", as PotPlayer takes a start position.
 QString seekOption(qint64 ms) {
@@ -101,7 +100,12 @@ PotPlayerControl platformPotPlayer() {
         },
         .sample = platform::samplePotPlayer,
         .watchExit = platform::watchExit,
-        .close = [](qint64 pid) { platform::closePotPlayer(pid, kPotPlayerCloseWait); }};
+        .close =
+            [](qint64 pid) {
+                QThreadPool::globalInstance()->start([pid] {
+                    static_cast<void>(platform::closePotPlayer(pid, std::chrono::milliseconds{0}));
+                });
+            }};
 }
 
 std::expected<void, QString> Player::play(const PlayRequest& request) {

@@ -16,10 +16,14 @@ RowLayout {
 
     readonly property EpisodeModel episodes: view.episodes
 
-    implicitHeight: 48
+    height: 48
+    Layout.preferredHeight: 48
+    Layout.minimumHeight: 48
+    Layout.maximumHeight: 48
     spacing: 8
 
     Label {
+        Layout.alignment: Qt.AlignVCenter
         text: "Episodios"
         color: Theme.ink
         font.pixelSize: Theme.subtitle
@@ -28,12 +32,14 @@ RowLayout {
     }
 
     Label {
+        Layout.alignment: Qt.AlignVCenter
         text: "(" + root.episodes.total + ")"
         color: Theme.muted
         font.pixelSize: Theme.subtitle
     }
 
     BusyIndicator {
+        Layout.alignment: Qt.AlignVCenter
         Layout.preferredWidth: 20
         Layout.preferredHeight: 20
         running: root.view.refreshing
@@ -42,6 +48,7 @@ RowLayout {
 
     CheckBox {
         id: selectPage
+        Layout.alignment: Qt.AlignVCenter
         visible: root.selecting && root.episodes.total > 2
         Layout.leftMargin: 16
         // A page is only worth naming when there are several.
@@ -62,6 +69,7 @@ RowLayout {
     }
 
     Pager {
+        Layout.alignment: Qt.AlignVCenter
         visible: root.episodes.pageCount > 1
         episodes: root.episodes
         onMoved: root.moved()

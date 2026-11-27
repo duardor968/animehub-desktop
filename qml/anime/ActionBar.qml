@@ -4,18 +4,16 @@ import QtQuick.Layouts
 import AnimeHub
 
 // The band under a page's header, as Steam's under a game: the main action on the left with the
-// page's own buttons beside it (favourite, alerts, more), then the figures. The page scrolls it
-// with the header until it reaches the top, where it stays, led there by the poster and title it
-// stands for.
+// page's own buttons beside it (favourite, alerts, more), then the figures. Once pinned to the top
+// during scroll, it stays strictly single-row (~68 px) so it never jumps taller or slices content.
 Rectangle {
     id: root
 
     // [{caption, value, progress (< 0: no bar), problem, action}]. Beside the actions while they
-    // all fit there; otherwise on a line of their own under them, wrapping as they need: none is
-    // ever left out. With `action`, the name of what its button next to the value does
-    // (figureAction).
+    // all fit there; when unpinned on a narrow pane they wrap cleanly beneath; when pinned the bar
+    // stays strictly single-row.
     property var figures: []
-    // Stuck to the top: a hairline parts it from what scrolls under it.
+    // Stuck to the top: elevated pane surface and full bottom hairline separate it from scrolling rows.
     property bool pinned: false
     // What the page is about, shown once the header that says it has scrolled away.
     property string title
@@ -41,11 +39,37 @@ Rectangle {
         return true
     }
 
-    // The figures under the actions: they do not fit beside them.
-    readonly property bool stacked: figures.length > 0 && figureFlow.needed > figureArea.width
+    readonly property int singleRowHeight: 68
+    // Narrow pane (e.g. 820x600 with the library sidebar): secondary actions compact so trailing
+    // icons never clip.
+    readonly property bool compact: width < 760
+    readonly property real actionsWidth: leading.implicitWidth
+                                         + (leading.implicitWidth > 0 && trailingRow.implicitWidth > 0 ? 8 : 0)
+                                         + trailingRow.implicitWidth
+    readonly property real identityRoom: Math.max(0, root.contentWidth - actionsWidth)
+    readonly property bool showIdentity: root.pinned && root.width >= 680 && identityRoom >= 140
+    readonly property real identityTargetWidth: showIdentity
+                                                ? Math.min(identityRow.implicitWidth + 24, identityRoom)
+                                                : 0
+    readonly property real figureGap: actionsWidth > 0 ? (compact ? 16 : 28) : 0
+    readonly property real unpinnedFigureWidth: Math.max(0, root.contentWidth - actionsWidth - figureGap)
+    readonly property real availableFigureWidth: Math.max(0, root.contentWidth - actionsWidth
+                                                          - Math.max(identityTargetWidth, identity.Layout.preferredWidth)
+                                                          - figureGap)
 
-    implicitHeight: stacked ? 72 + figureFlow.height + 16 : 72
-    color: Theme.pane
+    // Unpinned height stays stable for the header's barSlot so pinning never shifts list.contentY.
+    readonly property bool unpinnedStacked: figures.length > 0 && figureFlow.needed > unpinnedFigureWidth
+    readonly property real unpinnedHeight: unpinnedStacked
+                                           ? singleRowHeight + figureFlow.height + 16
+                                           : singleRowHeight
+    // Strictly single-row while pinned: never flips stacked mid-scroll when showIdentity appears.
+    readonly property bool stacked: !root.pinned && unpinnedStacked
+    readonly property bool showFigures: figures.length > 0
+                                        && (!root.pinned || figureFlow.needed <= availableFigureWidth)
+
+    implicitHeight: root.pinned ? singleRowHeight : unpinnedHeight
+    color: root.pinned ? Theme.pane : Theme.canvas
+    Behavior on color { ColorAnimation { duration: 140 } }
     Accessible.role: Accessible.ToolBar
 
     // A caption over its value, as Steam lays out its figures; a bar under it for a share.
@@ -110,7 +134,10 @@ Rectangle {
         id: head
         activeFocusOnTab: root.titleItem !== null
         Accessible.ignored: true
-        onActiveFocusChanged: if (activeFocus) root.titleItem.forceActiveFocus(Qt.BacktabFocusReason)
+        onActiveFocusChanged: {
+            if (activeFocus && root.titleItem)
+                root.titleItem.forceActiveFocus(Qt.BacktabFocusReason)
+        }
     }
 
     // The bar covers the page: presses on its empty parts must not reach what is under it.
@@ -126,24 +153,26 @@ Rectangle {
         anchors.bottom: parent.bottom
         height: 1
         color: Theme.stroke
-        visible: root.pinned
+        opacity: root.pinned ? 1.0 : 0.65
+        Behavior on opacity { NumberAnimation { duration: 140 } }
     }
 
     RowLayout {
         id: band
         x: Theme.section
         width: root.contentWidth
-        height: 72
+        height: root.singleRowHeight
         spacing: 0
 
         // Pinned, what the bar acts on; it opens from the left edge, easing the button aside.
+        // Hidden on narrow panes (< 680 px) or when space is tight so trailing actions never clip.
         Item {
             id: identity
 
-            property real shown: root.pinned ? 1 : 0
+            property real shown: root.showIdentity ? 1 : 0
             Behavior on shown { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
-            Layout.preferredWidth: (identityRow.implicitWidth + 24) * shown
+            Layout.preferredWidth: Math.min(identityRow.implicitWidth + 24, root.identityRoom) * shown
             Layout.fillHeight: true
             visible: shown > 0
             opacity: shown
@@ -152,20 +181,21 @@ Rectangle {
             RowLayout {
                 id: identityRow
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 12
+                spacing: 10
 
                 Poster {
-                    Layout.preferredWidth: 30
-                    Layout.preferredHeight: 42
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 40
                     source: root.posterUrl
                 }
 
                 Label {
                     visible: text !== ""
-                    Layout.maximumWidth: 200
+                    Layout.maximumWidth: Math.min(root.compact ? 120 : 200,
+                                                  Math.max(0, root.identityRoom - 62))
                     text: root.title
                     color: Theme.ink
-                    font.pixelSize: Theme.body
+                    font.pixelSize: 13
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
@@ -176,22 +206,24 @@ Rectangle {
         RowLayout {
             id: leading
             Layout.fillWidth: false
+            Layout.alignment: Qt.AlignVCenter
             spacing: 8
         }
 
         RowLayout {
             id: trailingRow
             Layout.fillWidth: false
+            Layout.alignment: Qt.AlignVCenter
             Layout.leftMargin: leading.implicitWidth > 0 ? 8 : 0
             spacing: 4
         }
 
-        // Where the figures go while they fit beside the actions.
+        // Where the figures go while they fit beside the actions. Zero margin when stacked or
+        // empty so narrow panes keep 100 % of contentWidth for actions and trailing buttons.
         Item {
             id: figureArea
-            // Apart from the actions, or on the edge where there are none.
-            Layout.leftMargin: leading.implicitWidth + trailingRow.implicitWidth > 0 ? 28 : 0
-            Layout.rightMargin: 16
+            Layout.leftMargin: root.showFigures && !root.stacked ? root.figureGap : 0
+            Layout.rightMargin: 0
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.minimumWidth: 0
@@ -215,8 +247,9 @@ Rectangle {
             return used
         }
 
+        visible: root.showFigures
         x: root.stacked ? band.x : band.x + figureArea.x
-        y: root.stacked ? 72 - 8 : (72 - height) / 2
+        y: root.stacked ? root.singleRowHeight - 8 : (root.singleRowHeight - height) / 2
         width: root.stacked ? root.contentWidth : figureArea.width
         spacing: 28
 
@@ -251,8 +284,11 @@ Rectangle {
         activeFocusOnTab: root.titleItem !== null
         Accessible.ignored: true
         onActiveFocusChanged: {
-            if (activeFocus)
-                root.titleItem.nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocusReason)
+            if (activeFocus && root.titleItem) {
+                const next = root.titleItem.nextItemInFocusChain(true)
+                if (next)
+                    next.forceActiveFocus(Qt.TabFocusReason)
+            }
         }
     }
 }

@@ -227,6 +227,11 @@ private:
     void cancelTask(qint64 id);
     void requeue(qint64 id);
 
+    [[nodiscard]] bool hasPendingNativeWork() const;
+    void ensureAria2Started();
+    void syncEpisodeIndex(const Task& task);
+    void removeFromEpisodeIndex(const Task& task);
+
     [[nodiscard]] QList<qint64> idsOf(const QString& slug) const;
     void sortByQueue(QList<Task>& tasks) const;
     [[nodiscard]] QStringList seriesOrder() const;
@@ -235,6 +240,7 @@ private:
     Services services_;
     std::function<DownloadSettings()> settings_;
     QHash<qint64, Task> tasks_;
+    QHash<QString, QHash<double, QList<qint64>>> active_by_episode_;
     QHash<qint64, Live> live_;
     QTimer poll_timer_;
     QTimer jd_poll_timer_;

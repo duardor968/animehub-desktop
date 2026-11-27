@@ -79,15 +79,14 @@ Rectangle {
             onClicked: root.view.markSelection(false)
         }
 
-        Button {
+        AccentButton {
             id: download
             anchors.verticalCenter: parent.verticalCenter
-            // Fluent keeps a disabled accent button blue: only a button that can be pressed is.
-            highlighted: enabled
+            emphasized: enabled
             enabled: root.view.episodes.selectedMissing > 0
             // What it queues, which the selection may not all be: "Descargar 5 episodios".
             text: enabled ? "Descargar " + root.view.episodes.selectedMissingText : "Descargar"
-            icon.source: Theme.source(Theme.icon.download)
+            glyphCode: Theme.icon.download
             onClicked: root.view.downloadSelection()
         }
 

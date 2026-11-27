@@ -44,9 +44,31 @@ class AnimeView final : public QObject {
     Q_PROPERTY(QUrl backdropUrl READ backdropUrl NOTIFY changed)
     // "9,1 (48 mil)": score and votes; empty without a score.
     Q_PROPERTY(QString score READ score NOTIFY changed)
+    // "7,4": Spanish-formatted score alone; empty when missing or <= 0.
+    Q_PROPERTY(QString scoreText READ scoreText NOTIFY changed)
+    // "1.842 votos" / "1 voto"; empty when votes <= 0.
+    Q_PROPERTY(QString votesText READ votesText NOTIFY changed)
+    // Explicit attribution for the community score shown on the detail panel.
+    Q_PROPERTY(QString scoreSource READ scoreSource CONSTANT)
     // "TV · 2023 · Finalizado · 28 episodios"
     Q_PROPERTY(QString facts READ facts NOTIFY changed)
+    // "En emisión", "Finalizado", "Próximamente", "En pausa", or empty if unknown.
+    Q_PROPERTY(QString statusText READ statusText NOTIFY changed)
+    // "airing", "finished", "upcoming", "paused", or empty.
+    Q_PROPERTY(QString statusTone READ statusTone NOTIFY changed)
+    // Plain metadata without status: "TV · 2026 · 8 episodios" or "Película · 2024".
+    Q_PROPERTY(QString metaLine READ metaLine NOTIFY changed)
     Q_PROPERTY(QString genres READ genres NOTIFY changed)
+    // Interactive genre chips: [{name, slug}] from API detail, or slugified fallback offline.
+    Q_PROPERTY(QVariantList genreChips READ genreChips NOTIFY changed)
+    // Link to the anime on AnimeAV1 (empty offline or when unavailable).
+    Q_PROPERTY(QString sourceUrl READ sourceUrl NOTIFY changed)
+    Q_PROPERTY(bool mature READ mature NOTIFY changed)
+    // Semantic status chip only (empty when status is unknown): [{text, tone}].
+    Q_PROPERTY(QVariantList chips READ chips NOTIFY changed)
+    // Structured metadata rows for the page's side column: [{label, name, value}], empty omitted.
+    Q_PROPERTY(QVariantList details READ details NOTIFY changed)
+    Q_PROPERTY(bool hasDetails READ hasDetails NOTIFY changed)
     Q_PROPERTY(QUrl trailerUrl READ trailerUrl NOTIFY changed)
     // A film or any work of one episode: no episode list.
     Q_PROPERTY(bool single READ single NOTIFY changed)
@@ -57,20 +79,23 @@ class AnimeView final : public QObject {
     Q_PROPERTY(bool notify READ notify NOTIFY changed)
     Q_PROPERTY(bool autoDownload READ autoDownload NOTIFY changed)
 
-    // The main button says what a press does: a series not begun, with nothing on disk or on
-    // its way, is downloaded whole ("Descargar todo (13)"); one whose batch is on its way is
-    // paused or resumed whole ("Pausar la descarga (13)"); otherwise it follows the episode to
-    // watch next ("Ver ep. 9", "Pausar · 45 %", "Reanudar ep. 9"). Where a download is goes in
-    // the figures. Hidden while there is nothing to do but wait for the next airing (a figure
-    // says when); disabled while a file is checked.
+    // Dual-Role main action: Play/Rewatch when the target episode is on disk (paired with the
+    // secondary batch download SplitButton whenever others are missing); otherwise stays on global
+    // DownloadAll while unqueued episodes remain, switching to PauseAll/ResumeAll/Failed only once
+    // every missing episode is already in the queue. Single-episode works follow their one task.
     Q_PROPERTY(PrimaryAction primaryAction READ primaryAction NOTIFY changed)
     Q_PROPERTY(QString primaryText READ primaryText NOTIFY changed)
     Q_PROPERTY(bool primaryEnabled READ primaryEnabled NOTIFY changed)
     // What a press does to the download, in full: "Pausar la descarga del episodio 9". Empty
     // when the text says it all.
     Q_PROPERTY(QString primaryHint READ primaryHint NOTIFY changed)
-    // Share of that episode's file already transferred (Downloading, Paused).
+    // Share of that episode's file already transferred (Downloading, Paused, PauseAll, ResumeAll).
     Q_PROPERTY(double primaryProgress READ primaryProgress NOTIFY changed)
+    // True when primaryAction is Play or Rewatch and unqueued episodes remain to download.
+    Q_PROPERTY(bool showSecondaryDownload READ showSecondaryDownload NOTIFY changed)
+    // Label for the batch download SplitButton: "Descargar ep. 5", "Descargar restantes (7)", or
+    // "Descargar todo (8)".
+    Q_PROPERTY(QString batchDownloadText READ batchDownloadText NOTIFY changed)
     // Episodes neither on disk nor on their way; of those, the unwatched ones. As a label
     // names them: "ep. 9", "7 episodios".
     Q_PROPERTY(int missingCount READ missingCount NOTIFY changed)
@@ -138,8 +163,20 @@ public:
     [[nodiscard]] QUrl posterUrl() const;
     [[nodiscard]] QUrl backdropUrl() const;
     [[nodiscard]] QString score() const;
+    [[nodiscard]] QString scoreText() const;
+    [[nodiscard]] QString votesText() const;
+    [[nodiscard]] QString scoreSource() const;
     [[nodiscard]] QString facts() const;
+    [[nodiscard]] QString statusText() const;
+    [[nodiscard]] QString statusTone() const;
+    [[nodiscard]] QString metaLine() const;
     [[nodiscard]] QString genres() const;
+    [[nodiscard]] QVariantList genreChips() const;
+    [[nodiscard]] QString sourceUrl() const;
+    [[nodiscard]] bool mature() const;
+    [[nodiscard]] QVariantList chips() const;
+    [[nodiscard]] QVariantList details() const;
+    [[nodiscard]] bool hasDetails() const;
     [[nodiscard]] QUrl trailerUrl() const;
     [[nodiscard]] bool single() const;
     [[nodiscard]] bool airing() const;
@@ -155,6 +192,8 @@ public:
     [[nodiscard]] bool primaryEnabled() const;
     [[nodiscard]] QString primaryHint() const;
     [[nodiscard]] double primaryProgress() const;
+    [[nodiscard]] bool showSecondaryDownload() const;
+    [[nodiscard]] QString batchDownloadText() const;
     [[nodiscard]] int missingCount() const {
         return static_cast<int>(summary_.missing.size());
     }
@@ -247,6 +286,7 @@ public:
     Q_INVOKABLE bool hasFolder() const;
     Q_INVOKABLE void openFolder();
     Q_INVOKABLE void openTrailer();
+    Q_INVOKABLE void openSource();
     Q_INVOKABLE void setInLibrary(bool value);
     Q_INVOKABLE void setFavorite(bool value);
     Q_INVOKABLE void setNotify(bool value);

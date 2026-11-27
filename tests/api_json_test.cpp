@@ -54,11 +54,13 @@ private slots:
 
         const auto schedule = json::decodeSchedule(fixture("schedule.json"));
         QVERIFY2(schedule, qPrintable(why(schedule)));
-        QVERIFY(!schedule->isEmpty());
-        QVERIFY(schedule->first().basisPublishedAt.isValid());
+        QVERIFY(!schedule->entries.isEmpty());
+        QVERIFY(schedule->entries.first().basisPublishedAt.isValid());
+        QVERIFY(!schedule->stale);
     }
 
-    // Every status the API sends reads back as itself; PAUSED is a series between seasons.
+    // Every status the API sends reads back as itself; PAUSED is emitted directly and UNKNOWN
+    // stays unknown even when a startDate is in the past.
     void statusKeysRoundTrip() {
         for (const auto status : {AnimeStatus::Airing, AnimeStatus::Finished, AnimeStatus::Upcoming,
                                   AnimeStatus::Paused}) {
@@ -67,6 +69,85 @@ private slots:
         QCOMPARE(statusKey(AnimeStatus::Paused), QStringLiteral("PAUSED"));
         QCOMPARE(statusFromKey(u"PAUSED"), AnimeStatus::Paused);
         QCOMPARE(statusFromKey(u"HIATUS"), AnimeStatus::Unknown);
+    }
+
+    void decodesPausedAndPreservesUnknownStatus() {
+        const auto paused = json::decodeAnime(edited(fixture("anime.json"), [](QJsonObject& root) {
+            auto data = root[u"data"].toObject();
+            data[u"status"] = QStringLiteral("PAUSED");
+            root[u"data"] = data;
+        }));
+        QVERIFY2(paused, qPrintable(why(paused)));
+        QCOMPARE(paused->status, AnimeStatus::Paused);
+
+        const auto unknown = json::decodeAnime(edited(fixture("anime.json"), [](QJsonObject& root) {
+            auto data = root[u"data"].toObject();
+            data[u"status"] = QStringLiteral("UNKNOWN");
+            auto relations = data[u"relations"].toArray();
+            if (!relations.isEmpty()) {
+                auto first = relations[0].toObject();
+                auto rel_anime = first[u"anime"].toObject();
+                rel_anime[u"status"] = QStringLiteral("UNKNOWN");
+                rel_anime[u"startDate"] = QStringLiteral("2020-04-01T00:00:00.000Z");
+                first[u"anime"] = rel_anime;
+                relations[0] = first;
+                data[u"relations"] = relations;
+            }
+            root[u"data"] = data;
+        }));
+        QVERIFY2(unknown, qPrintable(why(unknown)));
+        QVERIFY(unknown->startDate.isValid());
+        QCOMPARE(unknown->status, AnimeStatus::Unknown);
+        QVERIFY(!unknown->relations.isEmpty());
+        QCOMPARE(unknown->relations.first().anime.status, AnimeStatus::Unknown);
+    }
+
+    void decodesScheduleMetaStale() {
+        const auto stale_true =
+            json::decodeSchedule(edited(fixture("schedule.json"), [](QJsonObject& root) {
+                auto meta = root[u"meta"].toObject();
+                meta[u"stale"] = true;
+                root[u"meta"] = meta;
+            }));
+        QVERIFY2(stale_true, qPrintable(why(stale_true)));
+        QVERIFY(stale_true->stale);
+
+        const auto stale_false =
+            json::decodeSchedule(edited(fixture("schedule.json"), [](QJsonObject& root) {
+                auto meta = root[u"meta"].toObject();
+                meta[u"stale"] = false;
+                root[u"meta"] = meta;
+            }));
+        QVERIFY2(stale_false, qPrintable(why(stale_false)));
+        QVERIFY(!stale_false->stale);
+
+        const auto no_stale_field =
+            json::decodeSchedule(edited(fixture("schedule.json"), [](QJsonObject& root) {
+                auto meta = root[u"meta"].toObject();
+                meta.remove(u"stale");
+                root[u"meta"] = meta;
+            }));
+        QVERIFY2(no_stale_field, qPrintable(why(no_stale_field)));
+        QVERIFY(!no_stale_field->stale);
+
+        const auto no_meta = json::decodeSchedule(
+            edited(fixture("schedule.json"), [](QJsonObject& root) { root.remove(u"meta"); }));
+        QVERIFY2(no_meta, qPrintable(why(no_meta)));
+        QVERIFY(!no_meta->stale);
+
+        const auto bad_stale =
+            json::decodeSchedule(edited(fixture("schedule.json"), [](QJsonObject& root) {
+                auto meta = root[u"meta"].toObject();
+                meta[u"stale"] = QStringLiteral("yes");
+                root[u"meta"] = meta;
+            }));
+        QVERIFY(!bad_stale);
+        QCOMPARE(bad_stale.error(), QStringLiteral("meta.stale: expected boolean"));
+
+        const auto bad_meta = json::decodeSchedule(
+            edited(fixture("schedule.json"), [](QJsonObject& root) { root[u"meta"] = 7; }));
+        QVERIFY(!bad_meta);
+        QCOMPARE(bad_meta.error(), QStringLiteral("meta: expected object"));
     }
 
     void decodesAnimeDetail() {

@@ -81,7 +81,7 @@ public:
                CachePolicy policy = CachePolicy::CacheThenNetwork);
     void episodes(const QString& slug, int page, QObject* context, Callback<EpisodePage> done,
                   CachePolicy policy = CachePolicy::NetworkElseCache);
-    void schedule(QObject* context, Callback<QList<ScheduleEntry>> done,
+    void schedule(QObject* context, Callback<Schedule> done,
                   CachePolicy policy = CachePolicy::NetworkElseCache);
     void resolve(const QString& slug, const ResolveRequest& request, QObject* context,
                  Callback<Resolution> done);

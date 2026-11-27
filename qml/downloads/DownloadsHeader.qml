@@ -1,22 +1,25 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 import QtQuick.Layouts
 import AnimeHub
 
-// The top of the Downloads page, as in Steam: the series on view over its art, with its
-// episode, progress and failures as wide as the room left of the speed; the speed of the last
-// minutes on the right; in the corner what acts on the series and on every download. At rest it
-// is one line. The series is not repeated in the line below: its title and episode line are its
-// row, and unfold into its episodes as the rows below do.
+// Compact free-scrolling Steam-style Hero for the Downloads page (Ronda 2 C + Ronda 3):
+// scrolls out of view inside DownloadsPage's Flickable, uses headerBackdrop or a GPU MultiEffect
+// blur of headerPoster (with AmbientBackdrop fallback while loading) fading into Theme.canvas,
+// keeps headerTitle free of any hover fill box, exposes a neutral secondary expand/collapse button
+// for headerTasks, and hosts the live SpeedGraph + SpeedLimitPopover in both active and idle states.
 Rectangle {
     id: root
+    objectName: "downloadsHeader"
 
     required property DownloadsView downloads
-    // The series on view is unfolded into its episodes, under the header.
-    property bool expanded
+    required property AppSettings settings
+    property bool expanded: false
 
     signal toggled(string slug)
-    // The series' menu, which also holds what the page's own would.
+    signal animeRequested(string slug)
+    // The hero series' menu, which also holds the page's own "Abrir la carpeta de descargas" entry.
     signal menuRequested(var row, Item anchor)
     signal folderRequested()
 
@@ -24,334 +27,603 @@ Rectangle {
     readonly property bool idle: mode === DownloadsView.Idle
     readonly property bool busy: mode === DownloadsView.Active && downloads.headerProgress === 0
     readonly property bool wide: width >= 1280
-    // The corner's line: at rest, the whole header.
-    readonly property int topRoom: pageActions.y + pageActions.height + 16
+    readonly property bool narrow: width < 940
+    readonly property bool hasBackdrop: !idle && downloads.headerBackdrop !== ""
+                                        && backdropImage.status !== Image.Error
+    readonly property string limitButtonText: settings.nativeLimitEnabled
+                                              ? "Límite: " + settings.speedLimitText
+                                              : "Limitar velocidad"
+    readonly property string summaryLine: downloads.headerActiveSummary !== ""
+                                          ? downloads.headerActiveSummary
+                                          : downloads.headerEpisode
+    readonly property color summaryColor: mode === DownloadsView.Failed ? Theme.danger
+                                          : mode === DownloadsView.Paused ? Theme.warning
+                                          : Theme.muted
 
-    implicitHeight: idle ? topRoom
-                         : Math.max(200, topRoom + subject.implicitHeight + 28,
-                                    topRoom + speed.implicitHeight + 28)
-    Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-    color: Theme.pane
+    onIdleChanged: {
+        if (limitEditor.opened)
+            limitEditor.close()
+    }
+
+    implicitHeight: idle ? 56 : Math.max(158, heroRow.implicitHeight + 36)
+    Behavior on implicitHeight { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+    color: idle ? Theme.pane : Theme.canvas
     clip: true
 
-    // A figure of the session: its value over its name, right-aligned in a third of the block,
-    // so the last one ends where the rows below do and none moves as its value changes.
-    component Figure: ColumnLayout {
-        property alias value: valueLabel.text
-        property alias label: nameLabel.text
-        Layout.fillWidth: true
-        Layout.preferredWidth: 1
-        spacing: 2
-        Accessible.role: Accessible.StaticText
-        Accessible.name: label + ": " + value
+    // Subtle pill trigger for the speed limit popover, shared between the active telemetry block
+    // and the idle header so an active speed cap is always visible and reachable.
+    component LimitTrigger: AbstractButton {
+        id: control
 
-        // Filling, so the column can take its third: a layout grows no wider than its children.
-        Label {
-            id: valueLabel
-            Layout.fillWidth: true
-            horizontalAlignment: Text.AlignRight
-            color: Theme.ink
-            font.pixelSize: Theme.body
-            font.weight: Font.DemiBold
-            Accessible.ignored: true
+        readonly property bool active: root.settings.nativeLimitEnabled
+        readonly property color ink: active ? Theme.limitLine
+                                            : hovered ? Theme.ink
+                                            : !root.idle ? Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.86)
+                                            : Theme.muted
+
+        text: root.limitButtonText
+        hoverEnabled: true
+        focusPolicy: Qt.StrongFocus
+        topPadding: 4
+        bottomPadding: 4
+        leftPadding: 8
+        rightPadding: 7
+        Accessible.role: Accessible.Button
+        Accessible.name: active ? "Límite de velocidad: " + root.settings.speedLimitText
+                                : "Limitar velocidad de descarga"
+        Accessible.description: "Abrir control de límite de velocidad"
+        Accessible.onPressAction: clicked()
+        Keys.onReturnPressed: clicked()
+        Keys.onEnterPressed: clicked()
+        ToolTip.visible: hovered && !limitEditor.opened
+        ToolTip.text: active ? "Cambiar o quitar el límite de velocidad"
+                             : "Limitar velocidad de descarga"
+
+        background: Rectangle {
+            radius: Theme.radius
+            color: control.active
+                   ? Qt.rgba(Theme.limitLine.r, Theme.limitLine.g, Theme.limitLine.b,
+                             control.down ? 0.24 : control.hovered ? 0.18 : 0.12)
+                   : control.down ? Theme.raised
+                   : control.hovered ? Theme.hover
+                   : !root.idle ? Qt.rgba(Theme.pane.r, Theme.pane.g, Theme.pane.b, 0.56)
+                   : "transparent"
+            border.width: control.active ? 1 : 0
+            border.color: Qt.rgba(Theme.limitLine.r, Theme.limitLine.g, Theme.limitLine.b,
+                                  control.hovered || control.down ? 0.38 : 0.22)
+
+            FocusFrame { visible: control.activeFocus && InputModality.keyboard }
         }
-        Label {
-            id: nameLabel
-            Layout.fillWidth: true
-            horizontalAlignment: Text.AlignRight
-            color: Theme.muted
-            font.pixelSize: Theme.caption
-            Accessible.ignored: true
+
+        contentItem: RowLayout {
+            spacing: 5
+
+            Label {
+                text: control.text
+                color: control.ink
+                font.pixelSize: 12
+                font.weight: control.active ? Font.DemiBold : Font.Medium
+                Accessible.ignored: true
+            }
+            Glyph {
+                glyph: limitEditor.opened && limitEditor.anchorButton === control
+                       ? Theme.icon.collapseAll : Theme.icon.expandAll
+                size: 10
+                color: control.ink
+            }
         }
     }
 
+    // Layer 0 (Fallback while backdrop/poster loads, and under software renderers):
+    // smooth dominant-color ambient glow into Theme.canvas.
+    AmbientBackdrop {
+        anchors.fill: parent
+        visible: !root.idle
+        backdropUrl: ""
+        posterUrl: root.idle ? "" : root.downloads.headerPoster
+        surfaceColor: Theme.canvas
+        leftScrim: false
+    }
+
+    // Layer 1A: Real anime backdrop when available.
     Image {
-        id: art
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: Math.min(parent.width * 0.62, 860)
-        source: root.idle ? "" : root.downloads.headerArt
+        id: backdropImage
+        anchors.fill: parent
+        visible: !root.idle && root.downloads.headerBackdrop !== ""
+        source: visible ? root.downloads.headerBackdrop : ""
+        fillMode: Image.PreserveAspectCrop
+        verticalAlignment: Image.AlignVCenter
+        asynchronous: true
+        cache: true
+        sourceSize.width: Math.min(1920, Math.max(640, Math.ceil(width * Screen.devicePixelRatio)))
+        opacity: status === Image.Ready ? 0.56 : 0
+        Behavior on opacity { NumberAnimation { duration: 220 } }
+    }
+
+    // Layer 1B: GPU MultiEffect blur of the poster when the anime has no dedicated backdrop.
+    Image {
+        id: posterBlurSource
+        anchors.fill: parent
+        visible: false
+        source: !root.idle && !root.hasBackdrop ? root.downloads.headerPoster : ""
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
-        sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
-        opacity: status === Image.Ready ? 0.5 : 0
-        Behavior on opacity { NumberAnimation { duration: 250 } }
+        cache: true
+        sourceSize.width: 240
+        sourceSize.height: 340
     }
 
-    // Siblings, not children: they must not inherit the image's opacity to reach the pane.
+    MultiEffect {
+        id: posterBlurEffect
+        anchors.fill: parent
+        visible: !root.idle && !root.hasBackdrop && posterBlurSource.status === Image.Ready
+        source: posterBlurSource
+        blurEnabled: true
+        blur: 1.0
+        blurMax: 64
+        saturation: 0.15
+        autoPaddingEnabled: false
+        opacity: visible ? 0.34 : 0
+        Behavior on opacity { NumberAnimation { duration: 220 } }
+    }
+
+    // Layer 2: Clean dark readability gradients dissolving smoothly into Theme.canvas.
     Rectangle {
-        anchors.fill: art
-        visible: art.status === Image.Ready
+        anchors.fill: parent
+        visible: !root.idle
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0.28) }
+            GradientStop { position: 0.62; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0.68) }
+            GradientStop { position: 1.0; color: Theme.canvas }
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        visible: !root.idle
         gradient: Gradient {
             orientation: Gradient.Horizontal
-            // Darker under the text on the left, open in the middle, gone into the pane on the right.
-            GradientStop { position: 0.0; color: Qt.rgba(Theme.pane.r, Theme.pane.g, Theme.pane.b, 0.5) }
-            GradientStop { position: 0.4; color: Qt.rgba(Theme.pane.r, Theme.pane.g, Theme.pane.b, 0.1) }
-            GradientStop { position: 1.0; color: Theme.pane }
-        }
-    }
-    Rectangle {
-        anchors.fill: art
-        visible: art.status === Image.Ready
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: Qt.rgba(Theme.pane.r, Theme.pane.g, Theme.pane.b, 0.1) }
-            GradientStop { position: 1.0; color: Qt.rgba(Theme.pane.r, Theme.pane.g, Theme.pane.b, 0.9) }
+            GradientStop { position: 0.0; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0.72) }
+            GradientStop { position: 0.52; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0.36) }
+            GradientStop { position: 1.0; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0.48) }
         }
     }
 
-    // At rest, the line says so beside the corner's buttons.
-    Label {
-        anchors.left: parent.left
+    // Idle state: compact single-row top bar with title, speed limit trigger, and folder menu.
+    RowLayout {
+        anchors.fill: parent
         anchors.leftMargin: 32
-        anchors.right: pageActions.left
-        anchors.rightMargin: 16
-        anchors.verticalCenter: pageActions.verticalCenter
+        anchors.rightMargin: 32
+        spacing: 8
         visible: root.idle
-        text: root.downloads.headerTitle
-        color: Theme.muted
-        font.pixelSize: Theme.subtitle
-        font.weight: Font.DemiBold
-        elide: Text.ElideRight
-        Accessible.role: Accessible.Heading
-    }
-
-    // The series on view, as wide as the room left of the speed.
-    ColumnLayout {
-        id: subject
-        anchors.left: parent.left
-        anchors.leftMargin: 32
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 28
-        width: Math.max(0, speed.x - 48 - anchors.leftMargin)
-        visible: !root.idle
-        spacing: 4
-
-        // The series on view as the rows below are: pressed, it unfolds into its episodes, the
-        // chevron after its line saying which way it goes.
-        AbstractButton {
-            id: unfold
-            Layout.fillWidth: true
-            hoverEnabled: true
-            focusPolicy: Qt.StrongFocus
-            padding: 0
-            Accessible.role: Accessible.Button
-            Accessible.name: root.downloads.headerTitle + ", " + root.downloads.headerEpisode
-                             + ", episodios"
-            // QML has no expanded state: a toggle reads as one.
-            Accessible.checkable: true
-            Accessible.checked: root.expanded
-            Accessible.onPressAction: clicked()
-            onClicked: root.toggled(root.downloads.headerSlug)
-
-            background: Rectangle {
-                x: -12
-                y: -4
-                width: parent.width + 24
-                height: parent.height + 8
-                radius: Theme.radius
-                color: unfold.hovered ? Qt.rgba(Theme.hover.r, Theme.hover.g, Theme.hover.b, 0.6)
-                                      : "transparent"
-                border.width: unfold.visualFocus ? 2 : 0
-                border.color: Theme.accent
-            }
-
-            contentItem: ColumnLayout {
-                spacing: 4
-
-                Label {
-                    Layout.fillWidth: true
-                    text: root.downloads.headerTitle
-                    color: Theme.ink
-                    font.pixelSize: Theme.title
-                    font.weight: Font.DemiBold
-                    elide: Text.ElideRight
-                    Accessible.ignored: true
-                    ToolTip.visible: unfold.hovered && truncated
-                    ToolTip.text: text
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-
-                    Label {
-                        Layout.fillWidth: true
-                        Layout.maximumWidth: implicitWidth
-                        text: root.downloads.headerEpisode
-                        color: Theme.muted
-                        font.pixelSize: Theme.body
-                        elide: Text.ElideRight
-                        Accessible.ignored: true
-                    }
-                    Glyph {
-                        glyph: root.expanded ? "e70e" : "e70d"
-                        size: 12
-                        color: Theme.muted
-                    }
-                    Item { Layout.fillWidth: true }
-                }
-            }
-        }
-
-        // Who downloads the series and where, only when JDownloader takes part.
-        Repeater {
-            model: root.idle ? null : root.downloads.current
-
-            Label {
-                required property string engineLine
-                Layout.fillWidth: true
-                visible: engineLine !== ""
-                text: engineLine
-                color: Theme.muted
-                font.pixelSize: Theme.caption
-                elide: Text.ElideMiddle
-                ToolTip.visible: engineHover.hovered && truncated
-                ToolTip.text: text
-                HoverHandler { id: engineHover }
-            }
-        }
-        Repeater {
-            model: root.idle ? null : root.downloads.current
-
-            RowLayout {
-                required property string slug
-                required property bool canRetry
-                required property int failed
-                required property string failedText
-
-                visible: failed > 0
-                spacing: 4
-
-                Label {
-                    text: parent.failedText
-                    color: Theme.danger
-                    font.pixelSize: Theme.body
-                }
-                Button {
-                    visible: parent.canRetry
-                    flat: true
-                    text: "Reintentar fallidos"
-                    onClicked: root.downloads.retryFailed(parent.slug)
-                }
-            }
-        }
-
-        // What holds it back and what it does meanwhile (MEGA's quota), and the way past it
-        // once the user changed IP: every episode waiting for MEGA tries again.
-        RowLayout {
-            Layout.fillWidth: true
-            visible: root.downloads.headerNotice !== ""
-            spacing: 4
-
-            // Whole when it fits: a layout rounds a fractional width down and would elide it.
-            Label {
-                Layout.preferredWidth: Math.min(Math.ceil(implicitWidth),
-                                                subject.width - retryNow.implicitWidth - 4)
-                text: root.downloads.headerNotice
-                color: Theme.warning
-                font.pixelSize: Theme.body
-                elide: Text.ElideRight
-                ToolTip.visible: noticeHover.hovered && truncated
-                ToolTip.text: text
-                HoverHandler { id: noticeHover }
-            }
-            Button {
-                id: retryNow
-                flat: true
-                text: "Reintentar ahora"
-                onClicked: root.downloads.retryMegaQuota()
-            }
-            Item { Layout.fillWidth: true }
-        }
-
-        // Nothing measured yet (looking for the file, opening JDownloader): a moving bar.
-        ProgressLine {
-            Layout.fillWidth: true
-            Layout.topMargin: 12
-            implicitHeight: 4
-            visible: !root.busy
-            value: root.downloads.headerProgress
-        }
-        ProgressBar {
-            Layout.fillWidth: true
-            Layout.topMargin: 12
-            visible: root.busy
-            indeterminate: true
-            Accessible.name: root.downloads.headerDetail
-        }
 
         Label {
             Layout.fillWidth: true
-            Layout.topMargin: 4
-            text: root.downloads.headerDetail
+            text: root.downloads.headerTitle
             color: Theme.muted
-            font.pixelSize: Theme.caption
+            font.pixelSize: Theme.subtitle
+            font.weight: Font.DemiBold
             elide: Text.ElideRight
-        }
-    }
-
-    // What acts on every download, as Steam's and as the bottom bar's and the tray's, and on
-    // the series on view; one menu holds both.
-    RowLayout {
-        id: pageActions
-        anchors.right: parent.right
-        anchors.rightMargin: 32
-        anchors.top: parent.top
-        anchors.topMargin: 16
-        spacing: 4
-
-        Button {
-            Layout.rightMargin: 4
-            visible: root.downloads.canPauseAll || root.downloads.canResumeAll
-            text: root.downloads.canPauseAll ? "Pausar todo" : "Reanudar todo"
-            icon.source: Theme.source(root.downloads.canPauseAll ? Theme.icon.pause
-                                                                 : Theme.icon.play)
-            onClicked: root.downloads.canPauseAll ? root.downloads.pauseAll()
-                                                  : root.downloads.resumeAll()
+            Accessible.role: Accessible.Heading
         }
 
-        Repeater {
-            id: seriesActions
-            model: root.idle ? null : root.downloads.current
-
-            // What the series rows below offer, for the series on view.
-            RowLayout {
-                id: actions
-
-                required property string slug
-                required property string title
-                required property bool first
-                required property bool hasFolder
-                required property string cancelText
-                required property int cancelCount
-                required property bool canPause
-                required property bool canRetryNow
-                required property bool running
-
-                spacing: 4
-
-                ToolButton {
-                    id: more
-                    icon.source: Theme.source(Theme.icon.more)
-                    display: AbstractButton.IconOnly
-                    text: "Más opciones"
-                    ToolTip.visible: hovered
-                    ToolTip.text: text
-                    onClicked: root.menuRequested(actions, more)
-                }
-            }
+        LimitTrigger {
+            id: idleLimitButton
+            objectName: visible ? "nativeLimitButton" : ""
+            visible: root.idle
+            onClicked: limitEditor.toggleFor(idleLimitButton)
         }
 
         ToolButton {
             id: pageMore
-            visible: seriesActions.count === 0
+            visible: root.idle
             icon.source: Theme.source(Theme.icon.more)
             display: AbstractButton.IconOnly
             text: "Más opciones de Descargas"
             ToolTip.visible: hovered
             ToolTip.text: "Más opciones"
             onClicked: pageMenu.show(pageMore, true)
+        }
+    }
+
+    // Active / Paused / Waiting / Failed Hero: compact ~158-168 px horizontal composition.
+    RowLayout {
+        id: heroRow
+        visible: !root.idle
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.leftMargin: 32
+        anchors.rightMargin: 32
+        spacing: 18
+
+        Poster {
+            id: poster
+            Layout.preferredWidth: 76
+            Layout.preferredHeight: 108
+            Layout.alignment: Qt.AlignVCenter
+            visible: root.downloads.headerPoster.toString() !== ""
+            source: root.downloads.headerPoster
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.14)
+            Accessible.ignored: true
+
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: root.animeRequested(root.downloads.headerSlug) }
+        }
+
+        ColumnLayout {
+            id: subject
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.alignment: Qt.AlignVCenter
+            spacing: 5
+
+            // Clean interactive title: NO gray hover rectangle box; subtle click opens the anime.
+            AbstractButton {
+                id: titleButton
+                Layout.minimumWidth: 0
+                Layout.maximumWidth: subject.width
+                padding: 0
+                hoverEnabled: true
+                focusPolicy: Qt.StrongFocus
+                Accessible.role: Accessible.Heading
+                Accessible.name: root.downloads.headerTitle
+                Accessible.description: "Abrir ficha del anime"
+                Accessible.onPressAction: clicked()
+                onClicked: root.animeRequested(root.downloads.headerSlug)
+
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+
+                background: Item {
+                    FocusFrame {
+                        visible: titleButton.activeFocus && InputModality.keyboard
+                        radiusInside: 2
+                    }
+                }
+
+                contentItem: Label {
+                    id: titleLabel
+                    text: root.downloads.headerTitle
+                    color: titleButton.hovered ? "#ffffff" : Theme.ink
+                    font.pixelSize: root.narrow ? 18 : 20
+                    font.weight: Font.DemiBold
+                    font.underline: titleButton.hovered
+                    elide: Text.ElideRight
+                    Accessible.ignored: true
+                    ToolTip.visible: titleButton.hovered && truncated
+                    ToolTip.text: text
+                }
+            }
+
+            // Multi-episode or single-episode live summary.
+            Label {
+                Layout.fillWidth: true
+                text: root.summaryLine
+                color: root.summaryColor
+                font.pixelSize: 13
+                elide: Text.ElideRight
+                ToolTip.visible: summaryHover.hovered && truncated
+                ToolTip.text: text
+                HoverHandler { id: summaryHover }
+            }
+
+            // JDownloader destination line and partial failure retry action (0 px when absent).
+            Repeater {
+                model: root.idle ? null : root.downloads.current
+
+                ColumnLayout {
+                    id: currentMeta
+
+                    required property string slug
+                    required property string engineLine
+                    required property bool canRetry
+                    required property int failed
+                    required property string failedText
+
+                    Layout.fillWidth: true
+                    visible: engineLine !== "" || (failed > 0 && (canRetry || root.mode !== DownloadsView.Failed))
+                    spacing: 4
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: currentMeta.engineLine !== ""
+                        text: currentMeta.engineLine
+                        color: Theme.muted
+                        font.pixelSize: 12
+                        elide: Text.ElideMiddle
+                        ToolTip.visible: engineHover.hovered && truncated
+                        ToolTip.text: text
+                        HoverHandler { id: engineHover }
+                    }
+
+                    RowLayout {
+                        visible: currentMeta.failed > 0 && (currentMeta.canRetry || root.mode !== DownloadsView.Failed)
+                        spacing: 8
+
+                        Label {
+                            visible: root.mode !== DownloadsView.Failed
+                            text: currentMeta.failedText
+                            color: Theme.danger
+                            font.pixelSize: 12
+                        }
+
+                        Button {
+                            visible: currentMeta.canRetry
+                            text: currentMeta.failed === 1 ? "Reintentar" : "Reintentar fallidos"
+                            topPadding: 4
+                            bottomPadding: 4
+                            onClicked: root.downloads.retryFailed(currentMeta.slug)
+                        }
+                    }
+                }
+            }
+
+            // MEGA quota wait notice + immediate retry button (0 px when absent).
+            RowLayout {
+                Layout.fillWidth: true
+                visible: root.downloads.headerNotice !== ""
+                spacing: 4
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: Math.ceil(implicitWidth)
+                    text: root.downloads.headerNotice
+                    color: Theme.warning
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                    ToolTip.visible: noticeHover.hovered && truncated
+                    ToolTip.text: text
+                    HoverHandler { id: noticeHover }
+                }
+
+                Button {
+                    id: retryNow
+                    flat: true
+                    text: "Reintentar ahora"
+                    topPadding: 3
+                    bottomPadding: 3
+                    onClicked: root.downloads.retryMegaQuota()
+                }
+
+                Item { Layout.fillWidth: true }
+            }
+
+            ProgressBar {
+                Layout.fillWidth: true
+                Layout.maximumWidth: 480
+                Layout.topMargin: 2
+                visible: root.mode !== DownloadsView.Failed || root.downloads.headerProgress > 0
+                from: 0
+                to: 1
+                value: root.downloads.headerProgress
+                indeterminate: root.busy && width > 0
+                palette.active.accent: root.mode === DownloadsView.Failed ? Theme.danger
+                                       : root.mode === DownloadsView.Paused ? Theme.warning
+                                       : Theme.accent
+                palette.inactive.accent: root.mode === DownloadsView.Failed ? Theme.danger
+                                         : root.mode === DownloadsView.Paused ? Theme.warning
+                                         : Theme.accent
+                Accessible.name: root.summaryLine
+            }
+
+            // Hero actions: strictly NEUTRAL secondary Fluent expand/collapse toggle + Pause/Resume + menu.
+            RowLayout {
+                Layout.topMargin: 4
+                spacing: 8
+
+                Button {
+                    id: heroExpandButton
+                    objectName: "heroEpisodesToggle"
+                    visible: root.downloads.headerTaskCount > 0
+                    highlighted: false
+                    text: root.expanded
+                          ? "Ocultar episodios"
+                          : ("Ver episodios (" + root.downloads.headerTaskCount + ")")
+                    topPadding: 5
+                    bottomPadding: 5
+                    leftPadding: 12
+                    rightPadding: 10
+                    Accessible.checkable: true
+                    Accessible.checked: root.expanded
+                    onClicked: root.toggled(root.downloads.headerSlug)
+
+                    contentItem: RowLayout {
+                        spacing: 6
+
+                        Label {
+                            text: heroExpandButton.text
+                            color: Theme.ink
+                            font.pixelSize: 13
+                            font.weight: Font.Medium
+                            Accessible.ignored: true
+                        }
+
+                        Glyph {
+                            glyph: root.expanded ? Theme.icon.collapseAll : Theme.icon.expandAll
+                            size: 10
+                            color: Theme.muted
+                        }
+                    }
+                }
+
+                Button {
+                    visible: root.downloads.canPauseAll || root.downloads.canResumeAll
+                    highlighted: false
+                    text: root.downloads.canPauseAll ? "Pausar todo" : "Reanudar todo"
+                    icon.source: Theme.source(root.downloads.canPauseAll ? Theme.icon.pause
+                                                                         : Theme.icon.play)
+                    icon.width: 14
+                    icon.height: 14
+                    topPadding: 5
+                    bottomPadding: 5
+                    leftPadding: 12
+                    rightPadding: 12
+                    onClicked: root.downloads.canPauseAll ? root.downloads.pauseAll()
+                                                          : root.downloads.resumeAll()
+                }
+
+                Repeater {
+                    id: seriesActions
+                    model: root.idle ? null : root.downloads.current
+
+                    RowLayout {
+                        id: actions
+
+                        required property string slug
+                        required property string title
+                        required property bool first
+                        required property bool hasFolder
+                        required property string cancelText
+                        required property int cancelCount
+                        required property bool canPause
+                        required property bool canRetryNow
+                        required property bool running
+
+                        spacing: 4
+
+                        ToolButton {
+                            id: more
+                            icon.source: Theme.source(Theme.icon.more)
+                            display: AbstractButton.IconOnly
+                            text: "Más opciones"
+                            ToolTip.visible: hovered
+                            ToolTip.text: text
+                            onClicked: root.menuRequested(actions, more)
+                        }
+                    }
+                }
+
+                ToolButton {
+                    id: activeFallbackMore
+                    visible: seriesActions.count === 0
+                    icon.source: Theme.source(Theme.icon.more)
+                    display: AbstractButton.IconOnly
+                    text: "Más opciones de Descargas"
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Más opciones"
+                    onClicked: pageMenu.show(activeFallbackMore, true)
+                }
+            }
+        }
+
+        // Right telemetry block: C++ SpeedGraph + live speed + speed limit popover + session totals.
+        ColumnLayout {
+            id: telemetry
+            Layout.preferredWidth: root.wide ? 292 : root.width >= 1000 ? 268 : 232
+            Layout.minimumWidth: 224
+            Layout.alignment: Qt.AlignVCenter
+            spacing: 6
+
+            SpeedGraph {
+                id: graph
+                Layout.fillWidth: true
+                Layout.preferredHeight: 62
+                samples: root.downloads.speedSamples
+                nativeSamples: root.downloads.nativeSpeedSamples
+                limit: root.settings.nativeLimitEnabled ? root.settings.nativeLimitKBps * 1000 : 0
+
+                TapHandler {
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onTapped: limitEditor.toggleFor(activeLimitButton)
+                }
+                HoverHandler {
+                    id: chartHover
+                    cursorShape: Qt.PointingHandCursor
+                }
+                ToolTip.visible: chartHover.hovered && !limitEditor.opened
+                ToolTip.text: "Cambiar límite de velocidad"
+            }
+
+            // Engine split legend only while JDownloader is actively contributing.
+            RowLayout {
+                Layout.fillWidth: true
+                visible: root.downloads.jdActive
+                spacing: 10
+
+                Item { Layout.fillWidth: true }
+
+                RowLayout {
+                    spacing: 4
+
+                    Rectangle {
+                        Layout.preferredWidth: 7
+                        Layout.preferredHeight: 7
+                        radius: 2
+                        color: Theme.accent
+                    }
+                    Label {
+                        text: "AnimeHub · " + root.downloads.nativeSpeedText
+                        color: Theme.muted
+                        font.pixelSize: 11
+                    }
+                }
+
+                RowLayout {
+                    spacing: 4
+
+                    Rectangle {
+                        Layout.preferredWidth: 7
+                        Layout.preferredHeight: 7
+                        radius: 2
+                        color: Theme.muted
+                    }
+                    Label {
+                        text: "JD · " + root.downloads.jdSpeedText
+                        color: Theme.muted
+                        font.pixelSize: 11
+                        Accessible.name: "JDownloader: " + root.downloads.jdSpeedText
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Label {
+                    text: root.downloads.active.count > 0
+                          ? (root.downloads.totalSpeedText + " total")
+                          : root.downloads.totalSpeedText
+                    color: Theme.ink
+                    font.pixelSize: 13
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                    Accessible.name: "Velocidad actual: " + root.downloads.totalSpeedText
+                }
+
+                Item { Layout.fillWidth: true }
+
+                LimitTrigger {
+                    id: activeLimitButton
+                    objectName: visible ? "nativeLimitButton" : ""
+                    visible: !root.idle
+                    onClicked: limitEditor.toggleFor(activeLimitButton)
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Label {
+                    text: "Máx. " + root.downloads.peakText
+                    color: Theme.muted
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                    Accessible.name: "Velocidad máxima: " + root.downloads.peakText
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Label {
+                    text: "Sesión " + root.downloads.totalText
+                    color: Theme.muted
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                    Accessible.name: "Descargado en esta sesión: " + root.downloads.totalText
+                }
+            }
         }
     }
 
@@ -365,33 +637,55 @@ Rectangle {
         }
     }
 
-    // The speed as one block: its graph over the session's figures, in equal columns. Only
-    // while something is in line: at rest there is nothing to measure.
-    // Never under the corner's buttons: while the header grows, it waits below them, clipped.
-    ColumnLayout {
-        id: speed
-        anchors.right: parent.right
-        anchors.rightMargin: 32
-        y: Math.max(root.topRoom, root.height - 28 - height)
-        width: root.wide ? 312 : 288
-        visible: !root.idle
-        spacing: 10
+    Popup {
+        id: limitEditor
+        objectName: "nativeLimitPopup"
 
-        // Narrow windows keep the series' line whole: the figures stay, the graph goes.
-        SpeedGraph {
-            visible: root.width >= 1000
-            Layout.fillWidth: true
-            Layout.preferredHeight: 72
-            samples: root.downloads.speedSamples
+        property Item anchorButton: null
+
+        function toggleFor(anchor) {
+            if (opened) {
+                close()
+                return
+            }
+            if (!anchor || !parent)
+                return
+            anchorButton = anchor
+            const popupW = Math.max(implicitWidth,
+                                    speedControls.implicitWidth + leftPadding + rightPadding)
+            const popupH = Math.max(implicitHeight,
+                                    speedControls.implicitHeight + topPadding + bottomPadding)
+            const pt = anchor.mapToItem(parent, anchor.width, anchor.height)
+            x = Math.max(8, Math.min(parent.width - popupW - 8, pt.x - popupW))
+            y = Math.max(8, Math.min(parent.height - popupH - 8, pt.y + 6))
+            open()
         }
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
+        parent: Overlay.overlay
+        popupType: Popup.Item
+        padding: 16
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-            Figure { value: root.downloads.speedText; label: "Actual" }
-            Figure { value: root.downloads.peakText; label: "Máximo" }
-            Figure { value: root.downloads.totalText; label: "En esta sesión" }
+        onAboutToShow: {
+            speedControls.resetFromSettings()
+            Qt.callLater(() => {
+                if (limitEditor.visible)
+                    speedControls.focusToggle(InputModality.reason)
+            })
+        }
+        onOpened: speedControls.focusToggle(InputModality.reason)
+        onAboutToHide: {
+            if (anchorButton && anchorButton.visible
+                    && (limitEditor.activeFocus || InputModality.keyboard))
+                anchorButton.forceActiveFocus(InputModality.reason)
+        }
+
+        contentItem: NativeSpeedLimit {
+            id: speedControls
+            settings: root.settings
+            showApply: true
+            onApplied: limitEditor.close()
         }
     }
 
@@ -401,5 +695,6 @@ Rectangle {
         anchors.bottom: parent.bottom
         height: 1
         color: Theme.stroke
+        opacity: 0.85
     }
 }

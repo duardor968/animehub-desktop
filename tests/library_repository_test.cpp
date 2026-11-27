@@ -934,6 +934,262 @@ private slots:
         QVERIFY(repository_->franchises()->isEmpty());
     }
 
+    void watcherChecksAtStartupAndOnlyAnnouncesUnknownEpisodes_data() {
+        QTest::addColumn<bool>("known");
+        QTest::newRow("new episode") << false;
+        QTest::newRow("already in library") << true;
+    }
+
+    void watcherChecksAtStartupAndOnlyAnnouncesUnknownEpisodes() {
+        QFETCH(bool, known);
+        const auto slug = frieren().slug;
+        QVERIFY(repository_->setInLibrary(slug, true));
+        QVERIFY(repository_->syncEpisodes(slug, episodes(known ? 1 : 0), false));
+        testing::HttpTestServer server;
+        QVERIFY(server.listen());
+        auto home = fixture("home.json");
+        home.replace("dark-machine-the-animation", slug.toUtf8()); // episode 1 in the feed
+        server.json("/api/v1/home", home);
+        server.json("/api/v1/anime/sousou-no-frieren", fixture("anime.json"));
+        server.json("/api/v1/anime/sousou-no-frieren/episodes", kOneEpisode);
+        QNetworkAccessManager network;
+        api::ApiClient api(network, {.baseUrl = server.url(QStringLiteral("/api/v1/"))});
+        LibraryService service(*repository_, api);
+        QSignalSpy replies(&network, &QNetworkAccessManager::finished);
+        QSignalSpy arrivals(&service, &LibraryService::newEpisodes);
+
+        service.startWatching();
+        QTRY_COMPARE_WITH_TIMEOUT(replies.size(), known ? 1 : 3, 3000);
+        QCOMPARE(server.count("/api/v1/home"), 1);
+        QCOMPARE(arrivals.size(), known ? 0 : 1);
+        if (!known) {
+            QCOMPARE(arrivals.first().at(0).toString(), slug);
+            QCOMPARE(arrivals.first().at(1).value<QList<double>>(), QList<double>{1.0});
+        }
+        service.checkNow();
+        QTRY_COMPARE_WITH_TIMEOUT(replies.size(), known ? 2 : 4, 3000);
+        QCOMPARE(arrivals.size(), known ? 0 : 1);
+    }
+
+    void followedSlugsAndHasEpisodeMatchLibraryState() {
+        const auto add = [&](const QString& slug, bool in_library, bool notify, bool auto_dl,
+                             bool archived) {
+            auto record = frieren();
+            record.slug = slug;
+            record.title = slug;
+            QVERIFY(repository_->saveSnapshot(record));
+            if (in_library) {
+                QVERIFY(repository_->setInLibrary(slug, true));
+                QVERIFY(repository_->setFlag(slug, Flag::Notify, notify));
+                QVERIFY(repository_->setFlag(slug, Flag::AutoDownload, auto_dl));
+                if (archived) {
+                    QVERIFY(repository_->setArchived(slug, true));
+                }
+            }
+        };
+        add(QStringLiteral("notify-only"), true, true, false, false);
+        add(QStringLiteral("autodl-only"), true, false, true, false);
+        add(QStringLiteral("archived-followed"), true, true, false, true);
+        add(QStringLiteral("unfollowed"), true, false, false, false);
+        add(QStringLiteral("catalog-only"), false, true, false, false);
+
+        const auto slugs = repository_->followedSlugs();
+        QVERIFY2(slugs, why(slugs));
+        QCOMPARE(*slugs,
+                 (QSet<QString>{QStringLiteral("notify-only"), QStringLiteral("autodl-only"),
+                                QStringLiteral("archived-followed")}));
+
+        QCOMPARE(*repository_->hasEpisode(QStringLiteral("notify-only"), 1), false);
+        QVERIFY(repository_->syncEpisodes(QStringLiteral("notify-only"),
+                                          {{.id = QStringLiteral("1"), .number = 1},
+                                           {.id = QStringLiteral("12.5"), .number = 12.5}},
+                                          false));
+        QCOMPARE(*repository_->hasEpisode(QStringLiteral("notify-only"), 1), true);
+        QCOMPARE(*repository_->hasEpisode(QStringLiteral("notify-only"), 12.5), true);
+        QCOMPARE(*repository_->hasEpisode(QStringLiteral("notify-only"), 2), false);
+        QCOMPARE(*repository_->hasEpisode(QStringLiteral("missing-slug"), 1), false);
+    }
+
+    void bulkEntriesProgressMatchesSingleEntryQueries() {
+        const auto root = QDir::rootPath() + QStringLiteral("Anime/");
+        const auto seed = [&](const QString& slug, const QString& title, api::AnimeStatus status,
+                              std::optional<int> count, bool archived = false) {
+            AnimeRecord record;
+            record.slug = slug;
+            record.title = title;
+            record.status = status;
+            record.episodeCount = count;
+            QVERIFY(repository_->saveSnapshot(record));
+            QVERIFY(repository_->setInLibrary(slug, true));
+            if (archived) {
+                QVERIFY(repository_->setArchived(slug, true));
+            }
+        };
+
+        // 1. Empty work with zero episodes.
+        seed(QStringLiteral("empty-show"), QStringLiteral("Alpha Empty"), api::AnimeStatus::Airing,
+             std::nullopt);
+
+        // 2. Watching in progress with file on disk + missing episodes ahead + new flags.
+        seed(QStringLiteral("watching-show"), QStringLiteral("Beta Watching"),
+             api::AnimeStatus::Airing, 4);
+        QVERIFY(repository_->syncEpisodes(QStringLiteral("watching-show"), episodes(2), false));
+        QVERIFY(repository_->syncEpisodes(QStringLiteral("watching-show"), episodes(4), true));
+        QVERIFY(
+            repository_->setWatchState(QStringLiteral("watching-show"), 1, WatchState::Watched));
+        QVERIFY(repository_->setWatchState(QStringLiteral("watching-show"), 2, WatchState::Watching,
+                                           45'000, 1'440'000));
+        QVERIFY(repository_->setEpisodeFile(QStringLiteral("watching-show"), 2,
+                                            root + QStringLiteral("beta-2.mp4"), 1000));
+        QVERIFY(repository_->setEpisodeFile(QStringLiteral("watching-show"), 4,
+                                            root + QStringLiteral("beta-4.mp4"), 2000));
+
+        // 3. Skipped whole episode behind last watched, plus a fractional recap before it.
+        seed(QStringLiteral("skipped-show"), QStringLiteral("Gamma Skipped"),
+             api::AnimeStatus::Airing, 4);
+        QVERIFY(repository_->syncEpisodes(QStringLiteral("skipped-show"),
+                                          {{.id = QStringLiteral("0.5"), .number = 0.5},
+                                           {.id = QStringLiteral("1"), .number = 1},
+                                           {.id = QStringLiteral("1.5"), .number = 1.5},
+                                           {.id = QStringLiteral("2"), .number = 2},
+                                           {.id = QStringLiteral("4"), .number = 4}},
+                                          false));
+        QVERIFY(repository_->setWatchState(QStringLiteral("skipped-show"), 4, WatchState::Watched));
+
+        // 4. Only a fractional recap left unwatched behind last watched: no resume episode.
+        seed(QStringLiteral("recap-only"), QStringLiteral("Delta Recap"), api::AnimeStatus::Airing,
+             2);
+        QVERIFY(repository_->syncEpisodes(QStringLiteral("recap-only"),
+                                          {{.id = QStringLiteral("1.5"), .number = 1.5},
+                                           {.id = QStringLiteral("2"), .number = 2}},
+                                          false));
+        QVERIFY(repository_->setWatchState(QStringLiteral("recap-only"), 2, WatchState::Watched));
+
+        // 5. Finished show with all episodes watched and a shared multi-episode file.
+        seed(QStringLiteral("finished-show"), QStringLiteral("Epsilon Finished"),
+             api::AnimeStatus::Finished, 2, true);
+        QVERIFY(repository_->syncEpisodes(QStringLiteral("finished-show"), episodes(2), false));
+        QVERIFY(repository_->setWatchedThrough(QStringLiteral("finished-show"), 2));
+        const auto shared = root + QStringLiteral("shared-1-2.mkv");
+        QVERIFY(repository_->setEpisodeFile(QStringLiteral("finished-show"), 1, shared, 500));
+        QVERIFY(repository_->setEpisodeFile(QStringLiteral("finished-show"), 2, shared, 500));
+        QVERIFY(repository_->setEpisodeFile(QStringLiteral("finished-show"), 2,
+                                            root + QStringLiteral("extra-2.mkv"), 250));
+
+        const auto compareAll = [&](const QList<LibraryEntry>& bulk) {
+            for (const auto& item : bulk) {
+                const auto single = repository_->entry(item.slug);
+                QVERIFY2(single && *single, qPrintable(item.slug));
+                const auto& expected = **single;
+                QCOMPARE(item.knownEpisodes, expected.knownEpisodes);
+                QCOMPARE(item.watchedEpisodes, expected.watchedEpisodes);
+                QCOMPARE(item.downloadedEpisodes, expected.downloadedEpisodes);
+                QCOMPARE(item.downloadedBytes, expected.downloadedBytes);
+                QCOMPARE(item.newEpisodes, expected.newEpisodes);
+                QCOMPARE(item.resumeNumber, expected.resumeNumber);
+                QCOMPARE(item.resumePositionMs, expected.resumePositionMs);
+                QCOMPARE(item.resumeDurationMs, expected.resumeDurationMs);
+                QCOMPARE(item.resumeOnDisk, expected.resumeOnDisk);
+                QCOMPARE(item.unwatchedOnDisk, expected.unwatchedOnDisk);
+                QCOMPARE(item.missingEpisodes, expected.missingEpisodes);
+                QCOMPARE(item.finished(), expected.finished());
+            }
+        };
+
+        const auto active = repository_->entries(false);
+        QVERIFY2(active, why(active));
+        QCOMPARE(active->size(), 4);
+        compareAll(*active);
+
+        const auto all = repository_->entries(true);
+        QVERIFY2(all, why(all));
+        QCOMPARE(all->size(), 5);
+        compareAll(*all);
+
+        const auto followed = repository_->followedEntries();
+        QVERIFY2(followed, why(followed));
+        QCOMPARE(followed->size(), 5);
+        compareAll(*followed);
+
+        // Spot-check key edge-case expectations explicitly.
+        const auto bySlug = [&](const QString& slug) {
+            const auto it = std::ranges::find(*all, slug, &LibraryEntry::slug);
+            Q_ASSERT(it != all->end());
+            return *it;
+        };
+        QCOMPARE(bySlug(QStringLiteral("watching-show")).resumeNumber, 2.0);
+        QCOMPARE(bySlug(QStringLiteral("watching-show")).resumePositionMs, 45'000);
+        QVERIFY(bySlug(QStringLiteral("watching-show")).resumeOnDisk);
+        QCOMPARE(bySlug(QStringLiteral("watching-show")).unwatchedOnDisk, 2);
+        QCOMPARE(bySlug(QStringLiteral("watching-show")).missingEpisodes, QList<double>{3.0});
+        QCOMPARE(bySlug(QStringLiteral("watching-show")).newEpisodes, 2);
+        QCOMPARE(bySlug(QStringLiteral("skipped-show")).resumeNumber, 1.0);
+        QCOMPARE(bySlug(QStringLiteral("skipped-show")).missingEpisodes,
+                 (QList<double>{1.0, 1.5, 2.0}));
+        QVERIFY(!bySlug(QStringLiteral("recap-only")).resumeNumber.has_value());
+        QVERIFY(bySlug(QStringLiteral("finished-show")).finished());
+        QCOMPARE(bySlug(QStringLiteral("finished-show")).downloadedEpisodes, 2);
+        QCOMPARE(bySlug(QStringLiteral("finished-show")).downloadedBytes, 750);
+    }
+
+    void sweepRefreshesPausedAnime() {
+        auto paused = frieren();
+        paused.slug = QStringLiteral("paused-show");
+        paused.title = QStringLiteral("Paused Show");
+        paused.status = api::AnimeStatus::Paused;
+        QVERIFY(repository_->saveSnapshot(paused));
+        QVERIFY(repository_->setInLibrary(paused.slug, true));
+
+        auto done = frieren();
+        done.slug = QStringLiteral("finished-show");
+        done.title = QStringLiteral("Finished Show");
+        done.status = api::AnimeStatus::Finished;
+        QVERIFY(repository_->saveSnapshot(done));
+        QVERIFY(repository_->setInLibrary(done.slug, true));
+
+        testing::HttpTestServer server;
+        QVERIFY(server.listen());
+        auto paused_json = fixture("anime.json");
+        paused_json.replace("sousou-no-frieren", "paused-show");
+        server.json("/api/v1/anime/paused-show", paused_json);
+        server.json("/api/v1/anime/paused-show/episodes", kOneEpisode);
+        QNetworkAccessManager network;
+        api::ApiClient api(network, {.baseUrl = server.url(QStringLiteral("/api/v1/"))});
+        LibraryService service(*repository_, api);
+
+        service.sweep();
+        QTRY_COMPARE_WITH_TIMEOUT(server.count("/api/v1/anime/paused-show"), 1, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(!service.isRefreshing(paused.slug), 3000);
+        QCOMPARE(server.count("/api/v1/anime/finished-show"), 0);
+    }
+
+    void verifyFilesAsyncPrunesDeletedFilesAndAnnouncesAffectedSlugs() {
+        const auto slug = frieren().slug;
+        QVERIFY(repository_->setInLibrary(slug, true));
+        QTemporaryDir dir;
+        const auto kept = dir.filePath(QStringLiteral("ep1.mp4"));
+        const auto gone = dir.filePath(QStringLiteral("ep2.mp4"));
+        QFile file(kept);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("media");
+        file.close();
+        QVERIFY(repository_->setEpisodeFile(slug, 1, kept, 5));
+        QVERIFY(repository_->setEpisodeFile(slug, 2, gone, 5));
+
+        QNetworkAccessManager network;
+        api::ApiClient api(network, {.baseUrl = QUrl(QStringLiteral("http://127.0.0.1:9/"))});
+        LibraryService service(*repository_, api);
+        QSignalSpy changed(&service, &LibraryService::animeChanged);
+        QSignalSpy listed(&service, &LibraryService::listChanged);
+
+        service.verifyFilesAsync();
+        QTRY_COMPARE_WITH_TIMEOUT(changed.size(), 1, 3000);
+        QCOMPARE(changed.first().first().toString(), slug);
+        QCOMPARE(listed.size(), 1);
+        QCOMPARE((*repository_->episode(slug, 1))->filePath, kept);
+        QVERIFY((*repository_->episode(slug, 2))->filePath.isEmpty());
+    }
+
     void openingAnAnimePageAddsNothing() {
         testing::HttpTestServer server;
         QVERIFY(server.listen());

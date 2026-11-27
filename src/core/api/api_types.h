@@ -12,7 +12,7 @@
 // Value types for the AnimeHub REST contract (`animehub-api/openapi.json`, /api/v1).
 namespace animehub::api {
 
-// Paused: a series between seasons, which AnimeAV1 marks "Próximamente" (One Piece).
+// Paused: a series between seasons, which the API reports as PAUSED.
 enum class AnimeStatus { Unknown, Airing, Finished, Upcoming, Paused };
 enum class Provider { Mega, Pixeldrain, TransferIt, Mp4Upload, OneFichier };
 enum class Audio { Sub, Dub };
@@ -146,6 +146,11 @@ struct ScheduleEntry {
     Episode latestEpisode;
     QDateTime basisPublishedAt;
     bool isFinalEpisode = false;
+};
+
+struct Schedule {
+    QList<ScheduleEntry> entries;
+    bool stale = false;
 };
 
 struct ResolvedLink {

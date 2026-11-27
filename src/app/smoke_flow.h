@@ -76,7 +76,44 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
                 return object;
         return nullptr;
     };
-    if (flow == u"create") {
+    if (flow == u"speed" || flow == u"speed-editor") {
+        QMetaObject::invokeMethod(window, "showPage", Q_ARG(QVariant, 3));
+        settle();
+        auto* button = qobject_cast<QQuickItem*>(named("nativeLimitButton"));
+        auto* popup = named("nativeLimitPopup");
+        if (!check(downloads && button && button->isVisible() && popup,
+                   "speed limit trigger and popup exist"))
+            return false;
+        // Both engines contribute to the real meter, with known samples in the test profile.
+        for (int i = 0; i < 60; ++i) {
+            const int native = 1'250'000 + (i % 8) * 90'000;
+            downloads->recordSpeedSample(native + 900'000 + (i % 5) * 80'000, native);
+        }
+        downloads->recordSpeedSample(3'200'000, 1'800'000);
+        button->forceActiveFocus(Qt::TabFocusReason);
+        key(Qt::Key_Space);
+        settle();
+        if (!check(popup->property("opened").toBool(), "keyboard opens speed limit editor"))
+            return false;
+        const auto before = button->property("text").toString();
+        key(Qt::Key_Space);
+        settle();
+        if (!check(button->property("text").toString() != before, "toggle updates the meter"))
+            return false;
+        key(Qt::Key_Space);
+        settle();
+        if (!check(button->property("text").toString() == before, "toggle restores the same limit"))
+            return false;
+        key(Qt::Key_Escape);
+        settle();
+        if (!check(!popup->property("opened").toBool() && button->hasActiveFocus(),
+                   "Escape returns focus to speed control"))
+            return false;
+        if (flow == u"speed-editor") {
+            key(Qt::Key_Space);
+            settle();
+        }
+    } else if (flow == u"create") {
         // "Crear franquicia…" from a work's menu in the list.
         model->setFilter(LibraryModel::Filter::All);
         model->setGrouped(false);
@@ -143,25 +180,23 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
             return false;
         model->setArchivedOnly(true);
         settle();
-        QObject* restore = nullptr;
-        for (auto* object : descendants()) {
-            if (object->property("text").toString() != u"Restaurar a la biblioteca")
-                continue;
-            for (auto* context = QQmlEngine::contextForObject(object); context;
-                 context = context->parentContext()) {
-                auto* row = context->objectForName(QStringLiteral("row"));
-                if (row && row->property("slug").toString() == slug) {
-                    restore = object;
-                    break;
-                }
-            }
-            if (restore)
-                break;
-        }
-        if (!check(restore != nullptr, "archived row exposes restore action"))
+        auto* rowMenu = named("libraryRowMenu");
+        QVariant openedMenu;
+        if (!check(rowMenu &&
+                       QMetaObject::invokeMethod(rowMenu, "openForSlug",
+                                                 Q_RETURN_ARG(QVariant, openedMenu),
+                                                 Q_ARG(QVariant, slug)) &&
+                       openedMenu.toBool(),
+                   "archived row opens shared context menu"))
+            return false;
+        settle();
+        auto* restore = named("restoreArchivedEntry");
+        if (!check(restore != nullptr && restore->property("wanted").toBool(),
+                   "archived row exposes restore action"))
             return false;
         if (!QMetaObject::invokeMethod(restore, "triggered"))
             return false;
+        QMetaObject::invokeMethod(rowMenu, "close");
         if (!check(model->archivedCount() == count, "restore action restores archive count"))
             return false;
         model->setArchivedOnly(false);
@@ -203,6 +238,11 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
                 return false;
             key(Qt::Key_Down);
         }
+        if (auto* expander = named("aboutEnginesExpander")) {
+            if (!check(!expander->property("expanded").toBool(),
+                       "engines expander starts collapsed"))
+                return false;
+        }
         // Descargas: a provider switch that cannot be used is still a stop for Tab, and says why.
         QMetaObject::invokeMethod(dialog, "openAt", Q_ARG(QVariant, QStringLiteral("downloads")));
         settle();
@@ -241,6 +281,10 @@ inline bool runSmokeFlow(QQuickWindow* window, LibraryModel* model, const QStrin
                     break;
                 }
         if (!check(page && view && model->rowCount() > 1, "navigate fixture, list and page"))
+            return false;
+        if (!check(byText(QStringLiteral("Atrás")) == nullptr &&
+                       byText(QStringLiteral("Adelante")) == nullptr,
+                   "header has no back/forward buttons"))
             return false;
         view->forceActiveFocus(Qt::TabFocusReason);
         settle();

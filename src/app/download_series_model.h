@@ -11,18 +11,29 @@ namespace animehub::app {
 struct DownloadEpisodeRow {
     qint64 id = 0;
     double number = 0;
-    QString label; // "Episodio 7"
-    QUrl image;    // the episode's still
-    QString state; // downloads::stateKey
+    QString episode;    // "7", "12,5"
+    QString label;      // "Episodio 7"
+    QString title;      // episode title from library, if known
+    QUrl image;         // the episode's still (also exposed as stillUrl)
+    QString state;      // downloads::stateKey
+    QString stateGroup; // "completed", "running", "queued", "paused", "failed"
+    QString stateText;  // "Descargando", "Completado", "En cola", "En pausa", "Error"
     double progress = 0;
-    QString detail; // display::download
+    QString percentText; // "64 %", "100 %", "En cola", "En pausa", "Error", "—"
+    QString speedText;   // "6,8 MB/s" or "—"
+    QString sizeText;    // "288 MB / 450 MB" or "442 MB · En disco" or "—"
+    QString etaText;     // "24 s", "4 min"; empty when unknown
+    QString provider;    // "MEGA", "Pixeldrain", "JDownloader"; empty when unknown
+    QString filePath;    // path on disk when completed and present; empty otherwise
+    QString detail;      // display::download
     bool problem = false;
-    bool hasFile = false; // completed and still on disk
+    bool hasFile = false; // completed and still on disk (also exposed as canPlay)
     bool canPause = false;
     bool canResume = false;
     bool canRetry = false;
     bool canRetryNow = false; // waits to try again by itself: "Reintentar ahora"
-    QString partial;          // what cancelling deletes ("143 MB"); empty when nothing
+    bool canCancel = false;
+    QString partial; // what cancelling deletes ("143 MB"); empty when nothing
 
     bool operator==(const DownloadEpisodeRow&) const = default;
 };
@@ -32,6 +43,7 @@ struct DownloadSeriesRow {
     QString slug;
     QString title;
     QUrl poster;
+    QString backdrop; // real backdrop URL when different from poster; empty otherwise
     // In line, "3 de 12 · 1,1 GB de 4,2 GB"; completed, "3 episodios · 286 MB · hoy 13:04".
     QString summary;
     double progress = 0;
@@ -51,10 +63,12 @@ struct DownloadSeriesRow {
     // Why it does not go as it should, beyond failures: "MEGA llegó a su límite · se libera a las
     // 15:20 · sigue con Pixeldrain". Empty when nothing to say.
     QString notice;
-    bool running = false;   // an episode looks for its file, transfers or is checked
-    int cancelCount = 0;    // episodes cancelling stops
-    bool filesGone = false; // completed, and none of its files is on disk anymore
-    int goneCount = 0;      // completed episodes whose file is gone
+    bool running = false;     // an episode looks for its file, transfers or is checked
+    int activeCount = 0;      // episodes actively running in this series
+    QString runningSpeedText; // combined live speed of this series; empty when 0
+    int cancelCount = 0;      // episodes cancelling stops
+    bool filesGone = false;   // completed, and none of its files is on disk anymore
+    int goneCount = 0;        // completed episodes whose file is gone
     QList<DownloadEpisodeRow> episodes;
 
     bool operator==(const DownloadSeriesRow&) const = default;
@@ -65,32 +79,52 @@ class DownloadEpisodesModel : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
     QML_UNCREATABLE("Provided by the application")
+    Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
 
 public:
     enum Role {
         IdRole = Qt::UserRole + 1,
         NumberRole,
+        EpisodeRole,
         LabelRole,
+        TitleRole,
         ImageRole,
+        StillUrlRole,
         StateRole,
+        StateGroupRole,
+        StateTextRole,
         ProgressRole,
+        PercentTextRole,
+        SpeedTextRole,
+        SizeTextRole,
+        EtaTextRole,
+        ProviderRole,
+        FilePathRole,
         DetailRole,
         ProblemRole,
         HasFileRole,
+        CanPlayRole,
         PartialRole,
         CanPauseRole,
         CanResumeRole,
         CanRetryRole,
         CanRetryNowRole,
+        CanCancelRole,
     };
 
     using QAbstractListModel::QAbstractListModel;
 
     void setRows(const QList<DownloadEpisodeRow>& rows);
+    [[nodiscard]] const QList<DownloadEpisodeRow>& rows() const {
+        return rows_;
+    }
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
+
+signals:
+    void countChanged();
 
 private:
     QList<DownloadEpisodeRow> rows_;
@@ -109,6 +143,7 @@ public:
         SlugRole = Qt::UserRole + 1,
         TitleRole,
         PosterRole,
+        BackdropRole,
         SummaryRole,
         ProgressRole,
         FailedRole,
@@ -125,10 +160,14 @@ public:
         HasFolderRole,
         NoticeRole,
         RunningRole,
+        ActiveCountRole,
+        RunningSpeedTextRole,
         CancelCountRole,
         FilesGoneRole,
         CanRetryNowRole,
         EpisodesRole,
+        TasksRole,
+        TaskCountRole,
     };
 
     using QAbstractListModel::QAbstractListModel;

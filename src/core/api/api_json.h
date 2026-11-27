@@ -20,7 +20,7 @@ template <class T> using Decoded = std::expected<T, QString>;
 [[nodiscard]] Decoded<QList<AnimeSummary>> decodeSuggestions(const QByteArray& body);
 [[nodiscard]] Decoded<AnimeDetail> decodeAnime(const QByteArray& body);
 [[nodiscard]] Decoded<EpisodePage> decodeEpisodes(const QByteArray& body);
-[[nodiscard]] Decoded<QList<ScheduleEntry>> decodeSchedule(const QByteArray& body);
+[[nodiscard]] Decoded<Schedule> decodeSchedule(const QByteArray& body);
 [[nodiscard]] Decoded<Resolution> decodeResolution(const QByteArray& body);
 
 // RFC 9457 problem details; empty when the body is not one.

@@ -8,6 +8,22 @@ Rectangle {
 
     property url source
 
+    // Quantize decode dimensions into coarse buckets so resizing the window never discards and
+    // re-decodes every cover in the library.
+    function decodeBucket(px) {
+        if (px <= 0)
+            return 0
+        if (px <= 64)
+            return 64
+        if (px <= 160)
+            return 160
+        if (px <= 280)
+            return 280
+        if (px <= 420)
+            return 420
+        return 640
+    }
+
     color: Theme.raised
     clip: true
     onSourceChanged: image.retries = 0
@@ -23,8 +39,8 @@ Rectangle {
         asynchronous: true
         cache: true
         // Both sides: cropped, a wide image is decoded just large enough to cover, not to the width.
-        sourceSize.width: Math.ceil(root.width * Screen.devicePixelRatio)
-        sourceSize.height: Math.ceil(root.height * Screen.devicePixelRatio)
+        sourceSize.width: root.decodeBucket(Math.ceil(root.width * Screen.devicePixelRatio))
+        sourceSize.height: root.decodeBucket(Math.ceil(root.height * Screen.devicePixelRatio))
         opacity: status === Image.Ready ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
     }

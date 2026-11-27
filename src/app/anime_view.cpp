@@ -11,7 +11,9 @@
 #include <QRegularExpression>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <string_view>
 
 namespace animehub::app {
 
@@ -54,6 +56,78 @@ QString votes(int count) {
         return QString::number(std::lround(count / 1000.0)) + QStringLiteral(" mil");
     }
     return decimal(count / 1e6, 1) + QStringLiteral(" M");
+}
+
+// "1", "842", "1.842", "917.992": Spanish dot-grouped integer for exact vote counts.
+QString groupedInteger(int count) {
+    const auto digits = QString::number(std::max(count, 0));
+    QString out;
+    out.reserve(digits.size() + digits.size() / 3);
+    const auto len = digits.size();
+    for (qsizetype i = 0; i < len; ++i) {
+        if (i > 0 && (len - i) % 3 == 0) {
+            out.append(QLatin1Char('.'));
+        }
+        out.append(digits[i]);
+    }
+    return out;
+}
+
+// Offline fallback slug for a stored Spanish genre label: "Fantasía" -> "fantasia",
+// "Ciencia Ficción" -> "ciencia-ficcion".
+QString slugifyGenre(const QString& text) {
+    const auto decomposed = text.normalized(QString::NormalizationForm_D).toLower();
+    QString out;
+    out.reserve(decomposed.size());
+    bool pending_dash = false;
+    for (const auto ch : decomposed) {
+        if (ch.category() == QChar::Mark_NonSpacing) {
+            continue;
+        }
+        if ((ch >= u'a' && ch <= u'z') || (ch >= u'0' && ch <= u'9')) {
+            if (pending_dash && !out.isEmpty()) {
+                out.append(QLatin1Char('-'));
+            }
+            pending_dash = false;
+            out.append(ch);
+        } else {
+            pending_dash = true;
+        }
+    }
+    return out;
+}
+
+QString shortMonth(int month) {
+    static constexpr std::array<std::u16string_view, 12> kMonths{
+        u"Ene", u"Feb", u"Mar", u"Abr", u"May", u"Jun",
+        u"Jul", u"Ago", u"Sep", u"Oct", u"Nov", u"Dic",
+    };
+    return month >= 1 && month <= 12
+               ? QStringView(kMonths[static_cast<size_t>(month - 1)]).toString()
+               : QString();
+}
+
+// Smart Spanish emission range: "Oct – Dic 2026", "Sep 2023 – Mar 2024", "Oct 2026", or "2026".
+QString formatEmission(const QDate& start, const QDate& end, std::optional<int> fallback_year) {
+    if (start.isValid() && end.isValid()) {
+        if (start.year() == end.year()) {
+            if (start.month() == end.month()) {
+                return shortMonth(start.month()) + QLatin1Char(' ') + QString::number(start.year());
+            }
+            return shortMonth(start.month()) + QStringLiteral(" – ") + shortMonth(end.month()) +
+                   QLatin1Char(' ') + QString::number(start.year());
+        }
+        return shortMonth(start.month()) + QLatin1Char(' ') + QString::number(start.year()) +
+               QStringLiteral(" – ") + shortMonth(end.month()) + QLatin1Char(' ') +
+               QString::number(end.year());
+    }
+    if (start.isValid()) {
+        return shortMonth(start.month()) + QLatin1Char(' ') + QString::number(start.year());
+    }
+    if (end.isValid()) {
+        return shortMonth(end.month()) + QLatin1Char(' ') + QString::number(end.year());
+    }
+    return fallback_year ? QString::number(*fallback_year) : QString();
 }
 
 QString relationLabel(api::RelationKind kind) {
@@ -270,18 +344,19 @@ void AnimeView::fetchSchedule() {
     const auto generation = generation_;
     services_.api.schedule(
         this,
-        [this, generation](const api::Result<QList<api::ScheduleEntry>>& result) {
+        [this, generation](const api::Result<api::Schedule>& result) {
             if (generation != generation_ || !result) {
                 return;
             }
-            const auto& entries = result->value;
+            const auto& entries = result->value.entries;
             const auto slot = std::ranges::find(
                 entries, slug_, [](const api::ScheduleEntry& entry) { return entry.anime.slug; });
             auto next = slot == entries.end()
                             ? std::nullopt
                             : schedule::next(*slot, QDateTime::currentDateTimeUtc());
-            // A copy from the cache cannot tell a late episode from one already out.
-            if (next && next->late && result->origin == api::Origin::Cache) {
+            // A cached or server-stale schedule cannot tell a late episode from one already out.
+            if (next && next->late &&
+                (result->origin == api::Origin::Cache || result->value.stale)) {
                 next.reset();
             }
             next_airing_ = next;
@@ -410,22 +485,8 @@ AnimeView::Summary AnimeView::summarize() const {
         }
         return summary;
     }
-    // A series not begun, with nothing on disk or on its way: all of it is what is wanted.
-    if (!single() && summary.watched == 0 && !summary.watching && summary.onDisk == 0 &&
-        summary.batchTotal == summary.batchDone && summary.missing.size() > 1) {
-        summary.primary = PrimaryAction::DownloadAll;
-        return summary;
-    }
-    // Everything watched of a finished series, with nothing on disk or on its way: it starts again
-    // as one not begun does, whole, never from an episode the user did not choose.
+
     const bool caught_up = summary.watched == list.size();
-    if (!single() && caught_up && !airing() && summary.onDisk == 0 &&
-        summary.batchTotal == summary.batchDone) {
-        summary.primary = PrimaryAction::DownloadAll;
-        return summary;
-    }
-    // The episode to watch next; with everything watched, none while it airs and the first
-    // one to start again otherwise.
     if (record_ && record_->resumeNumber && episodes_.episode(*record_->resumeNumber)) {
         summary.target = *record_->resumeNumber;
     } else if (!caught_up) {
@@ -435,50 +496,113 @@ AnimeView::Summary AnimeView::summarize() const {
     } else if (!airing()) {
         summary.target = list.first().number;
     }
-    if (!summary.target) {
-        summary.primary = PrimaryAction::Upcoming;
-        return summary;
-    }
-    const auto target = episodes_.episode(*summary.target);
-    summary.job = episodes_.task(*summary.target);
-    if (!target->filePath.isEmpty()) {
-        summary.job.reset();
-        summary.primary = caught_up ? PrimaryAction::Rewatch : PrimaryAction::Play;
-    } else if (!summary.job) {
-        summary.primary = PrimaryAction::Download;
-    } else if (summary.job->state != TaskState::Failed && summary.active > 1) {
-        // Its download goes with others of the series: the button acts on all of them.
-        summary.primary = summary.running ? PrimaryAction::PauseAll : PrimaryAction::ResumeAll;
-    } else {
-        switch (summary.job->state) {
-        case TaskState::Queued: {
-            // Its place among the tasks waiting for a slot, in the order they will start.
-            int place = 0;
-            for (const auto& task : services_.downloads.tasks()) {
-                if (task.state == TaskState::Queued) {
-                    ++place;
-                    if (task.id == summary.job->id) {
-                        summary.place = place;
-                        break;
-                    }
+
+    const auto queued_place = [this](qint64 task_id) {
+        int place = 0;
+        for (const auto& task : services_.downloads.tasks()) {
+            if (task.state == TaskState::Queued) {
+                ++place;
+                if (task.id == task_id) {
+                    return place;
                 }
             }
-            summary.primary = PrimaryAction::Queued;
-            break;
         }
-        case TaskState::Waiting:
-            summary.primary = PrimaryAction::Queued;
-            break;
-        case TaskState::Paused:
-            summary.primary = PrimaryAction::Paused;
-            break;
-        case TaskState::Failed:
-            summary.primary = PrimaryAction::Failed;
-            break;
-        default: // finding its file, transferring or checking it
-            summary.primary = PrimaryAction::Downloading;
-            break;
+        return 0;
+    };
+
+    // Single-episode work or film: follow its one file or download directly.
+    if (single()) {
+        summary.target = list.first().number;
+        const auto& film = list.first();
+        summary.job = episodes_.task(film.number);
+        if (!film.filePath.isEmpty()) {
+            summary.job.reset();
+            summary.primary = caught_up ? PrimaryAction::Rewatch : PrimaryAction::Play;
+        } else if (!summary.job) {
+            summary.primary = PrimaryAction::Download;
+        } else {
+            switch (summary.job->state) {
+            case TaskState::Queued:
+                summary.place = queued_place(summary.job->id);
+                summary.primary = PrimaryAction::Queued;
+                break;
+            case TaskState::Waiting:
+                summary.primary = PrimaryAction::Queued;
+                break;
+            case TaskState::Paused:
+                summary.primary = PrimaryAction::Paused;
+                break;
+            case TaskState::Failed:
+                summary.primary = PrimaryAction::Failed;
+                break;
+            default: // finding its file, transferring or checking it
+                summary.primary = PrimaryAction::Downloading;
+                break;
+            }
         }
+        return summary;
+    }
+
+    // Dual-Role series logic:
+    // 1) Target episode (next unwatched, or ep. 1 to rewatch a finished series) is on disk.
+    if (summary.target) {
+        if (const auto target = episodes_.episode(*summary.target);
+            target && !target->filePath.isEmpty()) {
+            summary.primary = caught_up ? PrimaryAction::Rewatch : PrimaryAction::Play;
+            return summary;
+        }
+    }
+
+    // 2) Target is not on disk (or caught up on an airing series) and unqueued episodes remain:
+    //    stay on global DownloadAll even while individual episodes are downloading or paused.
+    if (!summary.missing.isEmpty()) {
+        summary.primary = PrimaryAction::DownloadAll;
+        return summary;
+    }
+
+    // 3) No unqueued episodes left: act on the series' active, paused, or failed downloads.
+    const auto find_task = [this](const auto& matches) -> std::optional<downloads::Task> {
+        for (const auto& task : tasks_) {
+            if (matches(task.state)) {
+                return task;
+            }
+        }
+        return std::nullopt;
+    };
+    if (summary.running) {
+        summary.primary = PrimaryAction::PauseAll;
+        if (summary.active == 1) {
+            summary.job = find_task([](TaskState state) {
+                return state != TaskState::Cancelled && state != TaskState::Completed &&
+                       state != TaskState::Failed;
+            });
+            if (summary.job && summary.job->state == TaskState::Queued) {
+                summary.place = queued_place(summary.job->id);
+            }
+        }
+        return summary;
+    }
+    if (summary.paused) {
+        summary.primary = PrimaryAction::ResumeAll;
+        if (summary.active == 1) {
+            summary.job = find_task([](TaskState state) { return state == TaskState::Paused; });
+        }
+        return summary;
+    }
+    if (summary.failed > 0) {
+        summary.primary = PrimaryAction::Failed;
+        if (summary.failed == 1) {
+            summary.job = find_task([](TaskState state) { return state == TaskState::Failed; });
+        }
+        return summary;
+    }
+
+    // 4) Caught up with nothing missing or in the queue.
+    if (airing()) {
+        summary.primary = PrimaryAction::Upcoming;
+    } else if (summary.onDisk > 0) {
+        summary.target = list.first().number;
+        summary.primary = PrimaryAction::Rewatch;
     }
     return summary;
 }
@@ -527,14 +651,33 @@ QUrl AnimeView::backdropUrl() const {
 }
 
 QString AnimeView::score() const {
+    const auto text = scoreText();
+    if (text.isEmpty()) {
+        return {};
+    }
+    if (detail_->votes && *detail_->votes > 0) {
+        return text + QStringLiteral(" (") + votes(*detail_->votes) + QLatin1Char(')');
+    }
+    return text;
+}
+
+QString AnimeView::scoreText() const {
     if (!detail_ || !detail_->score || *detail_->score <= 0) {
         return {};
     }
-    auto text = decimal(*detail_->score, 2);
-    if (detail_->votes && *detail_->votes > 0) {
-        text += QStringLiteral(" (") + votes(*detail_->votes) + QLatin1Char(')');
+    return decimal(*detail_->score, 2);
+}
+
+QString AnimeView::votesText() const {
+    if (!detail_ || !detail_->votes || *detail_->votes <= 0) {
+        return {};
     }
-    return text;
+    const int count = *detail_->votes;
+    return count == 1 ? QStringLiteral("1 voto") : groupedInteger(count) + QStringLiteral(" votos");
+}
+
+QString AnimeView::scoreSource() const {
+    return QStringLiteral("AnimeAV1");
 }
 
 QString AnimeView::facts() const {
@@ -558,6 +701,147 @@ QString AnimeView::facts() const {
 
 QString AnimeView::genres() const {
     return source().genres;
+}
+
+QVariantList AnimeView::genreChips() const {
+    QVariantList result;
+    if (detail_ && !detail_->genres.isEmpty()) {
+        result.reserve(detail_->genres.size());
+        for (const auto& genre : detail_->genres) {
+            const auto name = genre.name.trimmed();
+            if (name.isEmpty()) {
+                continue;
+            }
+            const auto slug = genre.slug.isEmpty() ? slugifyGenre(name) : genre.slug;
+            result.append(
+                QVariantMap{{QStringLiteral("name"), name}, {QStringLiteral("slug"), slug}});
+        }
+        return result;
+    }
+    const auto raw = source().genres;
+    if (raw.isEmpty()) {
+        return result;
+    }
+    for (const auto& part : raw.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+        const auto name = part.trimmed();
+        if (name.isEmpty()) {
+            continue;
+        }
+        result.append(QVariantMap{{QStringLiteral("name"), name},
+                                  {QStringLiteral("slug"), slugifyGenre(name)}});
+    }
+    return result;
+}
+
+QString AnimeView::sourceUrl() const {
+    return detail_ && detail_->sourceUrl.isValid() ? detail_->sourceUrl.toString() : QString();
+}
+
+bool AnimeView::mature() const {
+    return detail_ && detail_->mature;
+}
+
+namespace {
+
+QString tone(api::AnimeStatus status) {
+    switch (status) {
+    case api::AnimeStatus::Airing:
+        return QStringLiteral("airing");
+    case api::AnimeStatus::Finished:
+        return QStringLiteral("finished");
+    case api::AnimeStatus::Upcoming:
+        return QStringLiteral("upcoming");
+    case api::AnimeStatus::Paused:
+        return QStringLiteral("paused");
+    case api::AnimeStatus::Unknown:
+        break;
+    }
+    return {};
+}
+
+QVariantMap chip(const QString& text, const QString& badge = {}) {
+    return {{QStringLiteral("text"), text}, {QStringLiteral("tone"), badge}};
+}
+
+QVariantMap detail(const QString& label, const QString& value) {
+    return {{QStringLiteral("label"), label},
+            {QStringLiteral("name"), label},
+            {QStringLiteral("value"), value}};
+}
+
+} // namespace
+
+QString AnimeView::statusText() const {
+    return display::status(source().status);
+}
+
+QString AnimeView::statusTone() const {
+    return tone(source().status);
+}
+
+QString AnimeView::metaLine() const {
+    const auto& anime = source();
+    QStringList parts;
+    if (!anime.category.isEmpty()) {
+        parts.append(display::category(anime.category));
+    }
+    if (anime.startYear) {
+        parts.append(QString::number(*anime.startYear));
+    }
+    const int count = std::max(anime.episodeCount.value_or(0), episodes_.total());
+    if (count > 1) {
+        parts.append(QStringLiteral("%1 episodios").arg(count));
+    }
+    return parts.join(QStringLiteral(" · "));
+}
+
+QVariantList AnimeView::chips() const {
+    QVariantList chips;
+    if (const auto status = statusText(); !status.isEmpty()) {
+        chips.append(chip(status, statusTone()));
+    }
+    return chips;
+}
+
+QVariantList AnimeView::details() const {
+    const auto& anime = source();
+    QVariantList details;
+    const auto category =
+        !anime.category.isEmpty()
+            ? anime.category
+            : (detail_ && detail_->category ? detail_->category->name : QString());
+    if (!category.isEmpty()) {
+        details.append(detail(QStringLiteral("Tipo"), display::category(category)));
+    }
+    const auto emission = formatEmission(detail_ ? detail_->startDate : QDate(),
+                                         detail_ ? detail_->endDate : QDate(), anime.startYear);
+    if (!emission.isEmpty()) {
+        details.append(detail(QStringLiteral("Emisión"), emission));
+    }
+    const auto effective_status = anime.status != api::AnimeStatus::Unknown
+                                      ? anime.status
+                                      : (detail_ ? detail_->status : api::AnimeStatus::Unknown);
+    if (const auto status = display::status(effective_status); !status.isEmpty()) {
+        details.append(detail(QStringLiteral("Estado"), status));
+    }
+    const int count =
+        std::max({anime.episodeCount.value_or(0), detail_ ? detail_->episodeCount.value_or(0) : 0,
+                  episodes_.total()});
+    if (count > 1 || (count == 1 && !single())) {
+        details.append(detail(QStringLiteral("Episodios"), QString::number(count)));
+    }
+    if (const auto scored = scoreText(); !scored.isEmpty()) {
+        auto text = QStringLiteral("★ ") + scored;
+        if (const auto voted = votesText(); !voted.isEmpty()) {
+            text += QStringLiteral(" (") + voted + QLatin1Char(')');
+        }
+        details.append(detail(QStringLiteral("Puntuación (AnimeAV1)"), text));
+    }
+    return details;
+}
+
+bool AnimeView::hasDetails() const {
+    return !details().isEmpty();
 }
 
 QUrl AnimeView::trailerUrl() const {
@@ -619,21 +903,44 @@ double AnimeView::lastNumber() const {
     return episodes_.episodes().isEmpty() ? 0 : episodes_.episodes().last().number;
 }
 
-// A verb and what it acts on: "Descargar ep. 9", or for a film "Reanudar la descarga".
+bool AnimeView::showSecondaryDownload() const {
+    return !single() &&
+           (summary_.primary == PrimaryAction::Play ||
+            summary_.primary == PrimaryAction::Rewatch) &&
+           !summary_.missing.isEmpty();
+}
+
+QString AnimeView::batchDownloadText() const {
+    const int count = missingCount();
+    if (count <= 0) {
+        return {};
+    }
+    if (count == 1) {
+        return QStringLiteral("Descargar ") + EpisodeModel::countText(summary_.missing);
+    }
+    if (hasDownloads() || summary_.onDisk > 0) {
+        return QStringLiteral("Descargar restantes (%1)").arg(count);
+    }
+    return QStringLiteral("Descargar todo (%1)").arg(count);
+}
+
+// A verb and what it acts on: "Ver ep. 9", "Descargar todo (8)", or "Reanudar la descarga".
 QString AnimeView::primaryText() const {
     const auto object = [this](const QString& film) {
-        return single() ? film : QStringLiteral(" ep. ") + display::episodeNumber(*summary_.target);
+        return single() || !summary_.target
+                   ? film
+                   : QStringLiteral(" ep. ") + display::episodeNumber(*summary_.target);
     };
     const auto download = QStringLiteral(" la descarga");
     switch (summary_.primary) {
     case PrimaryAction::Play: {
-        const auto episode = episodes_.episode(*summary_.target);
+        const auto episode = summary_.target ? episodes_.episode(*summary_.target) : std::nullopt;
         const bool resume =
             episode && episode->state == WatchState::Watching && episode->positionMs > 0;
         return (resume ? QStringLiteral("Continuar") : QStringLiteral("Ver")) + object({});
     }
     case PrimaryAction::Rewatch:
-        return QStringLiteral("Ver de nuevo");
+        return QStringLiteral("Volver a ver");
     case PrimaryAction::Download:
         return QStringLiteral("Descargar") +
                object(source().category.startsWith(QStringLiteral("Pel"), Qt::CaseInsensitive)
@@ -642,6 +949,9 @@ QString AnimeView::primaryText() const {
     case PrimaryAction::Queued:
         return QStringLiteral("Pausar") + object(download);
     case PrimaryAction::Downloading:
+        if (!summary_.job) {
+            return QStringLiteral("Pausar") + object(download);
+        }
         switch (summary_.job->state) {
         case TaskState::Resolving: // no size yet
             return QStringLiteral("Pausar") + object(download);
@@ -653,13 +963,22 @@ QString AnimeView::primaryText() const {
     case PrimaryAction::Paused:
         return QStringLiteral("Reanudar") + object(download);
     case PrimaryAction::Failed:
-        return QStringLiteral("Reintentar") + object(download);
+        return single() ? QStringLiteral("Reintentar la descarga")
+                        : QStringLiteral("Reintentar fallidos");
     case PrimaryAction::DownloadAll:
-        return QStringLiteral("Descargar todo (%1)").arg(summary_.missing.size());
+        return batchDownloadText();
     case PrimaryAction::PauseAll:
-        return QStringLiteral("Pausar la descarga (%1)").arg(summary_.active);
+        if (summary_.active == 1 && summary_.job) {
+            if (summary_.job->state == TaskState::Verifying) {
+                return QStringLiteral("Comprobando · ") + percent(primaryProgress());
+            }
+            if (summary_.job->state == TaskState::Downloading) {
+                return QStringLiteral("Pausar · ") + percent(primaryProgress());
+            }
+        }
+        return QStringLiteral("Pausar descargas");
     case PrimaryAction::ResumeAll:
-        return QStringLiteral("Reanudar la descarga (%1)").arg(summary_.active);
+        return QStringLiteral("Reanudar descargas");
     case PrimaryAction::Upcoming:
     case PrimaryAction::None:
         break;
@@ -673,19 +992,38 @@ bool AnimeView::primaryEnabled() const {
     case PrimaryAction::Upcoming:
         return false;
     case PrimaryAction::Downloading:
-        return summary_.job->state != TaskState::Verifying;
+        return summary_.job && summary_.job->state != TaskState::Verifying;
+    case PrimaryAction::PauseAll:
+        return !(summary_.active == 1 && summary_.job &&
+                 summary_.job->state == TaskState::Verifying);
     default:
         return true;
     }
 }
 
 QString AnimeView::primaryHint() const {
-    if (batch()) {
-        return (summary_.primary == PrimaryAction::PauseAll ? QStringLiteral("Pausar")
-                                                            : QStringLiteral("Reanudar")) +
-               QStringLiteral(" la descarga de %1 episodios").arg(summary_.active);
+    if (!primaryEnabled()) {
+        return {};
     }
-    if (!summary_.target || !primaryEnabled()) {
+    if (batch()) {
+        const auto verb = summary_.primary == PrimaryAction::PauseAll ? QStringLiteral("Pausar")
+                                                                      : QStringLiteral("Reanudar");
+        if (summary_.active == 1 && summary_.job) {
+            return verb + QStringLiteral(" la descarga del episodio ") +
+                   display::episodeNumber(summary_.job->number);
+        }
+        return verb + QStringLiteral(" la descarga de %1 episodios").arg(summary_.active);
+    }
+    if (summary_.primary == PrimaryAction::Failed && !single()) {
+        if (summary_.failed == 1 && summary_.job) {
+            return QStringLiteral("Reintentar la descarga del episodio ") +
+                   display::episodeNumber(summary_.job->number);
+        }
+        return summary_.failed == 1
+                   ? QStringLiteral("Reintentar la descarga fallida")
+                   : QStringLiteral("Reintentar %1 descargas fallidas").arg(summary_.failed);
+    }
+    if (!summary_.target) {
         return {};
     }
     const auto download = single() ? QStringLiteral("la descarga")
@@ -710,15 +1048,19 @@ bool AnimeView::batch() const {
 }
 
 double AnimeView::primaryProgress() const {
+    if (summary_.job &&
+        (summary_.primary == PrimaryAction::Downloading ||
+         summary_.primary == PrimaryAction::Paused || (batch() && summary_.active == 1))) {
+        return summary_.job->bytesTotal > 0
+                   ? std::clamp(static_cast<double>(summary_.job->bytesDone) /
+                                    static_cast<double>(summary_.job->bytesTotal),
+                                0.0, 1.0)
+                   : 0.0;
+    }
     if (batch()) {
         return summary_.batchProgress;
     }
-    const auto& job = summary_.job;
-    if (!job || job->bytesTotal <= 0) {
-        return 0;
-    }
-    return std::clamp(static_cast<double>(job->bytesDone) / static_cast<double>(job->bytesTotal),
-                      0.0, 1.0);
+    return 0.0;
 }
 
 double AnimeView::watchedProgress() const {
@@ -779,10 +1121,26 @@ QVariantList AnimeView::figures() const {
                            : summary_.transferring ? QStringLiteral("Descargando")
                            : waiting               ? QStringLiteral("En espera")
                                                    : QStringLiteral("En cola");
-        const auto shown = figure(
-            QStringLiteral("Descarga"),
-            state + QStringLiteral(" · %1/%2").arg(summary_.batchDone).arg(summary_.batchTotal),
-            summary_.batchProgress);
+        QString text;
+        if (summary_.batchTotal == 1 && summary_.active == 1) {
+            const auto single_it = std::ranges::find_if(tasks_, [](const auto& t) {
+                return t.state != TaskState::Completed && t.state != TaskState::Cancelled &&
+                       t.state != TaskState::Failed;
+            });
+            if (single_it != tasks_.end()) {
+                const auto ep = display::shortEpisode(single_it->number);
+                if (summary_.transferring && single_it->bytesTotal > 0) {
+                    text = ep + QStringLiteral(" · ") + percent(summary_.batchProgress);
+                } else {
+                    text = ep + QStringLiteral(" · ") + state;
+                }
+            }
+        }
+        if (text.isEmpty()) {
+            text =
+                state + QStringLiteral(" · %1/%2").arg(summary_.batchDone).arg(summary_.batchTotal);
+        }
+        const auto shown = figure(QStringLiteral("Descarga"), text, summary_.batchProgress);
         figures.append(waiting ? retryable(shown) : shown);
     }
     if (single()) {
@@ -821,9 +1179,9 @@ QVariantList AnimeView::figures() const {
             figure(QStringLiteral("Estreno"), display::when(start, QDateTime::currentDateTime())));
     } else if (next_airing_ && airing()) {
         const auto now = QDateTime::currentDateTimeUtc();
-        const auto at = next_airing_->late        ? QStringLiteral("Retrasado")
-                        : now >= next_airing_->at ? QStringLiteral("Ahora")
-                                                  : display::when(next_airing_->at, now);
+        // Within the grace it keeps its hour: no "Ahora", as on AnimeHub Web.
+        const auto at =
+            next_airing_->late ? QStringLiteral("Retrasado") : display::when(next_airing_->at, now);
         figures.append(
             figure(QStringLiteral("Próximo episodio"),
                    at + QStringLiteral(" · ") + display::shortEpisode(next_airing_->number)));
@@ -879,7 +1237,11 @@ void AnimeView::primary() {
         resumeDownload(*summary_.target);
         break;
     case PrimaryAction::Failed:
-        retryDownload(*summary_.target);
+        if (single() && summary_.target) {
+            retryDownload(*summary_.target);
+        } else {
+            retryFailed();
+        }
         break;
     case PrimaryAction::DownloadAll:
         downloadMissing();
@@ -1312,6 +1674,13 @@ void AnimeView::openFolder() {
 void AnimeView::openTrailer() {
     if (const auto url = trailerUrl(); url.isValid()) {
         QDesktopServices::openUrl(url);
+    }
+}
+
+void AnimeView::openSource() {
+    if (detail_ && detail_->sourceUrl.isValid() &&
+        (detail_->sourceUrl.scheme() == u"https" || detail_->sourceUrl.scheme() == u"http")) {
+        QDesktopServices::openUrl(detail_->sourceUrl);
     }
 }
 

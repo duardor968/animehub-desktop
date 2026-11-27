@@ -25,6 +25,8 @@ class DownloadsView final : public QObject {
     Q_PROPERTY(DownloadSeriesModel* current READ current CONSTANT)
     // Other series transferring at the same time, under it: they are not "next".
     Q_PROPERTY(DownloadSeriesModel* active READ active CONSTANT)
+    // Episodes of the hero series on view, for direct expansion in the Hero section.
+    Q_PROPERTY(DownloadEpisodesModel* headerTasks READ headerTasks CONSTANT)
 
     // Whether pausing or resuming everything, or retrying the failures, has anything to act on.
     // What JDownloader already transfers is not AnimeHub's to pause.
@@ -38,27 +40,51 @@ class DownloadsView final : public QObject {
     Q_PROPERTY(QString headerTitle READ headerTitle NOTIFY summaryChanged)
     Q_PROPERTY(QString headerEpisode READ headerEpisode NOTIFY summaryChanged)
     Q_PROPERTY(QString headerDetail READ headerDetail NOTIFY summaryChanged)
+    // Concise single- or multi-episode summary for the Hero section.
+    Q_PROPERTY(QString headerActiveSummary READ headerActiveSummary NOTIFY summaryChanged)
     // What holds it back beyond a failure (MEGA's quota); empty when nothing.
     Q_PROPERTY(QString headerNotice READ headerNotice NOTIFY summaryChanged)
     Q_PROPERTY(double headerProgress READ headerProgress NOTIFY summaryChanged)
     Q_PROPERTY(QUrl headerArt READ headerArt NOTIFY summaryChanged)
+    // Real backdrop URL of the hero anime when available (different from poster); empty otherwise.
+    Q_PROPERTY(QString headerBackdrop READ headerBackdrop NOTIFY summaryChanged)
+    // The series' poster, beside its title: the art behind is only ambience.
+    Q_PROPERTY(QUrl headerPoster READ headerPoster NOTIFY summaryChanged)
+    // True when the series shown in the header has only 1 unfinished episode.
+    Q_PROPERTY(bool headerSingleEpisode READ headerSingleEpisode NOTIFY summaryChanged)
+    // Total episodes listed in the hero series expansion.
+    Q_PROPERTY(int headerTaskCount READ headerTaskCount NOTIFY summaryChanged)
+    // True when a JDownloader task is transferring or contributed to the latest speed sample.
+    Q_PROPERTY(bool jdActive READ jdActive NOTIFY summaryChanged)
 
-    // The bar at the bottom of the window: shown while something is unfinished. As Steam's, it
-    // counts the episode on view among the line: "Descargando 3 de 10 · Frieren ep. 6".
+    // The bar at the bottom of the window: shown while something is unfinished, counting only
+    // active/pending work without mixing in completed items.
     Q_PROPERTY(bool barVisible READ barVisible NOTIFY summaryChanged)
     Q_PROPERTY(Mode barMode READ barMode NOTIFY summaryChanged)
+    Q_PROPERTY(QString barState READ barState NOTIFY summaryChanged)
+    Q_PROPERTY(bool barPaused READ barPaused NOTIFY summaryChanged)
+    Q_PROPERTY(bool barError READ barError NOTIFY summaryChanged)
     Q_PROPERTY(QString barText READ barText NOTIFY summaryChanged)
     Q_PROPERTY(QString barProblem READ barProblem NOTIFY summaryChanged)
     Q_PROPERTY(QString barNotice READ barNotice NOTIFY summaryChanged)
     Q_PROPERTY(double barProgress READ barProgress NOTIFY summaryChanged)
     Q_PROPERTY(QString barPercent READ barPercent NOTIFY summaryChanged) // "45 %"; empty when none
+    Q_PROPERTY(QString barPercentText READ barPercentText NOTIFY summaryChanged)
+    Q_PROPERTY(QString barSpeedText READ barSpeedText NOTIFY speedChanged)
     Q_PROPERTY(QUrl barPoster READ barPoster NOTIFY summaryChanged)
+    Q_PROPERTY(int activeSeriesCount READ activeSeriesCount NOTIFY summaryChanged)
+    Q_PROPERTY(int activeTaskCount READ activeTaskCount NOTIFY summaryChanged)
+    Q_PROPERTY(int pendingTaskCount READ pendingTaskCount NOTIFY summaryChanged)
 
     // Total speed of the last minutes (bytes per second, oldest first) and the session's figures.
     Q_PROPERTY(QList<qreal> speedSamples READ speedSamples NOTIFY speedChanged)
+    Q_PROPERTY(QList<qreal> nativeSpeedSamples READ nativeSpeedSamples NOTIFY speedChanged)
+    Q_PROPERTY(QString nativeSpeedText READ nativeSpeedText NOTIFY speedChanged)
+    Q_PROPERTY(QString jdSpeedText READ jdSpeedText NOTIFY speedChanged)
     Q_PROPERTY(QString speedText READ speedText NOTIFY speedChanged)
+    Q_PROPERTY(QString totalSpeedText READ totalSpeedText NOTIFY speedChanged)
     Q_PROPERTY(QString peakText READ peakText NOTIFY speedChanged)
-    Q_PROPERTY(QString totalText READ totalText NOTIFY speedChanged)
+    Q_PROPERTY(QString totalText READ totalText NOTIFY totalChanged)
 
     // After an episode that none of the enabled servers has, once per session each and only while
     // the window shows: "jdownloader" offers JDownloader for the servers only it downloads,
@@ -95,6 +121,9 @@ public:
     [[nodiscard]] DownloadSeriesModel* active() {
         return &active_;
     }
+    [[nodiscard]] DownloadEpisodesModel* headerTasks() {
+        return &header_tasks_;
+    }
 
     [[nodiscard]] bool canPauseAll() const {
         return can_pause_all_;
@@ -121,6 +150,9 @@ public:
     [[nodiscard]] QString headerDetail() const {
         return header_.detail;
     }
+    [[nodiscard]] QString headerActiveSummary() const {
+        return header_.activeSummary;
+    }
     [[nodiscard]] QString headerNotice() const {
         return header_.notice;
     }
@@ -130,12 +162,34 @@ public:
     [[nodiscard]] QUrl headerArt() const {
         return header_.art;
     }
+    [[nodiscard]] QString headerBackdrop() const {
+        return header_.backdrop;
+    }
+    [[nodiscard]] QUrl headerPoster() const {
+        return header_.poster;
+    }
+    [[nodiscard]] bool headerSingleEpisode() const {
+        return header_.singleEpisode;
+    }
+    [[nodiscard]] int headerTaskCount() const {
+        return header_.taskCount;
+    }
+    [[nodiscard]] bool jdActive() const {
+        return jd_active_;
+    }
 
     [[nodiscard]] bool barVisible() const {
         return bar_.mode != Mode::Idle;
     }
     [[nodiscard]] Mode barMode() const {
         return bar_.mode;
+    }
+    [[nodiscard]] QString barState() const;
+    [[nodiscard]] bool barPaused() const {
+        return bar_.mode == Mode::Paused || bar_.mode == Mode::Waiting;
+    }
+    [[nodiscard]] bool barError() const {
+        return bar_.mode == Mode::Failed;
     }
     [[nodiscard]] QString barText() const {
         return bar_.text;
@@ -152,14 +206,34 @@ public:
     [[nodiscard]] QString barPercent() const {
         return bar_.percent;
     }
+    [[nodiscard]] QString barPercentText() const {
+        return bar_.percent;
+    }
+    [[nodiscard]] QString barSpeedText() const;
     [[nodiscard]] QUrl barPoster() const {
         return bar_.poster;
+    }
+    [[nodiscard]] int activeSeriesCount() const {
+        return bar_.activeSeriesCount;
+    }
+    [[nodiscard]] int activeTaskCount() const {
+        return bar_.activeTaskCount;
+    }
+    [[nodiscard]] int pendingTaskCount() const {
+        return bar_.pendingTaskCount;
     }
 
     [[nodiscard]] QList<qreal> speedSamples() const {
         return samples_;
     }
+    [[nodiscard]] QList<qreal> nativeSpeedSamples() const {
+        return native_samples_;
+    }
     [[nodiscard]] QString speedText() const;
+    [[nodiscard]] QString totalSpeedText() const;
+    [[nodiscard]] QString nativeSpeedText() const;
+    [[nodiscard]] QString jdSpeedText() const;
+    void recordSpeedSample(qint64 total, qint64 native);
     [[nodiscard]] QString peakText() const;
     [[nodiscard]] QString totalText() const;
 
@@ -226,6 +300,7 @@ public:
 signals:
     void summaryChanged();
     void speedChanged();
+    void totalChanged();
     void message(const QString& text, bool problem);
     void offerChanged();
     void windowShownChanged();
@@ -233,7 +308,8 @@ signals:
 private:
     // What the page needs from the library about a series, read once per change.
     struct SeriesInfo {
-        QUrl art; // backdrop, else poster: the top of the page
+        QUrl art;      // backdrop, else poster: the top of the page
+        QUrl backdrop; // real backdrop only (empty when none or same as poster)
         QUrl poster;
         std::optional<double> resumeNumber;
         QHash<double, library::EpisodeRecord> episodes;
@@ -244,9 +320,14 @@ private:
         QString title;
         QString episode;
         QString detail;
+        QString activeSummary;
         QString notice;
         double progress = 0;
         QUrl art;
+        QString backdrop;
+        QUrl poster;
+        bool singleEpisode = false;
+        int taskCount = 0;
 
         bool operator==(const Header&) const = default;
     };
@@ -258,6 +339,9 @@ private:
         double progress = 0;
         QString percent;
         QUrl poster;
+        int activeSeriesCount = 0;
+        int activeTaskCount = 0;
+        int pendingTaskCount = 0;
 
         bool operator==(const Bar&) const = default;
     };
@@ -272,6 +356,11 @@ private:
     void taskChanged(qint64 id);
     void sample();
     const SeriesInfo& info(const QString& slug);
+    [[nodiscard]] bool fileExists(const QString& path);
+    [[nodiscard]] bool dirExists(const QString& path);
+    [[nodiscard]] bool hasExistingFolder(const QList<downloads::Task>& tasks);
+    void invalidateDiskCache();
+    [[nodiscard]] bool computeJdActive() const;
     [[nodiscard]] std::optional<double> nextToWatch(const QString& slug,
                                                     const QList<downloads::Task>& tasks);
     void playEpisode(const QString& slug, double number, const QString& title);
@@ -300,20 +389,28 @@ private:
     DownloadSeriesModel completed_;
     DownloadSeriesModel current_;
     DownloadSeriesModel active_;
+    DownloadEpisodesModel header_tasks_;
     QStringList line_order_; // every series in line, in order
     QHash<QString, SeriesInfo> infos_;
+    QHash<QString, bool> file_exists_cache_;
+    QHash<QString, bool> dir_exists_cache_;
+    bool completed_dirty_ = true;
     QTimer rebuild_timer_;
 
     bool can_pause_all_ = false;
     bool can_resume_all_ = false;
     bool can_retry_failed_ = false;
+    bool jd_downloading_ = false;
+    bool jd_active_ = false;
     Header header_;
     Bar bar_;
 
     QTimer sample_timer_;
     QList<qreal> samples_;
-    qint64 speed_ = 0;       // total now, read at each rebuild
-    qint64 shown_speed_ = 0; // the last sample's: what "Actual" says
+    QList<qreal> native_samples_;
+    qint64 speed_ = 0;        // total now, read at each rebuild
+    qint64 native_speed_ = 0; // native now, read at each rebuild
+    qint64 shown_speed_ = 0;  // the last sample's: what "Actual" says
     qint64 peak_ = 0;
     qint64 session_bytes_ = 0;
     QHash<qint64, Seen> seen_;

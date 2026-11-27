@@ -54,6 +54,15 @@ class AppController final : public QObject {
     Q_PROPERTY(AnimeView* libraryAnime READ libraryAnime CONSTANT)
     Q_PROPERTY(AnimeView* catalogAnime READ catalogAnime CONSTANT)
     Q_PROPERTY(QString version READ version CONSTANT)
+    Q_PROPERTY(QString qtVersion READ qtVersion CONSTANT)
+    Q_PROPERTY(QString platformLabel READ platformLabel CONSTANT)
+    Q_PROPERTY(QString aria2Version READ aria2Version CONSTANT)
+    Q_PROPERTY(QString mpvVersion READ mpvVersion CONSTANT)
+    Q_PROPERTY(QString sqliteVersion READ sqliteVersion CONSTANT)
+    Q_PROPERTY(QUrl homepageUrl READ homepageUrl CONSTANT)
+    Q_PROPERTY(QUrl releasesUrl READ releasesUrl CONSTANT)
+    Q_PROPERTY(QUrl issuesUrl READ issuesUrl CONSTANT)
+    Q_PROPERTY(QString dataDirectory READ dataDirectory CONSTANT)
     // The desktop shows tray icons: GNOME without its extension does not.
     Q_PROPERTY(bool tray READ hasTray CONSTANT)
 
@@ -103,6 +112,17 @@ public:
         return catalog_anime_.get();
     }
     [[nodiscard]] static QString version();
+    [[nodiscard]] static QString qtVersion();
+    [[nodiscard]] static QString platformLabel();
+    [[nodiscard]] static QString aria2Version();
+    [[nodiscard]] static QString mpvVersion();
+    [[nodiscard]] QString sqliteVersion() const;
+    [[nodiscard]] static QUrl homepageUrl();
+    [[nodiscard]] static QUrl releasesUrl();
+    [[nodiscard]] static QUrl issuesUrl();
+    [[nodiscard]] QString dataDirectory() const {
+        return paths_.data;
+    }
 
     void start();
 
@@ -114,6 +134,9 @@ public:
     Q_INVOKABLE void closeTo(AppSettings::CloseAction action, bool remember);
     Q_INVOKABLE void quit();
     Q_INVOKABLE void openDownloadFolder();
+    Q_INVOKABLE void openDataDirectory();
+    Q_INVOKABLE QString diagnosticsText() const;
+    Q_INVOKABLE void copyToClipboard(const QString& text);
     Q_INVOKABLE void openUrl(const QUrl& url);
     Q_INVOKABLE QString localPath(const QUrl& url) const;
     Q_INVOKABLE void tintTitleBar(QWindow* window, const QColor& background, const QColor& text);
@@ -155,12 +178,13 @@ private:
     std::unique_ptr<DownloadsView> downloads_view_;
     std::unique_ptr<AnimeView> library_anime_;
     std::unique_ptr<AnimeView> catalog_anime_;
-    std::unique_ptr<QSystemTrayIcon> tray_;
     std::unique_ptr<QMenu> tray_menu_;
+    std::unique_ptr<QSystemTrayIcon> tray_;
 #ifdef Q_OS_LINUX
     std::unique_ptr<Notifications> notifications_; // shown with or without a tray
 #endif
     QLocalServer instance_server_;
+    QString sqlite_version_;
     QString notified_slug_;
     QString problem_;
     bool quitting_ = false;

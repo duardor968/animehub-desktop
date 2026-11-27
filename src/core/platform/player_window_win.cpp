@@ -67,12 +67,20 @@ std::optional<PlayerWindowSample> samplePotPlayer(qint64 pid) {
         return std::nullopt;
     }
     const auto before = titleOf(search.window);
+    if (!before.endsWith(kTitleSuffix)) {
+        return std::nullopt;
+    }
     const auto status = ask(search.window, kGetPlayStatus);
+    if (!status || (*status != 1 && *status != 2)) {
+        return std::nullopt;
+    }
     const auto position = ask(search.window, kGetCurrentTime);
+    if (!position) {
+        return std::nullopt;
+    }
     const auto duration = ask(search.window, kGetTotalTime);
     // The same title on both sides: the figures belong to that file, not to the next one.
-    if (!status || !position || !duration || (*status != 1 && *status != 2) || *duration <= 0 ||
-        !before.endsWith(kTitleSuffix) || titleOf(search.window) != before) {
+    if (!duration || *duration <= 0 || titleOf(search.window) != before) {
         return std::nullopt;
     }
     return PlayerWindowSample{.fileName = before.chopped(kTitleSuffix.size()),
@@ -87,11 +95,11 @@ bool closePotPlayer(qint64 pid, std::chrono::milliseconds wait) {
     }
     Search search{.pid = static_cast<DWORD>(pid)};
     EnumWindows(findMain, reinterpret_cast<LPARAM>(&search));
-    if (search.window) {
-        PostMessageW(search.window, WM_CLOSE, 0, 0);
+    DWORD timeout = 0;
+    if (search.window && PostMessageW(search.window, WM_CLOSE, 0, 0) && wait.count() > 0) {
+        timeout = static_cast<DWORD>(wait.count());
     }
-    const bool ended =
-        WaitForSingleObject(process, static_cast<DWORD>(wait.count())) == WAIT_OBJECT_0;
+    const bool ended = WaitForSingleObject(process, timeout) == WAIT_OBJECT_0;
     CloseHandle(process);
     return ended;
 }

@@ -485,14 +485,15 @@ Decoded<EpisodePage> decodeEpisodes(const QByteArray& body) {
     return finish(reader, std::move(page));
 }
 
-Decoded<QList<ScheduleEntry>> decodeSchedule(const QByteArray& body) {
+Decoded<Schedule> decodeSchedule(const QByteArray& body) {
     using L = QLatin1StringView;
     const auto root = rootObject(body);
     if (!root) {
         return std::unexpected(root.error());
     }
     Reader reader;
-    auto entries = reader.list<ScheduleEntry>(
+    Schedule schedule;
+    schedule.entries = reader.list<ScheduleEntry>(
         reader.array(*root, {}, L("data")), QStringLiteral("data"),
         [&](const QJsonObject& item, const QString& item_path) {
             return ScheduleEntry{
@@ -505,7 +506,19 @@ Decoded<QList<ScheduleEntry>> decodeSchedule(const QByteArray& body) {
                 .isFinalEpisode = reader.boolean(item, item_path, L("isFinalEpisode")),
             };
         });
-    return finish(reader, std::move(entries));
+    // Old cached responses or minimal fixtures may omit `meta` or `meta.stale`.
+    const auto meta = root->value(L("meta"));
+    if (meta.isObject()) {
+        const auto stale = meta.toObject().value(L("stale"));
+        if (stale.isBool()) {
+            schedule.stale = stale.toBool();
+        } else if (!stale.isUndefined() && !stale.isNull()) {
+            reader.fail(QStringLiteral("meta.stale"), u"expected boolean");
+        }
+    } else if (!meta.isUndefined() && !meta.isNull()) {
+        reader.fail(QStringLiteral("meta"), u"expected object");
+    }
+    return finish(reader, std::move(schedule));
 }
 
 Decoded<Resolution> decodeResolution(const QByteArray& body) {

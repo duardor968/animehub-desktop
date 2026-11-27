@@ -3,18 +3,32 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import AnimeHub
 
-// Where the page sits, as Steam's store says it above a game: "Biblioteca › Kusuriya no
-// Hitorigoto". Each step is a link back to that place, by mouse or keyboard; the trail ends at the
-// page's parent, since the page's title right below names the page itself.
+// Full navigation breadcrumb above a detail hero: clickable parent steps leading into the muted,
+// non-clickable current page title ("Catálogo › Título", "Biblioteca › Franquicia › Título",
+// "Horario › Título", "Descargas › Título").
 RowLayout {
     id: root
 
     // [{text, go}] from the top place down to the page's parent.
     property var steps: []
+    // Muted, non-clickable title of the current page shown at the end of the trail.
+    property string current: ""
+
+    readonly property bool hasCurrent: {
+        if (current === "")
+            return false
+        if (steps.length > 0) {
+            const last = steps[steps.length - 1]
+            if (last && typeof last.go !== "function" && last.text === current)
+                return false
+        }
+        return true
+    }
 
     spacing: 6
     Accessible.role: Accessible.Grouping
-    Accessible.name: "Ruta: " + steps.map(step => step.text).join(", ")
+    Accessible.name: "Ruta: " + steps.map(step => step.text)
+                                     .concat(hasCurrent ? [current] : []).join(", ")
 
     Repeater {
         model: root.steps
@@ -25,30 +39,41 @@ RowLayout {
             required property int index
             required property var modelData
 
-            // A long franchise name gives way, cut at its end, before the page's edge.
+            readonly property bool clickable: typeof step.modelData.go === "function"
+            readonly property real stepCap: root.hasCurrent
+                                            ? Math.max(120, Math.round(root.width * 0.40))
+                                            : root.width
+
+            // A long franchise name gives way, cut at its end, before starving the current title.
             // Whole pixels: a layout rounds a fraction down and would cut a short name.
-            Layout.fillWidth: true
-            Layout.preferredWidth: Math.ceil(implicitWidth)
-            Layout.maximumWidth: Math.ceil(implicitWidth)
+            Layout.fillWidth: !clickable && !root.hasCurrent
+            Layout.preferredWidth: Math.min(Math.ceil(implicitWidth), stepCap)
+            Layout.maximumWidth: Math.min(Math.ceil(implicitWidth), stepCap)
             Layout.minimumWidth: 0
             spacing: 6
 
             Label {
                 visible: step.index > 0
                 text: "›"
-                color: Theme.muted
-                font.pixelSize: Theme.body
+                color: Theme.faint
+                font.pixelSize: 13
                 Accessible.ignored: true
             }
 
             AbstractButton {
                 id: link
+                visible: step.clickable
                 Layout.fillWidth: true
                 Layout.preferredWidth: Math.ceil(implicitWidth)
                 Layout.maximumWidth: Math.ceil(implicitWidth)
                 Layout.minimumWidth: 0
-                implicitWidth: implicitContentWidth + leftPadding + rightPadding
-                implicitHeight: implicitContentHeight + topPadding + bottomPadding
+                padding: 0
+                leftPadding: 0
+                rightPadding: 0
+                topPadding: 0
+                bottomPadding: 0
+                implicitWidth: implicitContentWidth
+                implicitHeight: implicitContentHeight
                 text: step.modelData.text
                 hoverEnabled: true
                 focusPolicy: Qt.StrongFocus
@@ -59,8 +84,9 @@ RowLayout {
                 background: null
                 contentItem: Label {
                     text: link.text
-                    color: link.hovered || link.visualFocus ? Theme.ink : Theme.muted
-                    font.pixelSize: Theme.body
+                    color: link.hovered || (link.activeFocus && InputModality.keyboard)
+                           ? Theme.ink : Theme.muted
+                    font.pixelSize: 13
                     font.underline: link.hovered
                     elide: Text.ElideRight
                 }
@@ -68,12 +94,45 @@ RowLayout {
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
 
                 FocusFrame {
-                    visible: link.visualFocus
+                    visible: link.activeFocus && InputModality.keyboard
                     radiusInside: 2
                 }
+            }
+
+            Label {
+                visible: !step.clickable
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                text: step.modelData.text
+                color: Theme.muted
+                font.pixelSize: 13
+                elide: Text.ElideRight
+                Accessible.role: Accessible.StaticText
             }
         }
     }
 
-    Item { Layout.fillWidth: true }
+    Label {
+        visible: root.hasCurrent && root.steps.length > 0
+        text: "›"
+        color: Theme.faint
+        font.pixelSize: 13
+        Accessible.ignored: true
+    }
+
+    Label {
+        visible: root.hasCurrent
+        Layout.fillWidth: true
+        Layout.minimumWidth: 0
+        text: root.current
+        color: Theme.muted
+        font.pixelSize: 13
+        elide: Text.ElideRight
+        Accessible.role: Accessible.StaticText
+    }
+
+    Item {
+        visible: !root.hasCurrent
+        Layout.fillWidth: true
+    }
 }

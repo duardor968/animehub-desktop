@@ -60,7 +60,7 @@ Rectangle {
     }
 
     function focusSearch() {
-        search.forceActiveFocus()
+        search.forceActiveFocus(InputModality.reason)
     }
 
     color: Theme.pane
@@ -114,87 +114,107 @@ Rectangle {
             placeholderText: "Buscar en la biblioteca"
             text: root.model.search
             onTextChanged: root.model.search = text
-            Keys.onDownPressed: list.forceActiveFocus()
+            Keys.onDownPressed: list.forceActiveFocus(InputModality.reason)
         }
 
-        // What the list shows and how, in one place: the filter, then the two ways of showing.
-        Button {
-            id: filterButton
+        // What the list shows and how, in one place: the filter, then the smart expand/collapse all toggle.
+        RowLayout {
             Layout.fillWidth: true
             Layout.leftMargin: 12
             Layout.rightMargin: 12
-            readonly property string label: root.model.archivedOnly
-                ? "Archivo (" + root.model.archivedCount + ")"
-                : root.filterNames[root.model.filter] + " (" + root.model.filterCounts[root.model.filter] + ")"
-                  + (root.model.onDiskOnly ? " · en disco" : "")
-            text: label
-            onClicked: filterMenu.show(filterButton)
-            Accessible.name: "Mostrar: " + label
+            spacing: 6
 
-            contentItem: RowLayout {
-                spacing: 8
+            Button {
+                id: filterButton
+                Layout.fillWidth: true
+                readonly property string label: root.model.archivedOnly
+                    ? "Archivo (" + root.model.archivedCount + ")"
+                    : root.filterNames[root.model.filter] + " (" + root.model.filterCounts[root.model.filter] + ")"
+                      + (root.model.onDiskOnly ? " · en disco" : "")
+                text: label
+                onClicked: filterMenu.show(filterButton)
+                Accessible.name: "Mostrar: " + label
 
-                Label {
-                    Layout.fillWidth: true
-                    text: filterButton.label
-                    elide: Text.ElideRight
-                    color: Theme.ink
-                    font: filterButton.font
+                contentItem: RowLayout {
+                    spacing: 8
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: filterButton.label
+                        elide: Text.ElideRight
+                        color: Theme.ink
+                        font: filterButton.font
+                    }
+
+                    Glyph {
+                        glyph: "e70d"
+                        size: 12
+                        color: Theme.muted
+                    }
                 }
 
-                Glyph {
-                    glyph: "e70d"
-                    size: 12
-                    color: Theme.muted
-                }
-            }
+                ActionMenu {
+                    id: filterMenu
+                    width: filterButton.width
 
-            ActionMenu {
-                id: filterMenu
-                width: filterButton.width
+                    Repeater {
+                        model: root.filterOrder
+                        delegate: MenuEntry {
+                            required property int modelData
+                            text: root.filterNames[modelData] + " (" + root.model.filterCounts[modelData] + ")"
+                            checkable: true
+                            checked: !root.model.archivedOnly && root.model.filter === modelData
+                            onTriggered: {
+                                root.model.archivedOnly = false
+                                root.model.filter = modelData
+                                root.homeRequested()
+                            }
+                        }
+                    }
 
-                Repeater {
-                    model: root.filterOrder
-                    delegate: MenuEntry {
-                        required property int modelData
-                        text: root.filterNames[modelData] + " (" + root.model.filterCounts[modelData] + ")"
+                    MenuEntry {
+                        visible: root.model.archivedCount > 0
+                        height: visible ? implicitHeight : 0
+                        text: "Archivo (" + root.model.archivedCount + ")"
                         checkable: true
-                        checked: !root.model.archivedOnly && root.model.filter === modelData
+                        checked: root.model.archivedOnly
                         onTriggered: {
-                            root.model.archivedOnly = false
-                            root.model.filter = modelData
+                            root.model.archivedOnly = true
                             root.homeRequested()
                         }
                     }
-                }
 
-                MenuEntry {
-                    visible: root.model.archivedCount > 0
-                    height: visible ? implicitHeight : 0
-                    text: "Archivo (" + root.model.archivedCount + ")"
-                    checkable: true
-                    checked: root.model.archivedOnly
-                    onTriggered: {
-                        root.model.archivedOnly = true
-                        root.homeRequested()
+                    MenuSeparator {}
+
+                    MenuEntry {
+                        text: "Solo en disco"
+                        checkable: true
+                        checked: root.model.onDiskOnly
+                        onTriggered: root.model.onDiskOnly = !root.model.onDiskOnly
+                    }
+
+                    MenuEntry {
+                        text: "Agrupar por franquicia"
+                        checkable: true
+                        checked: root.model.grouped
+                        onTriggered: root.model.grouped = !root.model.grouped
                     }
                 }
+            }
 
-                MenuSeparator {}
-
-                MenuEntry {
-                    text: "Solo en disco"
-                    checkable: true
-                    checked: root.model.onDiskOnly
-                    onTriggered: root.model.onDiskOnly = !root.model.onDiskOnly
-                }
-
-                MenuEntry {
-                    text: "Agrupar por franquicia"
-                    checkable: true
-                    checked: root.model.grouped
-                    onTriggered: root.model.grouped = !root.model.grouped
-                }
+            ToolButton {
+                id: toggleGroupsButton
+                objectName: "toggleGroupsButton"
+                visible: root.model.grouped && root.model.hasGroups
+                display: AbstractButton.IconOnly
+                icon.source: Theme.source(root.model.allExpanded ? Theme.icon.collapseAll
+                                                                 : Theme.icon.expandAll)
+                text: root.model.allExpanded ? "Contraer todas las franquicias"
+                                             : "Expandir todas las franquicias"
+                Accessible.name: text
+                ToolTip.visible: hovered
+                ToolTip.text: text
+                onClicked: root.model.allExpanded ? root.model.collapseAll() : root.model.expandAll()
             }
         }
 
@@ -265,7 +285,13 @@ Rectangle {
                 rightInset: 0
                 topInset: 0
                 bottomInset: 0
-                leftPadding: 8 + depth * 20
+                // Override FluentWinUI3's inherited topPadding/bottomPadding: 8 so the 28 px poster
+                // stays centered inside the 36 px hover pill without protruding below it.
+                topPadding: 0
+                bottomPadding: 0
+                // Keep >= 8 px left offset so Fluent's active left bar (x=4..7 px) stays clear;
+                // top-level grouped rows reserve a 28×36 px chevron column so all posters align at x=38.
+                leftPadding: root.model.grouped ? (depth === 0 ? 8 : 38 + depth * 20) : 14
                 rightPadding: 8
                 highlighted: isGroup ? groupId === root.selectedGroup : slug === root.selectedSlug
                 // The list is the keyboard's stop; a click focuses the list on this row.
@@ -275,96 +301,91 @@ Rectangle {
                     root.activateRow(index, false)
                 }
                 Accessible.name: title + ", " + caption
-                ToolTip.visible: hovered
+                ToolTip.visible: hovered && !chevronBtn.hovered && titleLabel.truncated
                 ToolTip.delay: 600
                 ToolTip.text: title + "\n" + caption
 
                 // Fluent frames the row reached with Tab; the arrows move the keyboard without
                 // that, so the same frame is drawn here.
                 FocusFrame {
-                    visible: row.activeFocus && !row.visualFocus && row.focusReason !== Qt.MouseFocusReason
+                    visible: row.activeFocus && !row.visualFocus && InputModality.keyboard
                 }
 
                 TapHandler {
                     acceptedButtons: Qt.RightButton
-                    onTapped: rowMenu.showAtPointer()
+                    onTapped: rowMenu.openFor(row.index, row.slug, row.title, row.isGroup, null)
                 }
-                Keys.onMenuPressed: rowMenu.show(row)
-
-                ActionMenu {
-                    id: rowMenu
-                    entries: [openRow, createRow, restoreRow, removeRow]
-
-                    MenuEntry {
-                        id: openRow
-                        text: row.isGroup ? "Abrir franquicia" : "Abrir anime"
-                        onTriggered: root.activateRow(row.index, false)
-                    }
-
-                    MenuEntry {
-                        id: createRow
-                        property bool wanted: !row.isGroup
-                        text: "Crear franquicia…"
-                        onTriggered: root.createFranchiseRequested(row.slug, row.title)
-                    }
-
-                    MenuEntry {
-                        id: restoreRow
-                        property bool wanted: !row.isGroup && root.model.archivedOnly
-                        text: "Restaurar a la biblioteca"
-                        onTriggered: {
-                            if (!root.model.archive([row.slug], false))
-                                root.actionFailed(root.model.error)
-                        }
-                    }
-
-                    MenuEntry {
-                        id: removeRow
-                        property bool wanted: !row.isGroup
-                        text: root.model.archivedOnly ? "Eliminar…" : "Quitar de la biblioteca…"
-                        onTriggered: root.removeRequested(row.slug, row.title)
-                    }
-                }
+                Keys.onMenuPressed: rowMenu.openFor(row.index, row.slug, row.title, row.isGroup, row)
 
                 contentItem: RowLayout {
                     spacing: 8
 
-                    // Unfolds the franchise in place; the row itself opens its page. While the list
-                    // groups, every row keeps the column, so the posters line up.
-                    Glyph {
-                        visible: root.model.grouped
-                        Layout.preferredWidth: 12
-                        opacity: row.isGroup ? 1 : 0
-                        glyph: row.expanded ? "e70d" : "e76c"
-                        size: 10
-                        color: Theme.muted
+                    // Unfolds the franchise in place; 28×36 px click-isolated button never opens
+                    // FranchisePage. Non-group top-level rows keep the column so posters align.
+                    Item {
+                        visible: root.model.grouped && row.depth === 0
+                        Layout.preferredWidth: 28
+                        Layout.preferredHeight: 36
+                        Layout.rightMargin: -6
 
-                        TapHandler {
-                            enabled: row.isGroup
-                            onTapped: root.model.toggleGroup(row.groupId)
+                        AbstractButton {
+                            id: chevronBtn
+                            visible: row.isGroup
+                            anchors.fill: parent
+                            padding: 0
+                            hoverEnabled: true
+                            focusPolicy: Qt.NoFocus
+                            text: row.expanded ? "Contraer " + row.title : "Expandir " + row.title
+                            Accessible.name: text
+                            onClicked: root.model.toggleGroup(row.groupId)
+
+                            background: Rectangle {
+                                anchors.fill: parent
+                                anchors.leftMargin: 3
+                                anchors.rightMargin: 3
+                                anchors.topMargin: 6
+                                anchors.bottomMargin: 6
+                                radius: 4
+                                color: chevronBtn.down ? Qt.rgba(1, 1, 1, 0.12)
+                                       : chevronBtn.hovered ? Qt.rgba(1, 1, 1, 0.07) : "transparent"
+                            }
+
+                            contentItem: Item {
+                                Glyph {
+                                    anchors.centerIn: parent
+                                    glyph: row.expanded ? "e70d" : "e76c"
+                                    size: 10
+                                    color: chevronBtn.hovered ? Theme.ink : Theme.muted
+                                }
+                            }
                         }
                     }
 
                     Poster {
                         Layout.preferredWidth: 20
                         Layout.preferredHeight: 28
+                        Layout.alignment: Qt.AlignVCenter
                         source: row.posterUrl
                     }
 
                     Label {
+                        id: titleLabel
                         Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
                         text: row.title
                         // Cut in the middle in either view: titles that share a beginning differ
                         // at their end ("…Part 2", "…2nd Season"), and both ends stay.
                         elide: Text.ElideMiddle
                         font.pixelSize: Theme.body
-                        color: row.ready ? Theme.ink : Theme.muted
+                        font.weight: row.highlighted ? Font.DemiBold : Font.Normal
+                        color: row.highlighted ? "#ffffff" : (row.ready ? Theme.ink : Theme.muted)
                     }
 
                     Rectangle {
                         visible: row.fresh
                         Layout.preferredWidth: 6
                         Layout.preferredHeight: 6
+                        Layout.alignment: Qt.AlignVCenter
                         radius: 3
                         color: Theme.accent
                     }
@@ -404,6 +425,90 @@ Rectangle {
                     }
                 }
             }
+        }
+    }
+
+    // One shared row context menu for the entire library list (avoids N*5 QML objects per reload).
+    ActionMenu {
+        id: rowMenu
+        objectName: "libraryRowMenu"
+
+        property int rowIndex: -1
+        property string rowSlug: ""
+        property string rowTitle: ""
+        property bool rowIsGroup: false
+
+        entries: [openRow, createRow, groupsSeparator, toggleAllGroupsRow, removeSeparator, restoreRow, removeRow]
+
+        function openFor(index, slug, title, isGroup, anchor) {
+            rowIndex = index
+            rowSlug = slug
+            rowTitle = title
+            rowIsGroup = isGroup
+            if (anchor)
+                show(anchor)
+            else
+                showAtPointer()
+        }
+
+        function openForSlug(slug) {
+            const index = root.model.indexOf(slug)
+            if (index < 0)
+                return false
+            list.positionViewAtIndex(index, ListView.Contain)
+            const item = list.itemAtIndex(index)
+            openFor(index, slug, item ? item.title : slug, false, item || list)
+            return true
+        }
+
+        MenuEntry {
+            id: openRow
+            text: rowMenu.rowIsGroup ? "Abrir franquicia" : "Abrir anime"
+            onTriggered: root.activateRow(rowMenu.rowIndex, false)
+        }
+
+        MenuEntry {
+            id: createRow
+            property bool wanted: !rowMenu.rowIsGroup
+            text: "Crear franquicia…"
+            onTriggered: root.createFranchiseRequested(rowMenu.rowSlug, rowMenu.rowTitle)
+        }
+
+        MenuSeparator {
+            id: groupsSeparator
+            property bool separator: true
+        }
+
+        MenuEntry {
+            id: toggleAllGroupsRow
+            property bool wanted: root.model.grouped && root.model.hasGroups
+            glyph: root.model.allExpanded ? Theme.icon.collapseAll : Theme.icon.expandAll
+            text: root.model.allExpanded ? "Contraer todas las franquicias"
+                                         : "Expandir todas las franquicias"
+            onTriggered: root.model.allExpanded ? root.model.collapseAll() : root.model.expandAll()
+        }
+
+        MenuSeparator {
+            id: removeSeparator
+            property bool separator: true
+        }
+
+        MenuEntry {
+            id: restoreRow
+            objectName: "restoreArchivedEntry"
+            property bool wanted: !rowMenu.rowIsGroup && root.model.archivedOnly
+            text: "Restaurar a la biblioteca"
+            onTriggered: {
+                if (!root.model.archive([rowMenu.rowSlug], false))
+                    root.actionFailed(root.model.error)
+            }
+        }
+
+        MenuEntry {
+            id: removeRow
+            property bool wanted: !rowMenu.rowIsGroup
+            text: root.model.archivedOnly ? "Eliminar…" : "Quitar de la biblioteca…"
+            onTriggered: root.removeRequested(rowMenu.rowSlug, rowMenu.rowTitle)
         }
     }
 }

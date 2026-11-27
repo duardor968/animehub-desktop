@@ -12,7 +12,7 @@ StackView {
 
     required property AppController app
     property bool active: false
-    // Where the anime on view was opened from: "catalog", or "downloads" for the Downloads tab.
+    // Where the anime on view was opened from: "catalog", "schedule", or "downloads".
     property string from: "catalog"
 
     readonly property CatalogView catalog: app.catalog
@@ -20,6 +20,22 @@ StackView {
     // Esc on an anime: the window goes back as its ← does.
     signal back()
     signal showDownloads()
+    signal showSchedule()
+
+    // Crisp fast transitions avoid Fluent's long default push/pop slide that can leave a blank
+    // frame on rapid back-and-reopen sequences.
+    pushEnter: Transition {
+        PropertyAnimation { property: "opacity"; from: 0; to: 1; duration: 120; easing.type: Easing.OutCubic }
+    }
+    pushExit: Transition {
+        PropertyAnimation { property: "opacity"; from: 1; to: 0; duration: 80 }
+    }
+    popEnter: Transition {
+        PropertyAnimation { property: "opacity"; from: 0; to: 1; duration: 120; easing.type: Easing.OutCubic }
+    }
+    popExit: Transition {
+        PropertyAnimation { property: "opacity"; from: 1; to: 0; duration: 80 }
+    }
 
     onActiveChanged: if (active) catalog.start()
 
@@ -38,6 +54,8 @@ StackView {
         app.openCatalogAnime(slug)
         if (depth === 1)
             push(animePage)
+        if (currentItem)
+            currentItem.opacity = 1
         if (!quiet)
             focusTitle(reason)
     }
@@ -51,6 +69,19 @@ StackView {
     function search(text) {
         home()
         catalog.searchFor(text)
+    }
+
+    // Pop to catalog browse and filter by a genre chip's slug (from AnimePage in Catalog or Library).
+    function filterByGenre(slug) {
+        home()
+        catalog.start()
+        if (catalog.search !== "" || catalog.status !== 0)
+            catalog.clearFilters()
+        if (catalog.genre !== slug)
+            catalog.genre = slug
+        else
+            catalog.reload()
+        browse.scrollToTop()
     }
 
     function focusSearch() {
@@ -108,16 +139,37 @@ StackView {
 
         AnimePage {
             view: stack.app.catalogAnime
-            steps: stack.from === "downloads" ? [{ text: "Descargas", go: () => stack.showDownloads() }]
-                                              : [{ text: "Catálogo", go: () => stack.home() }]
+            steps: stack.from === "downloads"
+                   ? [{ text: "Descargas", go: () => stack.showDownloads() }]
+                   : stack.from === "schedule"
+                   ? [{ text: "Horario", go: () => {
+                           const win = stack.ApplicationWindow.window
+                           if (win && typeof win.showPage === "function")
+                               win.showPage(2)
+                           stack.showSchedule()
+                       } }]
+                   : [{ text: "Catálogo", go: () => stack.home() }]
             onBack: stack.back()
+            onGenreSelected: slug => stack.filterByGenre(slug)
         }
     }
 
     initialItem: Item {
         id: browse
 
-        function focusSearch() { search.forceActiveFocus() }
+        function focusSearch() { search.forceActiveFocus(InputModality.reason) }
+        function scrollToTop() { grid.positionViewAtBeginning() }
+
+        function syncFilters() {
+            status.currentIndex = stack.catalog.status
+            genreBox.currentIndex = Math.max(0, genreBox.indexOfValue(stack.catalog.genre))
+        }
+
+        Connections {
+            target: stack.catalog
+            function onQueryChanged() { browse.syncFilters() }
+            function onGenresChanged() { browse.syncFilters() }
+        }
 
         RowLayout {
             id: toolbar
@@ -151,6 +203,7 @@ StackView {
             }
 
             ComboBox {
+                id: genreBox
                 Layout.preferredWidth: 180
                 Layout.minimumWidth: 130
                 textRole: "name"

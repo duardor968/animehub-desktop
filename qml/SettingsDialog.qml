@@ -55,6 +55,15 @@ ModalDialog {
         return true
     }
 
+    property bool diagnosticsCopied: false
+    property bool aboutEnginesExpanded: false
+
+    Timer {
+        id: copiedTimer
+        interval: 2000
+        onTriggered: dialog.diagnosticsCopied = false
+    }
+
     // Clear of the tab bar above it, and of the window's edges down to its minimum size.
     width: Math.min(900, parent.width - 96)
     height: Math.min(600, parent.height - 120)
@@ -65,7 +74,11 @@ ModalDialog {
     header: null
     footer: null
     focus: true
-    onOpened: nav.forceActiveFocus()
+    onOpened: nav.forceActiveFocus(InputModality.reason)
+    onClosed: {
+        diagnosticsCopied = false
+        aboutEnginesExpanded = false
+    }
 
     // A category's rows; only the page scrolls when the dialog is shorter than they are.
     component SettingsPage: ScrollView {
@@ -111,6 +124,102 @@ ModalDialog {
         // Without a text, as wide as its knob: flush with the edge.
         Layout.preferredWidth: implicitIndicatorWidth
         Accessible.name: name
+    }
+
+    // Windows 11 SettingsCard surface for "Acerca de" (Files / PowerToys pattern).
+    component SettingsCard: Rectangle {
+        id: card
+        default property alias body: cardBox.data
+        property int verticalPadding: 12
+
+        Layout.fillWidth: true
+        implicitHeight: cardBox.implicitHeight + verticalPadding * 2
+        radius: Theme.radius
+        color: Qt.rgba(1, 1, 1, 0.045)
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.08)
+
+        ColumnLayout {
+            id: cardBox
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.leftMargin: 16
+            anchors.rightMargin: 16
+            anchors.topMargin: card.verticalPadding
+            anchors.bottomMargin: card.verticalPadding
+            spacing: 0
+        }
+    }
+
+    component AboutLinkRow: AbstractButton {
+        id: linkRow
+        property string title
+        property string subtitle
+
+        Layout.fillWidth: true
+        implicitHeight: 40
+        padding: 0
+        hoverEnabled: true
+        focusPolicy: Qt.StrongFocus
+        activeFocusOnTab: true
+        Keys.onReturnPressed: event => {
+            event.accepted = true
+            linkRow.click()
+        }
+        Keys.onEnterPressed: event => {
+            event.accepted = true
+            linkRow.click()
+        }
+        Accessible.role: Accessible.Link
+        Accessible.name: title + (subtitle !== "" ? ", " + subtitle : "")
+        Accessible.onPressAction: click()
+
+        background: Rectangle {
+            x: -8
+            width: parent.width + 16
+            radius: 4
+            color: linkRow.down ? Qt.rgba(1, 1, 1, 0.03)
+                   : linkRow.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent"
+
+            FocusFrame {
+                visible: linkRow.activeFocus && InputModality.keyboard
+                radiusInside: 4
+            }
+        }
+
+        contentItem: RowLayout {
+            spacing: 10
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 1
+
+                Label {
+                    Layout.fillWidth: true
+                    text: linkRow.title
+                    color: Theme.ink
+                    font.pixelSize: Theme.body - 1
+                    elide: Text.ElideRight
+                    Accessible.ignored: true
+                }
+                Label {
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    text: linkRow.subtitle
+                    color: Theme.muted
+                    font.pixelSize: Theme.caption - 1
+                    elide: Text.ElideRight
+                    Accessible.ignored: true
+                }
+            }
+
+            Glyph {
+                glyph: Theme.icon.openExternal
+                size: 12
+                color: linkRow.hovered ? Theme.ink : Theme.muted
+            }
+        }
     }
 
     RowLayout {
@@ -256,6 +365,18 @@ ModalDialog {
                             Accessible.name: "Al cerrar la ventana"
                         }
                     }
+
+                    SettingRow {
+                        label: "Episodios en Descargas"
+
+                        Choice {
+                            readonly property var keys: ["cards", "compact"]
+                            model: ["Con miniaturas", "Tabla compacta"]
+                            currentIndex: Math.max(0, keys.indexOf(dialog.settings.downloadEpisodesStyle))
+                            onActivated: index => dialog.settings.downloadEpisodesStyle = keys[index]
+                            Accessible.name: "Episodios en Descargas"
+                        }
+                    }
                 }
 
                 SettingsPage {
@@ -273,6 +394,15 @@ ModalDialog {
                     }
 
                     SettingRow {
+                        label: "Límite de velocidad"
+
+                        NativeSpeedLimit {
+                            settings: dialog.settings
+                            showApply: false
+                        }
+                    }
+
+                    SettingRow {
                         label: "Servidor preferido"
 
                         Choice {
@@ -285,13 +415,15 @@ ModalDialog {
                         }
                     }
 
-                    // As the web's preferences: which servers episodes come from. Their knobs in
-                    // one column, their names after them.
+                    // As the web's preferences: which servers episodes come from. Compact 3-column
+                    // grid keeps all Descargas rows within 1100x720 without scrolling.
                     SettingRow {
                         label: "Proveedores"
 
-                        ColumnLayout {
-                            spacing: 8
+                        GridLayout {
+                            columns: 3
+                            columnSpacing: 16
+                            rowSpacing: 8
 
                             Repeater {
                                 model: dialog.settings.providerSwitches
@@ -302,7 +434,7 @@ ModalDialog {
                                     id: provider
                                     required property var modelData
                                     readonly property bool explained: modelData.reason !== ""
-                                    Layout.fillWidth: true
+                                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                                     implicitWidth: providerSwitch.implicitWidth
                                     implicitHeight: providerSwitch.implicitHeight
                                     activeFocusOnTab: !providerSwitch.enabled
@@ -313,7 +445,8 @@ ModalDialog {
                                     Accessible.checked: modelData.checked
                                     Accessible.ignored: providerSwitch.enabled
                                     HoverHandler { id: reasonHover }
-                                    ToolTip.visible: explained && (reasonHover.hovered || activeFocus)
+                                    ToolTip.visible: explained && (reasonHover.hovered
+                                                                   || (activeFocus && InputModality.keyboard))
                                     ToolTip.text: modelData.reason
 
                                     Toggle {
@@ -328,7 +461,7 @@ ModalDialog {
 
                                         FocusFrame {
                                             target: providerSwitch.indicator
-                                            visible: provider.activeFocus
+                                            visible: provider.activeFocus && InputModality.keyboard
                                             radiusInside: providerSwitch.indicator.height / 2
                                         }
                                     }
@@ -512,55 +645,295 @@ ModalDialog {
                 }
 
                 SettingsPage {
-                    RowLayout {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        Layout.bottomMargin: 16
-                        spacing: 16
+                        spacing: 10
 
-                        Image {
-                            Layout.preferredWidth: 48
-                            Layout.preferredHeight: 48
-                            source: "qrc:/qt/qml/AnimeHub/assets/animehub.png"
-                            mipmap: true
-                            Accessible.ignored: true
-                        }
-                        ColumnLayout {
-                            spacing: 2
+                        // Identity card: app icon, version + platform, Copy diagnostics.
+                        SettingsCard {
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 14
 
-                            Label {
-                                text: "AnimeHub"
-                                color: Theme.ink
-                                font.pixelSize: Theme.subtitle
-                                font.weight: Font.DemiBold
+                                Image {
+                                    Layout.preferredWidth: 44
+                                    Layout.preferredHeight: 44
+                                    source: "qrc:/qt/qml/AnimeHub/assets/animehub.png"
+                                    mipmap: true
+                                    Accessible.ignored: true
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: "AnimeHub Desktop"
+                                        color: Theme.ink
+                                        font.pixelSize: Theme.subtitle
+                                        font.weight: Font.DemiBold
+                                        elide: Text.ElideRight
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: "Versión " + dialog.app.version + " · " + dialog.app.platformLabel
+                                        color: Theme.muted
+                                        font.pixelSize: Theme.caption
+                                        elide: Text.ElideRight
+                                    }
+                                }
+
+                                Button {
+                                    text: dialog.diagnosticsCopied ? "Copiado" : "Copiar información"
+                                    icon.source: Theme.source(dialog.diagnosticsCopied
+                                                              ? Theme.icon.check : Theme.icon.copy)
+                                    icon.width: 14
+                                    icon.height: 14
+                                    icon.color: dialog.diagnosticsCopied ? Theme.success : Theme.ink
+                                    Accessible.name: "Copiar información técnica"
+                                    onClicked: {
+                                        dialog.app.copyToClipboard(dialog.app.diagnosticsText())
+                                        dialog.diagnosticsCopied = true
+                                        copiedTimer.restart()
+                                    }
+                                }
                             }
-                            Label {
-                                text: "Versión " + dialog.app.version
-                                color: Theme.muted
+                        }
+
+                        // Links card: GitHub repository, release notes, issue tracker.
+                        SettingsCard {
+                            verticalPadding: 6
+
+                            AboutLinkRow {
+                                title: "Repositorio en GitHub"
+                                subtitle: dialog.app.homepageUrl.toString().replace(/^https?:\/\//, "")
+                                onClicked: dialog.app.openUrl(dialog.app.homepageUrl)
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 4
+                                Layout.bottomMargin: 4
+                                Layout.preferredHeight: 1
+                                color: Qt.rgba(1, 1, 1, 0.07)
+                            }
+
+                            AboutLinkRow {
+                                title: "Notas de la versión"
+                                subtitle: "Cambios en v" + dialog.app.version
+                                onClicked: dialog.app.openUrl(dialog.app.releasesUrl)
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 4
+                                Layout.bottomMargin: 4
+                                Layout.preferredHeight: 1
+                                color: Qt.rgba(1, 1, 1, 0.07)
+                            }
+
+                            AboutLinkRow {
+                                title: "Informar de un error"
+                                subtitle: "Abrir incidencia en GitHub Issues"
+                                onClicked: dialog.app.openUrl(dialog.app.issuesUrl)
                             }
                         }
-                    }
 
-                    SettingRow {
-                        label: "Licencia"
-                        value: "GNU GPL 3.0 o posterior"
+                        // Diagnostics card: local data folder + Open button.
+                        SettingsCard {
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 12
 
-                        Button {
-                            visible: dialog.licenseFile.toString() !== ""
-                            text: "Abrir"
-                            onClicked: dialog.app.openUrl(dialog.licenseFile)
-                            Accessible.name: "Abrir la licencia"
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: "Carpeta de datos"
+                                        color: Theme.ink
+                                        font.pixelSize: Theme.body - 1
+                                        font.weight: Font.DemiBold
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: dialog.nativePath(dialog.app.dataDirectory)
+                                        color: Theme.muted
+                                        font.pixelSize: Theme.caption
+                                        elide: Text.ElideMiddle
+                                        HoverHandler { id: dataDirHover }
+                                        ToolTip.visible: dataDirHover.hovered && truncated
+                                        ToolTip.text: text
+                                    }
+                                }
+
+                                Button {
+                                    text: "Abrir"
+                                    icon.source: Theme.source(Theme.icon.folder)
+                                    icon.width: 14
+                                    icon.height: 14
+                                    Accessible.name: "Abrir carpeta de datos"
+                                    onClicked: dialog.app.openDataDirectory()
+                                }
+                            }
                         }
-                    }
 
-                    SettingRow {
-                        visible: dialog.noticeFile.toString() !== ""
-                        label: "Software de terceros"
-                        value: "Qt, aria2 y mpv"
+                        // Collapsible SettingsExpander: engines and licenses (collapsed at rest so
+                        // all four cards fit within 1100x720 with zero scroll).
+                        SettingsCard {
+                            id: enginesExpander
+                            objectName: "aboutEnginesExpander"
+                            property bool expanded: dialog.aboutEnginesExpanded
+                            verticalPadding: 10
 
-                        Button {
-                            text: "Abrir"
-                            onClicked: dialog.app.openUrl(dialog.noticeFile)
-                            Accessible.name: "Abrir los avisos de software de terceros"
+                            readonly property string summaryText: {
+                                const parts = ["Qt " + dialog.app.qtVersion]
+                                if (dialog.windows) {
+                                    if (dialog.app.aria2Version !== "")
+                                        parts.push("aria2 " + dialog.app.aria2Version)
+                                    if (dialog.app.mpvVersion !== "")
+                                        parts.push("mpv " + dialog.app.mpvVersion)
+                                }
+                                parts.push("SQLite")
+                                parts.push("GNU GPL 3.0+")
+                                return parts.join(" · ")
+                            }
+
+                            AbstractButton {
+                                id: expanderHeader
+                                Layout.fillWidth: true
+                                implicitHeight: 38
+                                padding: 0
+                                hoverEnabled: true
+                                focusPolicy: Qt.StrongFocus
+                                activeFocusOnTab: true
+                                Keys.onReturnPressed: event => {
+                                    event.accepted = true
+                                    expanderHeader.click()
+                                }
+                                Keys.onEnterPressed: event => {
+                                    event.accepted = true
+                                    expanderHeader.click()
+                                }
+                                Accessible.role: Accessible.Button
+                                Accessible.name: "Motores y licencias"
+                                Accessible.checkable: true
+                                Accessible.checked: dialog.aboutEnginesExpanded
+                                Accessible.onPressAction: click()
+                                onClicked: dialog.aboutEnginesExpanded = !dialog.aboutEnginesExpanded
+
+                                background: Rectangle {
+                                    x: -8
+                                    width: parent.width + 16
+                                    radius: 4
+                                    color: expanderHeader.down ? Qt.rgba(1, 1, 1, 0.03)
+                                           : expanderHeader.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent"
+
+                                    FocusFrame {
+                                        visible: expanderHeader.activeFocus && InputModality.keyboard
+                                        radiusInside: 4
+                                    }
+                                }
+
+                                contentItem: RowLayout {
+                                    spacing: 10
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 1
+
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: "Motores y licencias"
+                                            color: Theme.ink
+                                            font.pixelSize: Theme.body - 1
+                                            font.weight: Font.DemiBold
+                                            Accessible.ignored: true
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: enginesExpander.summaryText
+                                            color: Theme.muted
+                                            font.pixelSize: Theme.caption - 1
+                                            elide: Text.ElideRight
+                                            Accessible.ignored: true
+                                        }
+                                    }
+
+                                    Glyph {
+                                        glyph: dialog.aboutEnginesExpanded ? Theme.icon.collapseAll
+                                                                           : Theme.icon.expandAll
+                                        size: 11
+                                        color: expanderHeader.hovered ? Theme.ink : Theme.muted
+                                    }
+                                }
+                            }
+
+                            ColumnLayout {
+                                visible: dialog.aboutEnginesExpanded
+                                Layout.fillWidth: true
+                                Layout.topMargin: 10
+                                spacing: 10
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 1
+                                    color: Qt.rgba(1, 1, 1, 0.07)
+                                }
+
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 2
+                                    columnSpacing: 20
+                                    rowSpacing: 6
+
+                                    Repeater {
+                                        model: [
+                                            "Qt Quick / FluentWinUI3", dialog.app.qtVersion,
+                                            "aria2 (descargas)", dialog.windows && dialog.app.aria2Version !== ""
+                                                                 ? dialog.app.aria2Version : "Del sistema",
+                                            "mpv (reproducción)", dialog.windows && dialog.app.mpvVersion !== ""
+                                                                  ? dialog.app.mpvVersion : "Del sistema",
+                                            "SQLite", dialog.app.sqliteVersion,
+                                            "Licencia", "GNU GPL 3.0 o posterior"
+                                        ]
+
+                                        delegate: Label {
+                                            required property int index
+                                            required property string modelData
+                                            Layout.fillWidth: index % 2 === 1
+                                            text: modelData
+                                            color: index % 2 === 0 ? Theme.muted : Theme.ink
+                                            font.pixelSize: Theme.caption
+                                            font.weight: index % 2 === 1 ? Font.DemiBold : Font.Normal
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+
+                                RowLayout {
+                                    visible: dialog.licenseFile.toString() !== ""
+                                             || dialog.noticeFile.toString() !== ""
+                                    Layout.topMargin: 2
+                                    spacing: 8
+
+                                    Button {
+                                        visible: dialog.licenseFile.toString() !== ""
+                                        text: "Ver licencia"
+                                        onClicked: dialog.app.openUrl(dialog.licenseFile)
+                                        Accessible.name: "Ver la licencia"
+                                    }
+
+                                    Button {
+                                        visible: dialog.noticeFile.toString() !== ""
+                                        text: "Terceros"
+                                        onClicked: dialog.app.openUrl(dialog.noticeFile)
+                                        Accessible.name: "Ver licencias de terceros"
+                                    }
+                                }
+                            }
                         }
                     }
                 }

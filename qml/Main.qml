@@ -45,7 +45,7 @@ ApplicationWindow {
         if (index < 0 || index >= history.length)
             return
         const reason = openingReason()
-        focusAt[historyIndex] = { item: activeFocusItem, reason: reason }
+        focusAt[historyIndex] = { item: activeFocusItem }
         travelling = true
         const place = history[index]
         tabs.currentIndex = place.page
@@ -63,7 +63,7 @@ ApplicationWindow {
         const last = focusAt[index]
         try {
             if (last && last.item && last.item.visible) {
-                last.item.forceActiveFocus(last.reason)
+                last.item.forceActiveFocus(reason)
                 return
             }
         } catch (gone) {
@@ -83,15 +83,13 @@ ApplicationWindow {
         else if (tabs.currentIndex === 1)
             catalogPage.home()
     }
-    // How a place is being opened, and what had the keyboard: a mouse-led opening shows no focus
-    // frame on the new page, as Fluent's controls show none for a click.
+    // How a place is being opened, and what had the keyboard: the new page shows its focus frame
+    // only while the keyboard is in use (InputModality), as Fluent's controls show none for a click.
     function openingReason() {
         const item = activeFocusItem
-        const reason = item && item.focusReason === Qt.MouseFocusReason ? Qt.MouseFocusReason
-                                                                         : Qt.OtherFocusReason
         if (!travelling && item)
-            leaving = { item: item, reason: item.focusReason ?? Qt.OtherFocusReason }
-        return reason
+            leaving = { item: item }
+        return InputModality.reason
     }
     // Places change after the click that changes them: one record per move, not per property.
     Timer {
@@ -100,16 +98,27 @@ ApplicationWindow {
         onTriggered: window.remember()
     }
 
-    // An anime's page: in the library if it is there, otherwise in the catalog. Opened from the
-    // Downloads tab, its breadcrumb leads back there.
+    // An anime's page: in the library if it is there, otherwise in the catalog. Opened from
+    // Downloads or Schedule, its breadcrumb leads back there.
     function openAnime(slug, from) {
-        const downloads = from === "downloads"
+        const external = from === "downloads" || from === "schedule"
         if (app.library.contains(slug)) {
             showPage(0)
-            libraryPage.select(slug, downloads ? "downloads" : "library")
+            libraryPage.select(slug, external ? from : "library")
         } else {
             showPage(1)
-            catalogPage.openAnime(slug, downloads ? "downloads" : "catalog")
+            catalogPage.openAnime(slug, external ? from : "catalog")
+        }
+    }
+
+    function openCatalogGenre(slug) {
+        showPage(1)
+        if (typeof catalogPage.filterByGenre === "function") {
+            catalogPage.filterByGenre(slug)
+        } else {
+            catalogPage.home()
+            app.catalog.clearFilters()
+            app.catalog.genre = slug
         }
     }
 
@@ -169,7 +178,7 @@ ApplicationWindow {
     Component.onCompleted: {
         // It opens on the page it was left on.
         const page = Number(app.settings.value("window/page", 0))
-        tabs.currentIndex = page >= 0 && page <= 2 ? page : 0
+        tabs.currentIndex = page >= 0 && page <= 3 ? page : 0
         rememberLater.restart()
         tintTitleBar()
         // Started in the tray, it stays hidden until asked for.
@@ -215,26 +224,6 @@ ApplicationWindow {
             anchors.rightMargin: 8
             spacing: 8
 
-            ToolButton {
-                text: "Atrás"
-                display: AbstractButton.IconOnly
-                icon.source: Theme.source(Theme.icon.back)
-                enabled: window.historyIndex > 0
-                onClicked: window.travel(-1)
-                ToolTip.visible: hovered
-                ToolTip.text: "Atrás (Alt+←)"
-            }
-
-            ToolButton {
-                text: "Adelante"
-                display: AbstractButton.IconOnly
-                icon.source: Theme.source("e72a")
-                enabled: window.historyIndex < window.history.length - 1
-                onClicked: window.travel(1)
-                ToolTip.visible: hovered
-                ToolTip.text: "Adelante (Alt+→)"
-            }
-
             TabBar {
                 id: tabs
                 Layout.alignment: Qt.AlignBottom
@@ -252,6 +241,7 @@ ApplicationWindow {
                     text: "Catálogo"
                     onReselected: catalogPage.home()
                 }
+                PageTab { text: "Horario" }
                 PageTab { text: "Descargas" }
             }
 
@@ -288,7 +278,8 @@ ApplicationWindow {
             onBrowseCatalog: window.showPage(1)
             onSearchCatalog: text => window.searchCatalog(text)
             onBack: window.goBack()
-            onShowDownloads: window.showPage(2)
+            onOpenSchedule: window.showPage(2)
+            onShowDownloads: window.showPage(3)
             onSelectedChanged: rememberLater.restart()
             onSelectedGroupChanged: rememberLater.restart()
             onShowGridChanged: rememberLater.restart()
@@ -301,7 +292,15 @@ ApplicationWindow {
             active: StackLayout.isCurrentItem
             onDepthChanged: rememberLater.restart()
             onBack: window.goBack()
-            onShowDownloads: window.showPage(2)
+            onShowDownloads: window.showPage(3)
+        }
+
+        SchedulePage {
+            id: schedulePage
+            objectName: "schedulePage"
+            app: window.app
+            active: StackLayout.isCurrentItem
+            onOpenAnime: slug => window.openAnime(slug, "schedule")
         }
 
         DownloadsPage {
@@ -310,6 +309,19 @@ ApplicationWindow {
             onBrowseCatalog: window.showPage(1)
             onOpenAnime: slug => window.openAnime(slug, "downloads")
         }
+    }
+
+    Connections {
+        target: libraryPage
+        ignoreUnknownSignals: true
+        function onOpenGenre(slug) { window.openCatalogGenre(slug) }
+    }
+    Connections {
+        target: catalogPage
+        ignoreUnknownSignals: true
+        function onOpenGenre(slug) { window.openCatalogGenre(slug) }
+        function onOpenSchedule() { window.showPage(2) }
+        function onShowSchedule() { window.showPage(2) }
     }
 
     // The mouse's side buttons go back and forward, as in Explorer; other buttons pass through.
@@ -322,8 +334,8 @@ ApplicationWindow {
 
     footer: DownloadBar {
         downloads: window.app.downloads
-        visible: window.app.downloads.barVisible && tabs.currentIndex !== 2
-        onClicked: window.showPage(2)
+        visible: window.app.downloads.barVisible && tabs.currentIndex !== 3
+        onClicked: window.showPage(3)
     }
 
     Toast {
@@ -389,6 +401,11 @@ ApplicationWindow {
         property: "windowShown"
         value: window.visible && window.visibility !== Window.Minimized
     }
+    Binding {
+        target: window.app.library
+        property: "windowShown"
+        value: window.visible && window.visibility !== Window.Minimized
+    }
     DownloadOffer {
         id: downloadOffer
         downloads: window.app.downloads
@@ -404,6 +421,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+1"; onActivated: window.showPage(0) }
     Shortcut { sequence: "Ctrl+2"; onActivated: window.showPage(1) }
     Shortcut { sequence: "Ctrl+3"; onActivated: window.showPage(2) }
+    Shortcut { sequence: "Ctrl+4"; onActivated: window.showPage(3) }
     Shortcut { sequences: [StandardKey.Find]; onActivated: window.focusSearch() }
     Shortcut { sequence: "Ctrl+,"; onActivated: settingsDialog.open() }
     Shortcut { sequence: "Ctrl+Q"; onActivated: window.app.quit() }

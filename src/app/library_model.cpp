@@ -12,6 +12,23 @@ namespace {
 
 using library::LibraryEntry;
 
+QString formatGenres(const QString& raw) {
+    if (raw.isEmpty()) {
+        return {};
+    }
+    QStringList parts;
+    for (const auto& item : raw.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+        const auto trimmed = item.trimmed();
+        if (!trimmed.isEmpty()) {
+            parts.append(trimmed);
+            if (parts.size() == 3) {
+                break;
+            }
+        }
+    }
+    return parts.join(QStringLiteral(" · "));
+}
+
 } // namespace
 
 LibraryModel::LibraryModel(library::LibraryService& library, downloads::DownloadManager& downloads,
@@ -48,40 +65,73 @@ LibraryModel::LibraryModel(library::LibraryService& library, downloads::Download
     connect(&franchise_timer_, &QTimer::timeout, this, &LibraryModel::rebuildFranchise);
     connect(&downloads_, &downloads::DownloadManager::taskChanged, this, [this](qint64 id) {
         const auto task = downloads_.task(id);
-        const auto it =
-            std::ranges::find(franchises_, selected_franchise_, &library::FranchiseRecord::id);
-        if (task && it != franchises_.end() && it->members.contains(task->slug)) {
+        const auto* group = franchiseFor(selected_franchise_);
+        if (task && group && group->members.contains(task->slug)) {
             franchise_timer_.start();
         }
     });
 
     schedule_timer_.setInterval(std::chrono::minutes(30));
     connect(&schedule_timer_, &QTimer::timeout, this, &LibraryModel::fetchSchedule);
-    // "Hoy", "Ahora" and "Retrasado" depend on the clock.
-    clock_timer_.setInterval(std::chrono::minutes(1));
-    connect(&clock_timer_, &QTimer::timeout, this, &LibraryModel::rebuildShelves);
+    // "Hoy", "Próximo", "Retrasado" and the local clock depend on wall-clock time.
+    clock_timer_.setInterval(std::chrono::seconds(30));
+    connect(&clock_timer_, &QTimer::timeout, this, &LibraryModel::tickClock);
+    updateClock(QDateTime::currentDateTimeUtc(), false);
     reload();
 }
 
 void LibraryModel::start() {
+    started_ = true;
     fetchSchedule();
     schedule_timer_.start();
-    clock_timer_.start();
+    if (window_shown_) {
+        clock_timer_.start();
+    }
+}
+
+void LibraryModel::setWindowShown(bool shown) {
+    if (window_shown_ == shown) {
+        return;
+    }
+    window_shown_ = shown;
+    if (!window_shown_) {
+        clock_timer_.stop();
+    } else {
+        tickClock();
+        if (started_) {
+            clock_timer_.start();
+        }
+    }
+    emit windowShownChanged();
 }
 
 // The saved copy paints the shelf at once; the network answer replaces it.
 void LibraryModel::fetchSchedule() {
+    schedule_fetch_elapsed_.restart();
     api_.schedule(
         this,
-        [this](const api::Result<QList<api::ScheduleEntry>>& result) {
+        [this](const api::Result<api::Schedule>& result) {
             if (!result) {
                 return; // the shelf keeps what it had; offline it may have nothing to show
             }
-            schedule_ = result->value;
-            schedule_stale_ = result->origin == api::Origin::Cache;
-            rebuildShelves();
+            schedule_ = result->value.entries;
+            const bool stale = (result->origin == api::Origin::Cache) || result->value.stale;
+            const bool meta_changed = (schedule_stale_ != stale) || !schedule_loaded_;
+            schedule_stale_ = stale;
+            schedule_loaded_ = true;
+            rebuildSchedule(meta_changed);
         },
         api::CachePolicy::CacheThenNetwork);
+}
+
+void LibraryModel::refreshSchedule() {
+    tickClock();
+    constexpr qint64 kRefreshThrottleMs = 30'000;
+    if (schedule_fetch_elapsed_.isValid() &&
+        schedule_fetch_elapsed_.elapsed() < kRefreshThrottleMs) {
+        return;
+    }
+    fetchSchedule();
 }
 
 // A watched episode or one in progress.
@@ -222,8 +272,13 @@ bool LibraryModel::shown(const LibraryEntry& entry, bool franchise_named) const 
 }
 
 const LibraryEntry* LibraryModel::entryFor(const QString& slug) const {
-    const auto it = std::ranges::find(entries_, slug, &LibraryEntry::slug);
-    return it == entries_.end() ? nullptr : &*it;
+    const auto it = entry_index_.constFind(slug);
+    return it == entry_index_.cend() ? nullptr : &entries_[*it];
+}
+
+const library::FranchiseRecord* LibraryModel::franchiseFor(qint64 id) const {
+    const auto it = franchise_index_.constFind(id);
+    return it == franchise_index_.cend() ? nullptr : &franchises_[*it];
 }
 
 void LibraryModel::setFilter(Filter filter) {
@@ -235,6 +290,7 @@ void LibraryModel::setFilter(Filter filter) {
         return;
     }
     filter_ = filter;
+    collapsed_filtered_.clear();
     emit filterChanged();
     rebuildRows();
     rebuildShelves();
@@ -245,6 +301,7 @@ void LibraryModel::setOnDiskOnly(bool on_disk_only) {
         return;
     }
     on_disk_only_ = on_disk_only;
+    collapsed_filtered_.clear();
     emit filterChanged();
     rebuildRows();
     rebuildShelves();
@@ -277,10 +334,10 @@ QList<int> LibraryModel::filterCounts() const {
     return counts;
 }
 
-// A franchise shows its anime when the user unfolded it, or when a search or a filter narrows
-// the list: then only the ones that pass are under it.
+// A franchise defaults to folded under "Todos" (expanded by explicit user toggle) and unfolded
+// under any active filter or search, while still letting the user fold individual groups back.
 bool LibraryModel::unfolded(qint64 id) const {
-    return expanded_.contains(id) || !search_.isEmpty() || filter_ != Filter::All || on_disk_only_;
+    return filterActive() ? !collapsed_filtered_.contains(id) : expanded_.contains(id);
 }
 
 // Under its franchise, a work says what sets it apart: "Part 2" under "Chitose-kun wa Ramune
@@ -326,6 +383,7 @@ void LibraryModel::setSearch(const QString& search) {
         return;
     }
     search_ = normalized;
+    collapsed_filtered_.clear();
     emit searchChanged();
     rebuildRows();
 }
@@ -342,16 +400,35 @@ void LibraryModel::reload() {
     }
     archived_count_ = 0;
     total_ = 0;
-    for (const auto& entry : entries_) {
+    QHash<QString, int> next_entry_index;
+    next_entry_index.reserve(entries_.size());
+    for (int i = 0; i < entries_.size(); ++i) {
+        const auto& entry = entries_[i];
         archived_count_ += entry.archived ? 1 : 0;
         total_ += entry.archived == archived_only_ ? 1 : 0;
+        next_entry_index.insert(entry.slug, i);
     }
-    QSet<QString> slugs;
-    for (const auto& entry : entries_) {
-        slugs.insert(entry.slug);
+    bool membership = (next_entry_index.size() != entry_index_.size());
+    if (!membership) {
+        for (const auto& entry : entries_) {
+            if (!entry_index_.contains(entry.slug)) {
+                membership = true;
+                break;
+            }
+        }
     }
-    const bool membership = slugs != slugs_;
-    slugs_ = std::move(slugs);
+    entry_index_ = std::move(next_entry_index);
+    franchise_index_.clear();
+    franchise_index_.reserve(franchises_.size());
+    member_franchise_index_.clear();
+    for (int i = 0; i < franchises_.size(); ++i) {
+        franchise_index_.insert(franchises_[i].id, i);
+        for (const auto& slug : franchises_[i].members) {
+            if (!member_franchise_index_.contains(slug)) {
+                member_franchise_index_.insert(slug, i);
+            }
+        }
+    }
     rebuildRows();
     rebuildShelves();
     rebuildFranchise();
@@ -429,14 +506,29 @@ void LibraryModel::rebuildShelves() {
     download_shelf_.setCards(std::move(download_cards));
     emit countChanged();
 
-    // The home's agenda is not the list's: every anime of the library that airs.
-    QList<const LibraryEntry*> library;
-    for (const auto& entry : entries_) {
-        if (!entry.archived) {
-            library.append(&entry);
-        }
+    // The home's agenda and the weekly schedule follow library membership and archive state.
+    rebuildSchedule(false);
+}
+
+void LibraryModel::updateClock(const QDateTime& now, bool notify) {
+    const auto time_text = display::time(now);
+    const bool time_changed = (local_time_text_ != time_text);
+    local_time_text_ = time_text;
+    if (!notify) {
+        const auto local_date = now.toLocalTime().date();
+        today_weekday_ = local_date.dayOfWeek() - 1;
+        today_heading_ = schedule::todayHeading(local_date);
+        return;
     }
-    rebuildUpcoming(library);
+    if (time_changed) {
+        emit clockChanged();
+    }
+}
+
+void LibraryModel::tickClock() {
+    const auto now = QDateTime::currentDateTimeUtc();
+    updateClock(now, true);
+    rebuildSchedule(false);
 }
 
 QString LibraryModel::downloadPendingOf(const QString& slug) {
@@ -470,54 +562,152 @@ QString LibraryModel::downloadPending() {
     return failed.join(QLatin1Char('\n'));
 }
 
-// The next episode of each library anime that airs weekly, soonest first; late ones last.
-void LibraryModel::rebuildUpcoming(const QList<const LibraryEntry*>& shown) {
+// Rebuilds both the home's today-only rail (followed, non-archived library anime airing today)
+// and the full catalog Monday–Sunday weekly timetable.
+void LibraryModel::rebuildSchedule(bool force_emit) {
     const auto now = QDateTime::currentDateTimeUtc();
+    const auto local_date = now.toLocalTime().date();
+    const int next_today_weekday = local_date.dayOfWeek() - 1;
+    const QString next_today_heading = schedule::todayHeading(local_date);
+
+    // 1) Home right rail: strictly today's followed, non-archived library anime.
     struct Upcoming {
         const LibraryEntry* entry;
         schedule::Next next;
     };
-    QList<Upcoming> upcoming;
+    QList<Upcoming> today_entries;
     for (const auto& slot : schedule_) {
-        const auto next = schedule::next(slot, now);
-        if (!next) {
+        const auto next = schedule::agenda(slot, now);
+        if (!next || !schedule::isToday(*next, now)) {
             continue;
         }
-        const auto it = std::ranges::find(shown, slot.anime.slug, &LibraryEntry::slug);
-        if (it == shown.end()) {
+        const auto* entry = entryFor(slot.anime.slug);
+        if (!entry || entry->archived) {
             continue;
         }
         // A copy from the cache cannot tell a late episode from one already out.
         if (next->late && schedule_stale_) {
             continue;
         }
-        upcoming.append({.entry = *it, .next = *next});
+        today_entries.append({.entry = entry, .next = *next});
     }
-    std::ranges::sort(upcoming, [](const Upcoming& a, const Upcoming& b) {
-        return a.next.late != b.next.late ? b.next.late : a.next.at < b.next.at;
-    });
-    // One column per day, in the order they come: [{day, items: [{slug, title, posterUrl,
-    // caption}]}].
-    QVariantList days;
-    for (const auto& item : upcoming) {
-        const auto day = schedule::day(item.next, now);
-        if (days.isEmpty() || days.last().toMap().value(QStringLiteral("day")) != day) {
-            days.append(QVariantMap{{QStringLiteral("day"), day},
-                                    {QStringLiteral("items"), QVariantList{}}});
+    std::ranges::sort(today_entries, [](const Upcoming& a, const Upcoming& b) {
+        if (a.next.at != b.next.at) {
+            return a.next.at < b.next.at;
         }
-        auto column = days.last().toMap();
-        auto items = column.value(QStringLiteral("items")).toList();
-        items.append(QVariantMap{{QStringLiteral("slug"), item.entry->slug},
-                                 {QStringLiteral("title"), item.entry->title},
-                                 {QStringLiteral("posterUrl"), item.entry->posterUrl},
-                                 {QStringLiteral("caption"), schedule::slot(item.next, now)}});
-        column.insert(QStringLiteral("items"), items);
-        days.last() = column;
+        return QString::localeAwareCompare(a.entry->title, b.entry->title) < 0;
+    });
+
+    QVariantList upcoming_list;
+    upcoming_list.reserve(today_entries.size());
+    for (const auto& item : today_entries) {
+        const auto slot_text = schedule::slot(item.next, now);
+        const auto state = schedule::state(item.next, now);
+        const auto badge = schedule::badge(item.next, now);
+        const auto time_text = schedule::timeText(item.next, now);
+        upcoming_list.append(
+            QVariantMap{{QStringLiteral("slug"), item.entry->slug},
+                        {QStringLiteral("title"), item.entry->title},
+                        {QStringLiteral("posterUrl"), item.entry->posterUrl.toString()},
+                        {QStringLiteral("episode"), display::episodeNumber(item.next.number)},
+                        {QStringLiteral("episodeNumber"), item.next.number},
+                        {QStringLiteral("episodeText"), display::shortEpisode(item.next.number)},
+                        {QStringLiteral("time"), time_text},
+                        {QStringLiteral("timeText"), time_text},
+                        {QStringLiteral("state"), state},
+                        {QStringLiteral("stateLabel"), badge},
+                        {QStringLiteral("badgeText"), badge},
+                        {QStringLiteral("day"), QStringLiteral("Hoy")},
+                        {QStringLiteral("caption"), slot_text},
+                        {QStringLiteral("slot"), slot_text}});
     }
-    upcoming_count_ = static_cast<int>(upcoming.size());
-    if (days != upcoming_days_) {
-        upcoming_days_ = std::move(days);
+    QVariantList days;
+    if (!upcoming_list.isEmpty()) {
+        days.append(QVariantMap{{QStringLiteral("day"), QStringLiteral("Hoy")},
+                                {QStringLiteral("isToday"), true},
+                                {QStringLiteral("items"), upcoming_list}});
+    }
+
+    // 2) Full catalog Monday–Sunday weekly timetable (strictly 0..6, never rotating Today first).
+    struct WeeklyItem {
+        QString slug;
+        QString title;
+        QString posterUrl;
+        QString backdropUrl;
+        schedule::WeeklySlot slot;
+        bool inLibrary = false;
+    };
+    QList<WeeklyItem> weekly_items;
+    weekly_items.reserve(schedule_.size());
+    for (const auto& entry_slot : schedule_) {
+        const auto derived = schedule::weekly(entry_slot, now, schedule_stale_);
+        if (!derived) {
+            continue;
+        }
+        const auto* lib = entryFor(entry_slot.anime.slug);
+        const auto title = !entry_slot.anime.title.isEmpty()
+                               ? entry_slot.anime.title
+                               : (lib ? lib->title : entry_slot.anime.slug);
+        const auto poster = !entry_slot.anime.posterUrl.isEmpty() ? entry_slot.anime.posterUrl
+                                                                  : (lib ? lib->posterUrl : QUrl());
+        const auto backdrop = !entry_slot.anime.backdropUrl.isEmpty()
+                                  ? entry_slot.anime.backdropUrl
+                                  : (lib ? lib->backdropUrl : QUrl());
+        weekly_items.append({.slug = entry_slot.anime.slug,
+                             .title = title,
+                             .posterUrl = poster.toString(),
+                             .backdropUrl = backdrop.toString(),
+                             .slot = *derived,
+                             .inLibrary = lib != nullptr && !lib->archived});
+    }
+    std::ranges::sort(weekly_items, [](const WeeklyItem& a, const WeeklyItem& b) {
+        if (a.slot.weekday != b.slot.weekday) {
+            return a.slot.weekday < b.slot.weekday;
+        }
+        if (a.slot.slotMinutes != b.slot.slotMinutes) {
+            return a.slot.slotMinutes < b.slot.slotMinutes;
+        }
+        return QString::localeAwareCompare(a.title, b.title) < 0;
+    });
+
+    QVariantList weekly_list;
+    weekly_list.reserve(weekly_items.size());
+    for (const auto& item : weekly_items) {
+        weekly_list.append(
+            QVariantMap{{QStringLiteral("slug"), item.slug},
+                        {QStringLiteral("title"), item.title},
+                        {QStringLiteral("posterUrl"), item.posterUrl},
+                        {QStringLiteral("backdropUrl"), item.backdropUrl},
+                        {QStringLiteral("episode"), display::episodeNumber(item.slot.number)},
+                        {QStringLiteral("episodeNumber"), item.slot.number},
+                        {QStringLiteral("time"), item.slot.time},
+                        {QStringLiteral("slotMinutes"), item.slot.slotMinutes},
+                        {QStringLiteral("weekday"), item.slot.weekday},
+                        {QStringLiteral("isToday"), item.slot.isToday},
+                        {QStringLiteral("state"), item.slot.state},
+                        {QStringLiteral("stateLabel"), item.slot.stateLabel},
+                        {QStringLiteral("inLibrary"), item.inLibrary}});
+    }
+
+    const int next_upcoming_count = static_cast<int>(today_entries.size());
+    const bool upcoming_changed = (upcoming_list != upcoming_) || (days != upcoming_days_) ||
+                                  (next_upcoming_count != upcoming_count_);
+    const bool schedule_changed = upcoming_changed || (weekly_list != weekly_schedule_) ||
+                                  (next_today_weekday != today_weekday_) ||
+                                  (next_today_heading != today_heading_) || force_emit;
+
+    upcoming_ = std::move(upcoming_list);
+    upcoming_days_ = std::move(days);
+    upcoming_count_ = next_upcoming_count;
+    weekly_schedule_ = std::move(weekly_list);
+    today_weekday_ = next_today_weekday;
+    today_heading_ = next_today_heading;
+
+    if (upcoming_changed || force_emit) {
         emit upcomingChanged();
+    }
+    if (schedule_changed) {
+        emit scheduleChanged();
     }
 }
 
@@ -527,9 +717,15 @@ void LibraryModel::updateFeatured() {
     if (entry && entry->resumeNumber) {
         // The line reads as the posters' beside it; the button only says what it does.
         double progress = -1;
+        QString remaining_text;
         if (entry->resumePositionMs > 0 && entry->resumeDurationMs > 0) {
             progress = std::clamp(
                 static_cast<double>(entry->resumePositionMs) / entry->resumeDurationMs, 0.0, 1.0);
+            if (entry->resumeDurationMs > entry->resumePositionMs) {
+                const qint64 secs = (entry->resumeDurationMs - entry->resumePositionMs) / 1000;
+                remaining_text = secs < 60 ? QStringLiteral("Queda menos de un minuto")
+                                           : QStringLiteral("Quedan ") + display::remaining(secs);
+            }
         } else if (entry->resumePositionMs <= 0) {
             progress = progressOf(*entry);
         }
@@ -541,7 +737,14 @@ void LibraryModel::updateFeatured() {
                     {QStringLiteral("detail"), readyCaption(*entry)},
                     {QStringLiteral("progress"), progress},
                     {QStringLiteral("actionText"),
-                     started(*entry) ? QStringLiteral("Continuar") : QStringLiteral("Empezar")}};
+                     started(*entry) ? QStringLiteral("Continuar") : QStringLiteral("Empezar")},
+                    {QStringLiteral("episodeLabel"), display::episode(*entry->resumeNumber)},
+                    {QStringLiteral("unwatchedOnDisk"), entry->unwatchedOnDisk},
+                    {QStringLiteral("statusText"), display::status(entry->status)},
+                    {QStringLiteral("genres"), formatGenres(entry->genres)},
+                    {QStringLiteral("hasBackdrop"),
+                     entry->backdropUrl.isValid() && !entry->backdropUrl.isEmpty()},
+                    {QStringLiteral("remainingText"), remaining_text}};
     }
     if (featured != featured_) {
         featured_ = std::move(featured);
@@ -549,25 +752,25 @@ void LibraryModel::updateFeatured() {
     }
 }
 
-void LibraryModel::rebuildRows() {
+void LibraryModel::rebuildRows(bool force_groups_emit) {
     QList<Row> rows;
     QSet<QString> in_group;
     int shown_count = 0;
     if (grouped_) {
         for (const auto& group : franchises_) {
-            QList<int> members;
+            int visible_members = 0;
             const bool group_named = named(group.title);
-            for (int i = 0; i < entries_.size(); ++i) {
-                const auto& entry = entries_[i];
-                if (!group.members.contains(entry.slug))
+            for (const auto& slug : group.members) {
+                const auto idx = entry_index_.constFind(slug);
+                if (idx == entry_index_.cend())
                     continue;
-                in_group.insert(entry.slug);
-                if (shown(entry, group_named))
-                    members.append(i);
+                in_group.insert(slug);
+                if (shown(entries_[*idx], group_named))
+                    ++visible_members;
             }
-            if (members.isEmpty())
+            if (visible_members == 0)
                 continue;
-            shown_count += static_cast<int>(members.size());
+            shown_count += visible_members;
             rows.append({-1, group.id, 0});
         }
     }
@@ -581,8 +784,8 @@ void LibraryModel::rebuildRows() {
     const auto title = [this](const Row& row) {
         if (row.entry >= 0)
             return sortKey(entries_[row.entry].title);
-        const auto it = std::ranges::find(franchises_, row.group, &library::FranchiseRecord::id);
-        return it == franchises_.end() ? QString() : sortKey(it->title);
+        const auto* group = franchiseFor(row.group);
+        return group ? sortKey(group->title) : QString();
     };
     std::ranges::stable_sort(rows, [&](const Row& a, const Row& b) {
         return QString::localeAwareCompare(title(a), title(b)) < 0;
@@ -592,15 +795,15 @@ void LibraryModel::rebuildRows() {
             const auto id = rows[row].group;
             if (!id || !unfolded(id))
                 continue;
-            const auto it = std::ranges::find(franchises_, id, &library::FranchiseRecord::id);
-            if (it == franchises_.end())
+            const auto* group = franchiseFor(id);
+            if (!group)
                 continue;
             QList<int> members;
-            const bool group_named = named(it->title);
-            for (int i = 0; i < entries_.size(); ++i) {
-                const auto& entry = entries_[i];
-                if (it->members.contains(entry.slug) && shown(entry, group_named))
-                    members.append(i);
+            const bool group_named = named(group->title);
+            for (const auto& slug : group->members) {
+                const auto idx = entry_index_.constFind(slug);
+                if (idx != entry_index_.cend() && shown(entries_[*idx], group_named))
+                    members.append(*idx);
             }
             std::ranges::stable_sort(members, [this](int a, int b) {
                 const auto ay = entries_[a].startYear.value_or(9999);
@@ -628,19 +831,26 @@ void LibraryModel::rebuildRows() {
             overview_.append(card);
             continue;
         }
-        const auto group = std::ranges::find(franchises_, row.group, &library::FranchiseRecord::id);
-        if (group == franchises_.end())
+        const auto* group = franchiseFor(row.group);
+        if (!group)
             continue;
-        QUrl poster;
-        int count = 0; // the works that pass, as the filter counts them
+        QList<int> matched;
         const bool group_named = named(group->title);
-        for (const auto& entry : entries_) {
-            if (group->members.contains(entry.slug) && shown(entry, group_named)) {
-                if (poster.isEmpty())
-                    poster = entry.posterUrl;
-                ++count;
+        for (const auto& slug : group->members) {
+            const auto idx = entry_index_.constFind(slug);
+            if (idx != entry_index_.cend() && shown(entries_[*idx], group_named)) {
+                matched.append(*idx);
             }
         }
+        std::ranges::sort(matched);
+        QUrl poster;
+        for (const int idx : matched) {
+            if (!entries_[idx].posterUrl.isEmpty()) {
+                poster = entries_[idx].posterUrl;
+                break;
+            }
+        }
+        const auto count = matched.size(); // the works that pass, as the filter counts them
         overview_.append(QVariantMap{
             {QStringLiteral("groupId"), group->id},
             {QStringLiteral("slug"), QString()},
@@ -650,6 +860,23 @@ void LibraryModel::rebuildRows() {
              count == 1 ? QStringLiteral("1 entrega") : QStringLiteral("%1 entregas").arg(count)},
             {QStringLiteral("progress"), -1.0}});
     }
+    bool has_groups = false;
+    bool all_expanded = true;
+    for (const auto& row : rows) {
+        if (row.entry < 0 && row.group != 0) {
+            has_groups = true;
+            if (!unfolded(row.group)) {
+                all_expanded = false;
+            }
+        }
+    }
+    if (!has_groups) {
+        all_expanded = false;
+    }
+    const bool groups_changed = (has_groups_ != has_groups) || (all_expanded_ != all_expanded);
+    has_groups_ = has_groups;
+    all_expanded_ = all_expanded;
+
     // The same rows keep the list's scroll and focus; only what they show may have changed.
     if (rows == rows_) {
         if (!rows_.isEmpty()) {
@@ -661,6 +888,9 @@ void LibraryModel::rebuildRows() {
         endResetModel();
     }
     emit countChanged();
+    if (groups_changed || force_groups_emit) {
+        emit groupsChanged();
+    }
 }
 
 int LibraryModel::indexOf(const QString& slug) const {
@@ -678,15 +908,15 @@ QString LibraryModel::slugAt(int row) const {
 }
 
 bool LibraryModel::contains(const QString& slug) const {
-    return slugs_.contains(slug);
+    return entry_index_.contains(slug);
 }
 
 QVariantMap LibraryModel::franchiseStep(const QString& slug) const {
-    const auto it =
-        std::ranges::find_if(franchises_, [&slug](const library::FranchiseRecord& group) {
-            return group.members.contains(slug);
-        });
-    if (it == franchises_.end() || it->members.size() < 2)
+    const auto it = member_franchise_index_.constFind(slug);
+    if (it == member_franchise_index_.cend())
+        return {};
+    const auto& group = franchises_[*it];
+    if (group.members.size() < 2)
         return {};
     // Its letters and digits alone: "Ansatsu Kyoushitsu" names the series "Ansatsu Kyoushitsu".
     const auto letters = [](const QString& text) {
@@ -697,10 +927,10 @@ QVariantMap LibraryModel::franchiseStep(const QString& slug) const {
         }
         return kept;
     };
-    const auto entry = std::ranges::find(entries_, slug, &library::LibraryEntry::slug);
-    if (entry != entries_.end() && letters(entry->title) == letters(it->title))
+    const auto* entry = entryFor(slug);
+    if (entry && letters(entry->title) == letters(group.title))
         return {};
-    return {{QStringLiteral("id"), it->id}, {QStringLiteral("title"), it->title}};
+    return {{QStringLiteral("id"), group.id}, {QStringLiteral("title"), group.title}};
 }
 
 int LibraryModel::rowCount(const QModelIndex& parent) const {
@@ -721,35 +951,48 @@ QVariant LibraryModel::data(const QModelIndex& index, int role) const {
     if (role == ExpandedRole)
         return unfolded(row.group);
     if (row.entry < 0 && role == ReadyRole) {
-        const auto it = std::ranges::find(franchises_, row.group, &library::FranchiseRecord::id);
-        return it != franchises_.end() &&
-               std::ranges::any_of(entries_, [&](const LibraryEntry& member) {
-                   return it->members.contains(member.slug) && member.unwatchedOnDisk > 0;
-               });
-    }
-    if (row.entry < 0) {
-        const auto it = std::ranges::find(franchises_, row.group, &library::FranchiseRecord::id);
-        if (it == franchises_.end())
-            return {};
-        const LibraryEntry* first = nullptr;
-        int count = 0; // the works that pass, as the filter counts them
-        const bool group_named = named(it->title);
-        for (const auto& item : entries_) {
-            if (it->members.contains(item.slug) && shown(item, group_named)) {
-                if (!first)
-                    first = &item;
-                ++count;
+        const auto* group = franchiseFor(row.group);
+        if (!group)
+            return false;
+        for (const auto& slug : group->members) {
+            if (const auto* member = entryFor(slug); member && member->unwatchedOnDisk > 0) {
+                return true;
             }
         }
+        return false;
+    }
+    if (row.entry < 0) {
+        const auto* group = franchiseFor(row.group);
+        if (!group)
+            return {};
         switch (role) {
         case TitleRole:
         case Qt::DisplayRole:
-            return it->title;
-        case PosterRole:
-            return first ? first->posterUrl : QUrl();
-        case CaptionRole:
+            return group->title;
+        case PosterRole: {
+            const bool group_named = named(group->title);
+            int best_idx = -1;
+            for (const auto& slug : group->members) {
+                const auto idx = entry_index_.constFind(slug);
+                if (idx != entry_index_.cend() && shown(entries_[*idx], group_named) &&
+                    (best_idx < 0 || *idx < best_idx)) {
+                    best_idx = *idx;
+                }
+            }
+            return best_idx >= 0 ? entries_[best_idx].posterUrl : QUrl();
+        }
+        case CaptionRole: {
+            const bool group_named = named(group->title);
+            int count = 0; // the works that pass, as the filter counts them
+            for (const auto& slug : group->members) {
+                const auto idx = entry_index_.constFind(slug);
+                if (idx != entry_index_.cend() && shown(entries_[*idx], group_named)) {
+                    ++count;
+                }
+            }
             return count == 1 ? QStringLiteral("1 entrega")
                               : QStringLiteral("%1 entregas").arg(count);
+        }
         case ProgressRole:
             return -1.0;
         case FreshRole:
@@ -768,10 +1011,8 @@ QVariant LibraryModel::data(const QModelIndex& index, int role) const {
     case TitleRole:
     case Qt::DisplayRole:
         if (row.depth > 0) {
-            const auto it =
-                std::ranges::find(franchises_, row.group, &library::FranchiseRecord::id);
-            if (it != franchises_.end())
-                return distinctTitle(entry.title, it->title);
+            if (const auto* group = franchiseFor(row.group))
+                return distinctTitle(entry.title, group->title);
         }
         return entry.title;
     case PosterRole:
@@ -795,6 +1036,7 @@ void LibraryModel::setArchivedOnly(bool archived) {
     if (archived_only_ == archived)
         return;
     archived_only_ = archived;
+    collapsed_filtered_.clear();
     emit archivedOnlyChanged();
     reload();
 }
@@ -811,11 +1053,55 @@ qint64 LibraryModel::groupAt(int row) const {
 }
 
 void LibraryModel::toggleGroup(qint64 id) {
-    if (expanded_.contains(id))
-        expanded_.remove(id);
-    else
-        expanded_.insert(id);
-    rebuildRows();
+    auto& set = filterActive() ? collapsed_filtered_ : expanded_;
+    if (set.contains(id)) {
+        set.remove(id);
+    } else {
+        set.insert(id);
+    }
+    rebuildRows(true);
+}
+
+void LibraryModel::expandAll() {
+    bool mutated = false;
+    if (filterActive()) {
+        if (!collapsed_filtered_.isEmpty()) {
+            collapsed_filtered_.clear();
+            mutated = true;
+        }
+    } else {
+        for (const auto& group : franchises_) {
+            if (!expanded_.contains(group.id)) {
+                expanded_.insert(group.id);
+                mutated = true;
+            }
+        }
+    }
+    if (!mutated) {
+        return;
+    }
+    rebuildRows(true);
+}
+
+void LibraryModel::collapseAll() {
+    bool mutated = false;
+    if (filterActive()) {
+        for (const auto& group : franchises_) {
+            if (!collapsed_filtered_.contains(group.id)) {
+                collapsed_filtered_.insert(group.id);
+                mutated = true;
+            }
+        }
+    } else {
+        if (!expanded_.isEmpty()) {
+            expanded_.clear();
+            mutated = true;
+        }
+    }
+    if (!mutated) {
+        return;
+    }
+    rebuildRows(true);
 }
 
 QVariantMap LibraryModel::workMap(const LibraryEntry& entry) const {
@@ -880,9 +1166,7 @@ void LibraryModel::openFranchise(qint64 id) {
 
 void LibraryModel::rebuildFranchise() {
     QVariantMap value;
-    const auto it =
-        std::ranges::find(franchises_, selected_franchise_, &library::FranchiseRecord::id);
-    if (it != franchises_.end()) {
+    if (const auto* it = franchiseFor(selected_franchise_)) {
         QVariantList works;
         QStringList slugs;
         QUrl backdrop;
@@ -895,9 +1179,10 @@ void LibraryModel::rebuildFranchise() {
         std::optional<int> first_year;
         std::optional<int> last_year;
         QList<const LibraryEntry*> members;
-        for (const auto& entry : entries_) {
-            if (it->members.contains(entry.slug) && entry.archived == archived_only_)
-                members.append(&entry);
+        for (const auto& slug : it->members) {
+            if (const auto* entry = entryFor(slug); entry && entry->archived == archived_only_) {
+                members.append(entry);
+            }
         }
         std::ranges::stable_sort(members, [](const LibraryEntry* a, const LibraryEntry* b) {
             const auto ay = a->startYear.value_or(9999);
@@ -1065,10 +1350,14 @@ bool LibraryModel::setFranchiseMember(qint64 id, const QString& slug, bool inclu
 }
 
 QVariantList LibraryModel::memberChoices(qint64 id) const {
-    const auto it = std::ranges::find(franchises_, id, &library::FranchiseRecord::id);
+    const auto* group = franchiseFor(id);
+    QSet<QString> existing;
+    if (group) {
+        existing = QSet<QString>(group->members.cbegin(), group->members.cend());
+    }
     QVariantList choices;
     for (const auto& entry : entries_) {
-        if (it != franchises_.end() && it->members.contains(entry.slug))
+        if (existing.contains(entry.slug))
             continue;
         choices.append(workMap(entry));
     }
