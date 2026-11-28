@@ -26,11 +26,12 @@ ModalDialog {
     readonly property string isolatedReason: settings.isolated
                                              ? "No disponible en un perfil de prueba" : ""
 
-    readonly property int controlWidth: 320
-    // Lists and text fields share one width across Ajustes: the widest list's, when its longest
-    // option needs more than controlWidth.
+    readonly property int controlWidth: 240
+    readonly property int maxControlWidth: 300
+    // Lists and text fields share one capped width across Ajustes so long player or device names
+    // never push controls off-screen at 820x600.
     property real widestChoice: controlWidth
-    readonly property real fieldWidth: Math.max(controlWidth, widestChoice)
+    readonly property real fieldWidth: Math.min(maxControlWidth, Math.max(controlWidth, widestChoice))
     // Linux has no bundled mpv (the system's is used) and its desktops name things otherwise.
     readonly property bool windows: Qt.platform.os === "windows"
     readonly property var categories: [
@@ -81,16 +82,55 @@ ModalDialog {
         updateSection.notesExpanded = false
     }
 
+    // Keep whatever the keyboard reaches inside the active settings ScrollView cleanly in view.
+    Connections {
+        target: dialog.ApplicationWindow.window
+        function onActiveFocusItemChanged() {
+            if (!dialog.visible)
+                return
+            const win = dialog.ApplicationWindow.window
+            const item = win ? win.activeFocusItem : null
+            if (pages.currentIndex === 0)
+                generalPage.ensureVisible(item)
+            else if (pages.currentIndex === 1)
+                downloadsSettingsPage.ensureVisible(item)
+            else if (pages.currentIndex === 2)
+                linkedDevicesPage.ensureVisible(item)
+            else if (pages.currentIndex === 3)
+                aboutPage.ensureVisible(item)
+        }
+    }
+
     // A category's rows; only the page scrolls when the dialog is shorter than they are.
     component SettingsPage: ScrollView {
         id: page
 
         default property alias rows: column.data
 
+        function ensureVisible(item) {
+            if (!item || !page.visible || !InputModality.keyboard)
+                return
+            const flick = page.contentItem as Flickable
+            if (!flick || flick.contentHeight <= flick.height)
+                return
+            let inside = false
+            for (let p = item; p && !inside; p = p.parent)
+                inside = p === column
+            if (!inside)
+                return
+            const top = item.mapToItem(column, 0, 0).y
+            if (top - 16 < flick.contentY)
+                flick.contentY = Math.max(0, top - 16)
+            else if (top + item.height + 16 > flick.contentY + flick.height)
+                flick.contentY = Math.min(top + item.height + 16 - flick.height,
+                                          Math.max(0, flick.contentHeight - flick.height))
+        }
+
         contentWidth: availableWidth
         clip: true
         // The scroll bar lies in this margin: the rows keep one right edge on every page, with a
-        // bar or without.
+        // bar or without. Top padding keeps the first focused control's FocusFrame unclipped.
+        topPadding: 4
         leftPadding: 32
         rightPadding: 32
         bottomPadding: 24
@@ -103,18 +143,27 @@ ModalDialog {
         }
     }
 
-    // Lists and text fields share one width, against the rows' right edge, so their edges and
-    // chevrons line up; no option is ever cut.
+    // Lists and text fields share one capped width, against the rows' right edge, so their edges
+    // and chevrons line up while staying bounded at narrow widths.
     component Choice: ComboBox {
         implicitContentWidthPolicy: ComboBox.WidestText
         Layout.fillWidth: true
+        Layout.minimumWidth: 0
         Layout.preferredWidth: dialog.fieldWidth
         Layout.maximumWidth: dialog.fieldWidth
-        onImplicitWidthChanged: dialog.widestChoice = Math.max(dialog.widestChoice, implicitWidth)
-        Component.onCompleted: dialog.widestChoice = Math.max(dialog.widestChoice, implicitWidth)
+        onImplicitWidthChanged: dialog.widestChoice = Math.min(dialog.maxControlWidth,
+                                                               Math.max(dialog.widestChoice, implicitWidth))
+        Component.onCompleted: dialog.widestChoice = Math.min(dialog.maxControlWidth,
+                                                              Math.max(dialog.widestChoice, implicitWidth))
+        ToolTip.visible: (hovered || (activeFocus && InputModality.keyboard))
+                         && displayText !== "" && implicitWidth > width
+        ToolTip.delay: Theme.tooltipDelay
+        ToolTip.timeout: Theme.tooltipTimeout
+        ToolTip.text: displayText
     }
     component Field: TextField {
         Layout.fillWidth: true
+        Layout.minimumWidth: 0
         Layout.preferredWidth: dialog.fieldWidth
         Layout.maximumWidth: dialog.fieldWidth
     }
@@ -179,13 +228,13 @@ ModalDialog {
         background: Rectangle {
             x: -8
             width: parent.width + 16
-            radius: 4
-            color: linkRow.down ? Qt.rgba(1, 1, 1, 0.03)
-                   : linkRow.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent"
+            radius: Theme.radiusSm
+            color: linkRow.down ? Theme.pressSubtle
+                   : linkRow.hovered ? Theme.hoverSubtle : "transparent"
 
             FocusFrame {
                 visible: linkRow.activeFocus && InputModality.keyboard
-                radiusInside: 4
+                radiusInside: Theme.radiusSm
             }
         }
 
@@ -200,7 +249,7 @@ ModalDialog {
                     Layout.fillWidth: true
                     text: linkRow.title
                     color: Theme.ink
-                    font.pixelSize: Theme.body - 1
+                    font.pixelSize: Theme.small
                     elide: Text.ElideRight
                     Accessible.ignored: true
                 }
@@ -209,7 +258,7 @@ ModalDialog {
                     visible: text !== ""
                     text: linkRow.subtitle
                     color: Theme.muted
-                    font.pixelSize: Theme.caption - 1
+                    font.pixelSize: Theme.micro
                     elide: Text.ElideRight
                     Accessible.ignored: true
                 }
@@ -254,6 +303,7 @@ ModalDialog {
                 Accessible.name: "Categorías"
 
                 delegate: ItemDelegate {
+                    id: navItem
                     required property int index
                     required property var modelData
 
@@ -264,6 +314,14 @@ ModalDialog {
                     focus: ListView.isCurrentItem
                     focusPolicy: Qt.ClickFocus
                     onClicked: nav.currentIndex = index
+
+                    // Arrow-key navigation moves focus with OtherFocusReason (clearing visualFocus),
+                    // so keep the keyboard FocusFrame visible across ↑/↓ moves without double-drawing.
+                    FocusFrame {
+                        visible: navItem.ListView.isCurrentItem && nav.activeFocus
+                                 && InputModality.keyboard && !navItem.visualFocus
+                        radiusInside: Theme.radiusSm
+                    }
                 }
             }
 
@@ -304,6 +362,7 @@ ModalDialog {
                 currentIndex: nav.currentIndex
 
                 SettingsPage {
+                    id: generalPage
                     SettingRow {
                         label: "Reproductor"
                         info: dialog.windows
@@ -393,16 +452,27 @@ ModalDialog {
                 }
 
                 SettingsPage {
+                    id: downloadsSettingsPage
                     // The path under the name: it has the row's width, and the button keeps its column.
                     SettingRow {
                         label: "Carpeta"
-                        detail: dialog.nativePath(dialog.settings.downloadDirectory)
+                        detail: dialog.settings.nativeDownloadDirectory
                         unavailable: dialog.isolatedReason
 
                         Button {
+                            id: changeFolderButton
                             text: "Cambiar…"
                             onClicked: folderDialog.open()
                             Accessible.name: "Cambiar la carpeta de descargas"
+                            Accessible.onPressAction: changeFolderButton.click()
+                            Keys.onReturnPressed: event => {
+                                event.accepted = true
+                                changeFolderButton.click()
+                            }
+                            Keys.onEnterPressed: event => {
+                                event.accepted = true
+                                changeFolderButton.click()
+                            }
                         }
                     }
 
@@ -431,7 +501,7 @@ ModalDialog {
                     // As the web's preferences: which servers episodes come from. Compact 3-column
                     // grid keeps all Descargas rows within 1100x720 without scrolling.
                     SettingRow {
-                        label: "Proveedores"
+                        label: "Servidores"
 
                         GridLayout {
                             columns: 3
@@ -460,6 +530,9 @@ ModalDialog {
                                     HoverHandler { id: reasonHover }
                                     ToolTip.visible: explained && (reasonHover.hovered
                                                                    || (activeFocus && InputModality.keyboard))
+                                    ToolTip.delay: activeFocus && InputModality.keyboard
+                                                   ? 0 : Theme.tooltipDelay
+                                    ToolTip.timeout: Theme.tooltipTimeout
                                     ToolTip.text: modelData.reason
 
                                     Toggle {
@@ -490,7 +563,7 @@ ModalDialog {
                               + "de AnimeHub; su progreso se ve igual en Descargas."
 
                         Choice {
-                            model: ["No usar", "En este PC", "Por MyJDownloader"]
+                            model: ["No usar", "En este equipo", "Por MyJDownloader"]
                             currentIndex: dialog.settings.jdownloader
                             onActivated: index => dialog.settings.jdownloader = index
                             Accessible.name: "JDownloader"
@@ -513,7 +586,7 @@ ModalDialog {
 
                     SettingRow {
                         visible: dialog.jdLocal
-                        label: "API local"
+                        label: "Dirección local"
 
                         Field {
                             text: dialog.settings.jdEndpoint
@@ -521,7 +594,7 @@ ModalDialog {
                                 dialog.settings.jdEndpoint = text
                                 text = dialog.settings.jdEndpoint
                             }
-                            Accessible.name: "URL de la API local de JDownloader"
+                            Accessible.name: "Dirección local de JDownloader"
                         }
                     }
 
@@ -548,7 +621,7 @@ ModalDialog {
                                 Accessible.name: "Contraseña de MyJDownloader"
                                 onAccepted: if (signIn.enabled) signIn.clicked()
                             }
-                            Button {
+                            AccentButton {
                                 id: signIn
                                 Layout.alignment: Qt.AlignRight
                                 text: "Conectar"
@@ -567,10 +640,20 @@ ModalDialog {
                             visible: running
                         }
                         Button {
+                            id: disconnectJdButton
                             visible: dialog.jd.account !== ""
                             text: "Desconectar"
                             onClicked: dialog.jd.disconnectAccount()
                             Accessible.name: "Desconectar MyJDownloader"
+                            Accessible.onPressAction: disconnectJdButton.click()
+                            Keys.onReturnPressed: event => {
+                                event.accepted = true
+                                disconnectJdButton.click()
+                            }
+                            Keys.onEnterPressed: event => {
+                                event.accepted = true
+                                disconnectJdButton.click()
+                            }
                         }
                     }
 
@@ -596,15 +679,35 @@ ModalDialog {
                                                              : "Sin elegir"
 
                         Button {
+                            id: pickJdButton
                             text: "Elegir…"
                             onClicked: jdFile.open()
                             Accessible.name: "Elegir la aplicación JDownloader"
+                            Accessible.onPressAction: pickJdButton.click()
+                            Keys.onReturnPressed: event => {
+                                event.accepted = true
+                                pickJdButton.click()
+                            }
+                            Keys.onEnterPressed: event => {
+                                event.accepted = true
+                                pickJdButton.click()
+                            }
                         }
                         Button {
+                            id: openJdButton
                             visible: dialog.settings.jdExecutable !== ""
-                            text: "Iniciar"
+                            text: "Abrir"
                             onClicked: dialog.jd.launch()
-                            Accessible.name: "Iniciar JDownloader"
+                            Accessible.name: "Abrir JDownloader"
+                            Accessible.onPressAction: openJdButton.click()
+                            Keys.onReturnPressed: event => {
+                                event.accepted = true
+                                openJdButton.click()
+                            }
+                            Keys.onEnterPressed: event => {
+                                event.accepted = true
+                                openJdButton.click()
+                            }
                         }
                     }
 
@@ -658,6 +761,7 @@ ModalDialog {
                 }
 
                 SettingsPage {
+                    id: aboutPage
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 10
@@ -698,6 +802,7 @@ ModalDialog {
                                 }
 
                                 Button {
+                                    id: copyDiagnosticsButton
                                     text: dialog.diagnosticsCopied ? "Copiado" : "Copiar información"
                                     icon.source: Theme.source(dialog.diagnosticsCopied
                                                               ? Theme.icon.check : Theme.icon.copy)
@@ -705,6 +810,15 @@ ModalDialog {
                                     icon.height: 14
                                     icon.color: dialog.diagnosticsCopied ? Theme.success : Theme.ink
                                     Accessible.name: "Copiar información técnica"
+                                    Accessible.onPressAction: copyDiagnosticsButton.click()
+                                    Keys.onReturnPressed: event => {
+                                        event.accepted = true
+                                        copyDiagnosticsButton.click()
+                                    }
+                                    Keys.onEnterPressed: event => {
+                                        event.accepted = true
+                                        copyDiagnosticsButton.click()
+                                    }
                                     onClicked: {
                                         dialog.app.copyToClipboard(dialog.app.diagnosticsText())
                                         dialog.diagnosticsCopied = true
@@ -747,7 +861,7 @@ ModalDialog {
 
                             AboutLinkRow {
                                 title: "Notas de la versión"
-                                subtitle: "Cambios en v" + dialog.app.version
+                                subtitle: "Cambios en la versión " + dialog.app.version
                                 onClicked: dialog.app.openUrl(dialog.app.releasesUrl)
                             }
 
@@ -780,7 +894,7 @@ ModalDialog {
                                         Layout.fillWidth: true
                                         text: "Carpeta de datos"
                                         color: Theme.ink
-                                        font.pixelSize: Theme.body - 1
+                                        font.pixelSize: Theme.small
                                         font.weight: Font.DemiBold
                                     }
                                     Label {
@@ -791,16 +905,28 @@ ModalDialog {
                                         elide: Text.ElideMiddle
                                         HoverHandler { id: dataDirHover }
                                         ToolTip.visible: dataDirHover.hovered && truncated
+                                        ToolTip.delay: Theme.tooltipDelay
+                                        ToolTip.timeout: Theme.tooltipTimeout
                                         ToolTip.text: text
                                     }
                                 }
 
                                 Button {
+                                    id: openDataDirButton
                                     text: "Abrir"
                                     icon.source: Theme.source(Theme.icon.folder)
                                     icon.width: 14
                                     icon.height: 14
                                     Accessible.name: "Abrir carpeta de datos"
+                                    Accessible.onPressAction: openDataDirButton.click()
+                                    Keys.onReturnPressed: event => {
+                                        event.accepted = true
+                                        openDataDirButton.click()
+                                    }
+                                    Keys.onEnterPressed: event => {
+                                        event.accepted = true
+                                        openDataDirButton.click()
+                                    }
                                     onClicked: dialog.app.openDataDirectory()
                                 }
                             }
@@ -853,13 +979,13 @@ ModalDialog {
                                 background: Rectangle {
                                     x: -8
                                     width: parent.width + 16
-                                    radius: 4
-                                    color: expanderHeader.down ? Qt.rgba(1, 1, 1, 0.03)
-                                           : expanderHeader.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent"
+                                    radius: Theme.radiusSm
+                                    color: expanderHeader.down ? Theme.pressSubtle
+                                           : expanderHeader.hovered ? Theme.hoverSubtle : "transparent"
 
                                     FocusFrame {
                                         visible: expanderHeader.activeFocus && InputModality.keyboard
-                                        radiusInside: 4
+                                        radiusInside: Theme.radiusSm
                                     }
                                 }
 
@@ -874,7 +1000,7 @@ ModalDialog {
                                             Layout.fillWidth: true
                                             text: "Motores y licencias"
                                             color: Theme.ink
-                                            font.pixelSize: Theme.body - 1
+                                            font.pixelSize: Theme.small
                                             font.weight: Font.DemiBold
                                             Accessible.ignored: true
                                         }
@@ -882,15 +1008,15 @@ ModalDialog {
                                             Layout.fillWidth: true
                                             text: enginesExpander.summaryText
                                             color: Theme.muted
-                                            font.pixelSize: Theme.caption - 1
+                                            font.pixelSize: Theme.micro
                                             elide: Text.ElideRight
                                             Accessible.ignored: true
                                         }
                                     }
 
                                     Glyph {
-                                        glyph: dialog.aboutEnginesExpanded ? Theme.icon.collapseAll
-                                                                           : Theme.icon.expandAll
+                                        glyph: dialog.aboutEnginesExpanded ? Theme.icon.chevronUp
+                                                                           : Theme.icon.chevronDown
                                         size: 11
                                         color: expanderHeader.hovered ? Theme.ink : Theme.muted
                                     }
@@ -946,17 +1072,37 @@ ModalDialog {
                                     spacing: 8
 
                                     Button {
+                                        id: licenseButton
                                         visible: dialog.licenseFile.toString() !== ""
                                         text: "Ver licencia"
                                         onClicked: dialog.app.openUrl(dialog.licenseFile)
                                         Accessible.name: "Ver la licencia"
+                                        Accessible.onPressAction: licenseButton.click()
+                                        Keys.onReturnPressed: event => {
+                                            event.accepted = true
+                                            licenseButton.click()
+                                        }
+                                        Keys.onEnterPressed: event => {
+                                            event.accepted = true
+                                            licenseButton.click()
+                                        }
                                     }
 
                                     Button {
+                                        id: thirdPartyButton
                                         visible: dialog.noticeFile.toString() !== ""
                                         text: "Terceros"
                                         onClicked: dialog.app.openUrl(dialog.noticeFile)
                                         Accessible.name: "Ver licencias de terceros"
+                                        Accessible.onPressAction: thirdPartyButton.click()
+                                        Keys.onReturnPressed: event => {
+                                            event.accepted = true
+                                            thirdPartyButton.click()
+                                        }
+                                        Keys.onEnterPressed: event => {
+                                            event.accepted = true
+                                            thirdPartyButton.click()
+                                        }
                                     }
                                 }
                             }
@@ -969,6 +1115,7 @@ ModalDialog {
 
     // Declared after the pages: last in the Tab order.
     ToolButton {
+        id: closeSettingsButton
         anchors.top: parent.top
         anchors.topMargin: 8
         anchors.right: parent.right
@@ -976,8 +1123,20 @@ ModalDialog {
         text: "Cerrar"
         display: AbstractButton.IconOnly
         icon.source: Theme.source(Theme.icon.cancel)
-        ToolTip.visible: hovered
+        ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+        ToolTip.delay: Theme.tooltipDelay
+        ToolTip.timeout: Theme.tooltipTimeout
         ToolTip.text: "Cerrar (Esc)"
+        Accessible.name: "Cerrar ajustes"
+        Accessible.onPressAction: closeSettingsButton.click()
+        Keys.onReturnPressed: event => {
+            event.accepted = true
+            closeSettingsButton.click()
+        }
+        Keys.onEnterPressed: event => {
+            event.accepted = true
+            closeSettingsButton.click()
+        }
         onClicked: dialog.close()
     }
 

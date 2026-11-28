@@ -13,7 +13,7 @@ Item {
     property var selectedGroup: 0
     // The right pane shows the list as posters.
     property bool showGrid: false
-    // Where the anime on view was opened from: "library", or "downloads" for the Downloads tab.
+    // Where the anime on view was opened from: "library", "schedule", or "downloads".
     property string from: "library"
 
     signal browseCatalog()
@@ -30,6 +30,8 @@ Item {
     readonly property var animeSteps: {
         if (from === "downloads")
             return [{ text: "Descargas", go: () => page.showDownloads() }]
+        if (from === "schedule")
+            return [{ text: "Horario", go: () => page.openSchedule() }]
         const steps = [{ text: "Biblioteca", go: () => page.select("") }]
         const franchise = app.library.total >= 0 ? app.library.franchiseStep(selected) : ({})
         if (franchise.id)
@@ -74,7 +76,7 @@ Item {
     // arrows, ← and →), the keyboard goes to its title, framed when the keyboard opened it.
     function select(slug, origin, quiet) {
         const reason = ApplicationWindow.window ? ApplicationWindow.window.openingReason()
-                                                : Qt.OtherFocusReason
+                                                : InputModality.reason
         selectedGroup = 0
         showGrid = false
         from = origin || "library"
@@ -88,7 +90,7 @@ Item {
 
     function openFranchise(id, quiet) {
         const reason = ApplicationWindow.window ? ApplicationWindow.window.openingReason()
-                                                : Qt.OtherFocusReason
+                                                : InputModality.reason
         selected = ""
         showGrid = false
         selectedGroup = id
@@ -242,21 +244,59 @@ Item {
             }
         }
         // The anime's title is a suggestion: typing replaces it.
-        onAboutToShow: { failure = ""; groupTitle.forceActiveFocus(InputModality.reason); groupTitle.selectAll() }
+        onAboutToShow: {
+            failure = ""
+            groupTitle.forceActiveFocus(InputModality.reason)
+            groupTitle.selectAll()
+        }
         ColumnLayout {
             width: 432
-            TextField { id: groupTitle; objectName: "createFranchiseTitle"; Layout.fillWidth: true; placeholderText: "Nombre de la franquicia"; Accessible.name: "Nombre de la franquicia"; onAccepted: createGroup.submit() }
-            Label { Layout.fillWidth: true; visible: text !== ""; text: createGroup.failure; wrapMode: Text.Wrap; color: Theme.muted }
+            spacing: 12
+            TextField {
+                id: groupTitle
+                objectName: "createFranchiseTitle"
+                Layout.fillWidth: true
+                placeholderText: "Nombre de la franquicia"
+                Accessible.name: "Nombre de la franquicia"
+                onAccepted: createGroup.submit()
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                visible: createGroup.failure !== ""
+                spacing: 6
+
+                Glyph {
+                    Layout.alignment: Qt.AlignTop
+                    Layout.topMargin: 2
+                    glyph: Theme.icon.warning
+                    size: 13
+                    color: Theme.danger
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: createGroup.failure
+                    wrapMode: Text.Wrap
+                    color: Theme.danger
+                    font.pixelSize: Theme.caption
+                }
+            }
         }
         footer: DialogButtonBox {
-            Button {
+            AccentButton {
                 objectName: "createFranchiseConfirm"
                 text: "Crear franquicia"
+                implicitHeight: 32
                 enabled: groupTitle.text.trim().length > 0
-                highlighted: createGroup.visible // DialogButtonBox clears it while it builds
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
                 onClicked: createGroup.submit()
             }
-            Button { text: "Cancelar"; onClicked: createGroup.reject() }
+            Button {
+                text: "Cancelar"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                Keys.onReturnPressed: createGroup.reject()
+                Keys.onEnterPressed: createGroup.reject()
+            }
         }
     }
 }

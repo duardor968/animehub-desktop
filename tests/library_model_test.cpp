@@ -909,6 +909,122 @@ private slots:
         QTest::qWait(50);
         QCOMPARE(server.count("/api/v1/schedule"), 1);
     }
+
+    void spanishPluralsSingleEpisodeFilmAndFeaturedRemaining() {
+        auto opened = storage::Database::open(QStringLiteral(":memory:"));
+        QVERIFY(opened);
+        auto db = std::move(*opened);
+        library::LibraryRepository repo(*db);
+        downloads::DownloadRepository queue(*db);
+        QNetworkAccessManager network;
+        QTemporaryDir cache;
+        api::ApiClient api(network, {.baseUrl = QUrl(QStringLiteral("http://127.0.0.1:1/")),
+                                     .cacheDirectory = cache.path()});
+        library::LibraryService service(repo, api);
+        downloads::Aria2 aria(network, QString(), QByteArray("test"));
+        downloads::mega::Api mega(network);
+        downloads::pixeldrain::Api pixeldrain(network);
+        downloads::DownloadManager downloads({api, aria, mega, pixeldrain, queue, repo},
+                                             [] { return downloads::DownloadSettings{}; });
+
+        const auto add_anime = [&](const QString& slug, const QString& title, int count,
+                                   const QString& category) {
+            library::AnimeRecord record;
+            record.slug = slug;
+            record.title = title;
+            record.category = category;
+            record.status = api::AnimeStatus::Finished;
+            record.episodeCount = count;
+            QVERIFY(repo.saveSnapshot(record));
+            QVERIFY(repo.setInLibrary(slug, true));
+            QList<api::Episode> episodes;
+            for (int number = 1; number <= count; ++number) {
+                api::Episode episode;
+                episode.id = slug + QString::number(number);
+                episode.number = number;
+                episodes.append(episode);
+            }
+            QVERIFY(repo.syncEpisodes(slug, episodes, false));
+        };
+
+        add_anime(QStringLiteral("one-disk"), QStringLiteral("Saga One"), 12,
+                  QStringLiteral("TV Anime"));
+        add_anime(QStringLiteral("two-disk"), QStringLiteral("Saga Two"), 12,
+                  QStringLiteral("TV Anime"));
+        add_anime(QStringLiteral("film"), QStringLiteral("Saga Film"), 1,
+                  QStringLiteral("Película"));
+
+        QVERIFY(repo.setEpisodeFile(QStringLiteral("one-disk"), 1,
+                                    cache.filePath(QStringLiteral("o1.mkv")), 10));
+        QVERIFY(repo.setWatchState(QStringLiteral("one-disk"), 1, library::WatchState::Watching,
+                                   60'000, 120'000)); // 60 s left -> "Queda 1 min"
+
+        QVERIFY(repo.setEpisodeFile(QStringLiteral("two-disk"), 1,
+                                    cache.filePath(QStringLiteral("t1.mkv")), 10));
+        QVERIFY(repo.setEpisodeFile(QStringLiteral("two-disk"), 2,
+                                    cache.filePath(QStringLiteral("t2.mkv")), 10));
+
+        QVERIFY(repo.setEpisodeFile(QStringLiteral("film"), 1,
+                                    cache.filePath(QStringLiteral("f1.mkv")), 10));
+        QVERIFY(repo.setWatchState(QStringLiteral("film"), 1, library::WatchState::Watching,
+                                   100'000, 3'700'000)); // 3600 s left -> "Queda 1 h"
+
+        const auto group = repo.createFranchise(QStringLiteral("Saga"), QStringLiteral("one-disk"));
+        QVERIFY(group);
+        QVERIFY(repo.setFranchiseMember(*group, QStringLiteral("two-disk"), true));
+        QVERIFY(repo.setFranchiseMember(*group, QStringLiteral("film"), true));
+
+        LibraryModel model(service, downloads, api);
+        model.setGrouped(false);
+        model.openFranchise(*group);
+
+        QHash<QString, QVariantMap> by_slug;
+        for (const auto& item : model.franchise().value(QStringLiteral("works")).toList()) {
+            const auto map = item.toMap();
+            by_slug.insert(map.value(QStringLiteral("slug")).toString(), map);
+        }
+        QCOMPARE(
+            by_slug.value(QStringLiteral("one-disk")).value(QStringLiteral("diskText")).toString(),
+            QStringLiteral("1 episodio en disco"));
+        QCOMPARE(
+            by_slug.value(QStringLiteral("two-disk")).value(QStringLiteral("diskText")).toString(),
+            QStringLiteral("2 episodios en disco"));
+        QCOMPARE(by_slug.value(QStringLiteral("film")).value(QStringLiteral("diskText")).toString(),
+                 QStringLiteral("En disco"));
+        QCOMPARE(
+            by_slug.value(QStringLiteral("one-disk")).value(QStringLiteral("state")).toString(),
+            QStringLiteral("Continuar ep. 1"));
+        QCOMPARE(
+            by_slug.value(QStringLiteral("one-disk")).value(QStringLiteral("caption")).toString(),
+            QStringLiteral("Continuar ep. 1"));
+        QCOMPARE(by_slug.value(QStringLiteral("film")).value(QStringLiteral("state")).toString(),
+                 QStringLiteral("Continuar"));
+        QCOMPARE(by_slug.value(QStringLiteral("film")).value(QStringLiteral("caption")).toString(),
+                 QStringLiteral("Continuar"));
+
+        // Featured remainingText handles singular "Queda 1 min" and exact "Queda 1 h" (no "0 min").
+        // Film was touched most recently (and sorts first by title) so it leads featured without
+        // "Episodio 1".
+        QCOMPARE(model.featured().value(QStringLiteral("slug")).toString(), QStringLiteral("film"));
+        QCOMPARE(model.featured().value(QStringLiteral("episodeLabel")).toString(), QString());
+        QCOMPARE(model.featured().value(QStringLiteral("remainingText")).toString(),
+                 QStringLiteral("Queda 1 h"));
+
+        // Finish film so one-disk deterministically leads featured with 60 s left -> "Queda 1 min".
+        QVERIFY(repo.setWatchState(QStringLiteral("film"), 1, library::WatchState::Watched));
+        LibraryModel model_min(service, downloads, api);
+        QCOMPARE(model_min.featured().value(QStringLiteral("slug")).toString(),
+                 QStringLiteral("one-disk"));
+        QCOMPARE(model_min.featured().value(QStringLiteral("remainingText")).toString(),
+                 QStringLiteral("Queda 1 min"));
+
+        // Update one-disk to 30 s left -> "Queda menos de un minuto".
+        QVERIFY(repo.setWatchState(QStringLiteral("one-disk"), 1, library::WatchState::Watching,
+                                   90'000, 120'000));
+        LibraryModel model_sec(service, downloads, api);
+        QCOMPARE(model_sec.featured().value(QStringLiteral("remainingText")).toString(),
+                 QStringLiteral("Queda menos de un minuto"));
+    }
 };
 
 QTEST_GUILESS_MAIN(LibraryModelTest)

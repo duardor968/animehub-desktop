@@ -3,6 +3,7 @@
 #include "api/response_cache.h"
 #include "http_test_server.h"
 
+#include <QDir>
 #include <QFile>
 #include <QNetworkAccessManager>
 #include <QSignalSpy>
@@ -755,7 +756,15 @@ private slots:
         QCOMPARE(detailValue(rows, QStringLiteral("Estado")), QStringLiteral("Finalizado"));
         QCOMPARE(detailValue(rows, QStringLiteral("Episodios")), QStringLiteral("28"));
         QCOMPARE(detailValue(rows, QStringLiteral("Puntuación (AnimeAV1)")),
-                 QStringLiteral("★ 9,25 (917.992 votos)"));
+                 QStringLiteral("9,25 (917.992 votos)"));
+        bool score_has_star_icon = false;
+        for (const auto& item : rows) {
+            const auto map = item.toMap();
+            if (map.value(QStringLiteral("label")).toString() == u"Puntuación (AnimeAV1)") {
+                score_has_star_icon = map.value(QStringLiteral("icon")).toString() == u"starFilled";
+            }
+        }
+        QVERIFY(score_has_star_icon);
 
         // 2) Mature anime with same-year range, 4-digit vote grouping ("1.842 votos"), and 7,4.
         constexpr auto kMatureBody =
@@ -781,7 +790,7 @@ private slots:
                  QStringLiteral("Oct – Dic 2026"));
         QCOMPARE(detailValue(mature_rows, QStringLiteral("Episodios")), QStringLiteral("8"));
         QCOMPARE(detailValue(mature_rows, QStringLiteral("Puntuación (AnimeAV1)")),
-                 QStringLiteral("★ 7,4 (1.842 votos)"));
+                 QStringLiteral("7,4 (1.842 votos)"));
 
         // 3) Singular vote ("1 voto") and startDate-only ("Oct 2026").
         constexpr auto kSingleVoteBody =
@@ -808,9 +817,9 @@ private slots:
                  QStringLiteral("Próximamente"));
         QCOMPARE(detailValue(single_rows, QStringLiteral("Episodios")), QString());
         QCOMPARE(detailValue(single_rows, QStringLiteral("Puntuación (AnimeAV1)")),
-                 QStringLiteral("★ 7,4 (1 voto)"));
+                 QStringLiteral("7,4 (1 voto)"));
 
-        // 4) Score with no votes omits parentheses ("★ 8").
+        // 4) Score with no votes omits parentheses ("8").
         constexpr auto kScoreOnlyBody =
             R"({"data":{"id":"44","slug":"score-only","title":"Score Only",)"
             R"("synopsis":null,"posterUrl":null,"backdropUrl":null,"backdropSrcSet":null,)"
@@ -833,7 +842,7 @@ private slots:
         QCOMPARE(detailValue(score_only_rows, QStringLiteral("Emisión")),
                  QStringLiteral("Abr 2026"));
         QCOMPARE(detailValue(score_only_rows, QStringLiteral("Puntuación (AnimeAV1)")),
-                 QStringLiteral("★ 8"));
+                 QStringLiteral("8"));
 
         // 5) Offline fallback: stored genres split & slugified, startYear fallback, no score row.
         Fixture offline;
@@ -868,6 +877,79 @@ private slots:
             QVERIFY(!val.isEmpty());
             QVERIFY(val != u"—");
         }
+    }
+
+    void singleEpisodeFilmCopyAndIsolatedShellGuards() {
+        // Single-episode film uses singular watched/unwatched phrasing rather than "Todo marcado".
+        Fixture film;
+        QVERIFY(film.open(api::AnimeStatus::Finished, 1, 1, QStringLiteral("Película")));
+        film.show();
+        QSignalSpy undo_spy(film.view.get(), &AnimeView::undoable);
+        film.view->markAllWatched();
+        QCOMPARE(undo_spy.size(), 1);
+        QCOMPARE(undo_spy.last().first().toString(), QStringLiteral("Marcado como visto"));
+        film.view->markAllUnwatched();
+        QCOMPARE(undo_spy.size(), 2);
+        QCOMPARE(undo_spy.last().first().toString(), QStringLiteral("Marcado como no visto"));
+
+        // Isolated profile blocks openFolder, showFile, openTrailer and openSource.
+        testing::HttpTestServer server;
+        QVERIFY(server.listen());
+        constexpr auto kWithLinks =
+            R"({"data":{"id":"1","slug":"a","title":"Anime",)"
+            R"("synopsis":null,"posterUrl":null,"backdropUrl":null,"backdropSrcSet":null,)"
+            R"("category":{"id":"1","name":"TV Anime","slug":"tv-anime"},"status":"FINISHED",)"
+            R"("startDate":null,"endDate":null,"mature":false,"alternativeTitle":null,)"
+            R"("trailerUrl":"https://youtube.com/watch?v=test","nextEpisodeAt":null,)"
+            R"("episodeCount":1,"score":null,"votes":null,)"
+            R"("sourceUrl":"https://animeav1.com/media/a","genres":[],"relations":[]}})";
+        serve(server, "/api/v1/anime/a", kWithLinks, 0);
+        serve(server, "/api/v1/anime/a/episodes", kTwoEpisodes, 0);
+
+        Fixture guarded;
+        guarded.apiUrl = server.url(QStringLiteral("/api/v1/"));
+        QVERIFY(guarded.open(api::AnimeStatus::Finished, 1, 2));
+        QVERIFY(guarded.keep(1));
+        const auto folder = guarded.root.filePath(QStringLiteral("Anime/Anime"));
+        QVERIFY(QDir().mkpath(folder));
+        guarded.manager->start(false);
+
+        QStringList opened_folders;
+        QStringList revealed_files;
+        QList<QUrl> opened_urls;
+        app::Services services{
+            *guarded.api,
+            *guarded.library,
+            *guarded.manager,
+            *guarded.player,
+            *guarded.settings,
+            app::Services::Shell{
+                .open = [&](const QString& path) { opened_folders.append(path); },
+                .reveal = [&](const QString& path) { revealed_files.append(path); },
+                .openUrl = [&](const QUrl& url) { opened_urls.append(url); }}};
+        guarded.view = std::make_unique<AnimeView>(std::move(services));
+        guarded.view->open(QStringLiteral("a"));
+        QTRY_VERIFY(!guarded.view->refreshing());
+        QVERIFY(!guarded.view->downloadFolder().isEmpty());
+        QVERIFY(QDir().mkpath(guarded.view->downloadFolder()));
+
+        guarded.settings->setIsolated(true);
+        guarded.view->openFolder();
+        guarded.view->showFile(1);
+        guarded.view->openTrailer();
+        guarded.view->openSource();
+        QVERIFY(opened_folders.isEmpty());
+        QVERIFY(revealed_files.isEmpty());
+        QVERIFY(opened_urls.isEmpty());
+
+        guarded.settings->setIsolated(false);
+        guarded.view->openFolder();
+        guarded.view->showFile(1);
+        guarded.view->openTrailer();
+        guarded.view->openSource();
+        QCOMPARE(opened_folders.size(), 1);
+        QCOMPARE(revealed_files.size(), 1);
+        QCOMPARE(opened_urls.size(), 2);
     }
 };
 

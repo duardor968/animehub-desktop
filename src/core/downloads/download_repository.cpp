@@ -182,7 +182,7 @@ Stored<QList<Task>> DownloadRepository::createMany(
     const QString& endpoint, const QString& device, const QString& sourceRequestId) {
     if (engine == DownloadEngine::JDownloaderLocal && !jd::isLocalEndpoint(QUrl(endpoint))) {
         return std::unexpected(StorageError{
-            u"La API local debe ser HTTP de loopback, sin credenciales ni parámetros."_s});
+            u"La dirección local de JDownloader debe apuntar a este equipo (127.0.0.1 o [::1]), sin credenciales ni parámetros."_s});
     }
     QList<qint64> ids;
     auto inserted = database_.transaction([&]() -> Stored<void> {
@@ -223,7 +223,7 @@ Stored<QList<Task>> DownloadRepository::createMany(
                 if (seen->next()) {
                     if (seen->value(0).toString() != slug)
                         return std::unexpected(
-                            StorageError{u"El pedido remoto ya pertenece a otra obra."_s});
+                            StorageError{u"La solicitud remota ya pertenece a otro anime."_s});
                     continue;
                 }
                 seen->finish();

@@ -10,7 +10,8 @@ ModalDialog {
 
     required property AnimeView view
 
-    readonly property int count: view.missingBetween(start.value, end.value)
+    readonly property bool inverted: start.value > end.value
+    readonly property int count: inverted ? 0 : view.missingBetween(start.value, end.value)
 
     width: 420
     title: "Descargar un rango"
@@ -23,8 +24,8 @@ ModalDialog {
         start.value = Math.floor(view.firstMissing)
         end.value = Math.ceil(view.lastNumber)
     }
-    onOpened: start.contentItem.forceActiveFocus()
-    onAccepted: view.downloadRange(start.value, end.value)
+    onOpened: start.contentItem.forceActiveFocus(InputModality.reason)
+    onAccepted: if (!inverted && count > 0) view.downloadRange(start.value, end.value)
 
     // Fixed widths: Fluent's Dialog loops when its content follows it.
     ColumnLayout {
@@ -70,8 +71,9 @@ ModalDialog {
         Label {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
-            color: Theme.muted
-            text: dialog.count === 0 ? "Ya está todo en disco o en la cola"
+            color: dialog.inverted ? Theme.danger : Theme.muted
+            text: dialog.inverted ? "El episodio inicial no puede ser mayor que el final."
+                  : dialog.count === 0 ? "Ya está todo en disco o en la cola"
                   : (dialog.count === 1 ? "1 episodio, en:" : dialog.count + " episodios, en:")
         }
 
@@ -79,23 +81,26 @@ ModalDialog {
         Label {
             Layout.fillWidth: true
             Layout.topMargin: -12
-            visible: dialog.count > 0
+            visible: !dialog.inverted && dialog.count > 0
             wrapMode: Text.WrapAnywhere
             color: Theme.ink
             text: dialog.view.downloadFolder
         }
     }
 
+    // Windows order: primary action on the left, Cancel on the right.
     footer: DialogButtonBox {
-        Button {
+        AccentButton {
             text: "Descargar"
-            highlighted: dialog.visible // DialogButtonBox clears it while it builds
-            enabled: dialog.count > 0
+            enabled: !dialog.inverted && dialog.count > 0
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
         }
         Button {
             text: "Cancelar"
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            Accessible.onPressAction: click()
+            Keys.onReturnPressed: event => { event.accepted = true; click() }
+            Keys.onEnterPressed: event => { event.accepted = true; click() }
         }
     }
 }

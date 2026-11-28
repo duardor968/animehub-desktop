@@ -52,7 +52,7 @@ Item {
         }
         confirm.ask("¿Descargar " + episodes + " episodios?",
                     "De " + series + (series === 1 ? " anime" : " animes") + ", en "
-                    + app.settings.downloadDirectory + ".",
+                    + app.settings.nativeDownloadDirectory + ".",
                     "Descargar", "Cancelar", start)
     }
 
@@ -161,6 +161,9 @@ Item {
                         Layout.leftMargin: 12
                         text: "Descargar " + root.library.pendingCount + " episodios"
                         icon.source: Theme.source(Theme.icon.download)
+                        Accessible.onPressAction: click()
+                        Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+                        Keys.onEnterPressed: event => { event.accepted = true; clicked() }
                         onClicked: root.downloadAll()
                     }
 
@@ -206,11 +209,14 @@ Item {
                                 rightPadding: tileAction.width + 22
                                 text: tile.model.title
                                 Accessible.name: tile.model.title + ", " + tile.model.caption
+                                Accessible.onPressAction: clicked()
                                 onClicked: root.activated(tile.model.slug)
-                                Keys.onReturnPressed: clicked()
-                                Keys.onEnterPressed: clicked()
-                                ToolTip.visible: hovered && tileTitle.truncated
-                                ToolTip.delay: 500
+                                Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+                                Keys.onEnterPressed: event => { event.accepted = true; clicked() }
+                                ToolTip.visible: (hovered || (activeFocus && InputModality.keyboard))
+                                                 && tileTitle.truncated
+                                ToolTip.delay: Theme.tooltipDelay
+                                ToolTip.timeout: Theme.tooltipTimeout
                                 ToolTip.text: tile.model.title
 
                                 background: Rectangle {
@@ -276,9 +282,10 @@ Item {
                                 text: "Descargar"
                                 icon.source: Theme.source(Theme.icon.download)
                                 onClicked: root.act(tile.model.slug, "download")
-                                Keys.onReturnPressed: clicked()
-                                Keys.onEnterPressed: clicked()
+                                Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+                                Keys.onEnterPressed: event => { event.accepted = true; clicked() }
                                 Accessible.name: "Descargar " + tile.model.title
+                                Accessible.onPressAction: click()
                             }
                         }
                     }
@@ -301,6 +308,9 @@ Item {
                     visible: root.library.pendingCount > 1
                     text: "Descargar " + root.library.pendingCount + " episodios"
                     icon.source: Theme.source(Theme.icon.download)
+                    Accessible.onPressAction: click()
+                    Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+                    Keys.onEnterPressed: event => { event.accepted = true; clicked() }
                     onClicked: root.downloadAll()
                 }
             }
@@ -330,7 +340,7 @@ Item {
         color: Theme.stroke
     }
 
-    // Fixed right "Hoy" rail on wide windows (>= 1100 px), always offering "Ver horario ›".
+    // Fixed right "Hoy" rail on wide windows (>= 1100 px), always offering "Ver horario".
     Rectangle {
         id: railPane
         visible: !root.idle && root.twoZone
@@ -395,14 +405,14 @@ Item {
             AccentButton {
                 text: "Explorar el catálogo"
                 onClicked: root.browseCatalog()
-                Keys.onReturnPressed: clicked()
-                Keys.onEnterPressed: clicked()
             }
 
             Button {
                 visible: root.library.total > 0
                 text: "Ver horario"
-                icon.source: Theme.source(Theme.icon.schedule)
+                Accessible.onPressAction: click()
+                Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+                Keys.onEnterPressed: event => { event.accepted = true; clicked() }
                 onClicked: root.openSchedule()
             }
         }

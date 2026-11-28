@@ -222,7 +222,7 @@ QString percent(double fraction) {
 } // namespace
 
 AnimeView::AnimeView(Services services, QObject* parent)
-    : QObject(parent), services_(services), episodes_(this), related_(this) {
+    : QObject(parent), services_(std::move(services)), episodes_(this), related_(this) {
     // Downloads report progress several times a second: one repaint per event-loop turn.
     notify_timer_.setSingleShot(true);
     notify_timer_.setInterval(0);
@@ -831,11 +831,13 @@ QVariantList AnimeView::details() const {
         details.append(detail(QStringLiteral("Episodios"), QString::number(count)));
     }
     if (const auto scored = scoreText(); !scored.isEmpty()) {
-        auto text = QStringLiteral("★ ") + scored;
+        auto text = scored;
         if (const auto voted = votesText(); !voted.isEmpty()) {
             text += QStringLiteral(" (") + voted + QLatin1Char(')');
         }
-        details.append(detail(QStringLiteral("Puntuación (AnimeAV1)"), text));
+        auto row = detail(QStringLiteral("Puntuación (AnimeAV1)"), text);
+        row.insert(QStringLiteral("icon"), QStringLiteral("starFilled"));
+        details.append(std::move(row));
     }
     return details;
 }
@@ -1191,7 +1193,9 @@ QVariantList AnimeView::figures() const {
 
 void AnimeView::report(const storage::Stored<void>& result) {
     if (!result) {
-        emit message(QStringLiteral("No se pudo guardar el cambio: ") + result.error().message,
+        qWarning("library change: %s", qPrintable(result.error().message));
+        emit message(QStringLiteral("No se pudo guardar el cambio: ") +
+                         display::storageError(result.error().message),
                      true);
     }
 }
@@ -1292,14 +1296,14 @@ void AnimeView::play(double number) {
         {.slug = slug_,
          .number = number,
          .filePath = episode->filePath,
-         .title = title() + QStringLiteral(" · ") + display::episode(number),
+         .title = single() ? title() : title() + QStringLiteral(" · ") + display::episode(number),
          .startMs = episode->state == WatchState::Watching ? episode->positionMs : 0});
     if (!started) {
         if (!QFile::exists(episode->filePath)) {
             report(services_.library.repository().clearEpisodeFile(slug_, number));
             readLibrary();
         }
-        emit message(started.error(), true);
+        emit message(display::storageError(started.error()), true);
         return;
     }
     joinLibrary();
@@ -1360,7 +1364,7 @@ void AnimeView::downloadEpisodes(const QList<double>& numbers) {
     const auto queued =
         services_.downloads.enqueueMany(slug_, wanted, title(), downloads::TaskOrigin::Manual);
     if (!queued) {
-        emit message(queued.error(), true);
+        emit message(display::storageError(queued.error()), true);
         return;
     }
     joinLibrary();
@@ -1428,8 +1432,9 @@ void AnimeView::cancelDownload(double number, bool confirmed) {
     if (!confirmed && task->bytesDone > 0) {
         emit cancelConfirmationNeeded(
             number,
-            QStringLiteral("¿Cancelar la descarga del episodio %1?")
-                .arg(display::episodeNumber(number)),
+            single() ? QStringLiteral("¿Cancelar la descarga de %1?").arg(title())
+                     : QStringLiteral("¿Cancelar la descarga del episodio %1?")
+                           .arg(display::episodeNumber(number)),
             QStringLiteral("Se borrarán los %1 descargados.").arg(display::bytes(task->bytesDone)));
         return;
     }
@@ -1526,7 +1531,9 @@ void AnimeView::markAllWatched() {
     const auto result = services_.library.markWatchedThrough(slug_, episodes.last().number);
     report(result);
     if (result) {
-        offerUndo(QStringLiteral("Todo marcado como visto"), std::move(saved));
+        offerUndo(single() ? QStringLiteral("Marcado como visto")
+                           : QStringLiteral("Todo marcado como visto"),
+                  std::move(saved));
     }
 }
 
@@ -1537,7 +1544,9 @@ void AnimeView::markAllUnwatched() {
     const auto result = services_.library.markAllUnwatched(slug_);
     report(result);
     if (result) {
-        offerUndo(QStringLiteral("Todo marcado como no visto"), std::move(saved));
+        offerUndo(single() ? QStringLiteral("Marcado como no visto")
+                           : QStringLiteral("Todo marcado como no visto"),
+                  std::move(saved));
     }
 }
 
@@ -1596,20 +1605,24 @@ void AnimeView::continueFrom(double number, const QString& clock) {
 void AnimeView::trashFile(double number) {
     const auto trashed = services_.library.trashFiles(slug_, {number});
     if (!trashed) {
-        emit message(QStringLiteral("No se pudo guardar el cambio: ") + trashed.error().message,
+        emit message(QStringLiteral("No se pudo guardar el cambio: ") +
+                         display::storageError(trashed.error().message),
                      true);
     } else if (trashed->failed > 0) {
         emit message(QStringLiteral("No se pudo mover el archivo a la Papelera: está en uso."),
                      true);
     } else {
-        offerRestore(display::episode(number) + QStringLiteral(" en la Papelera"), trashed->files);
+        offerRestore(single() ? QStringLiteral("Archivo en la Papelera")
+                              : display::episode(number) + QStringLiteral(" en la Papelera"),
+                     trashed->files);
     }
 }
 
 void AnimeView::trashWatched() {
     const auto trashed = services_.library.trashWatched(slug_);
     if (!trashed) {
-        emit message(QStringLiteral("No se pudo guardar el cambio: ") + trashed.error().message,
+        emit message(QStringLiteral("No se pudo guardar el cambio: ") +
+                         display::storageError(trashed.error().message),
                      true);
         return;
     }
@@ -1622,7 +1635,8 @@ void AnimeView::trashWatched() {
         return;
     }
     if (trashed->count > 0) {
-        offerRestore((trashed->count == 1
+        offerRestore((single() ? QStringLiteral("Archivo en la Papelera · ")
+                      : trashed->count == 1
                           ? QStringLiteral("1 episodio en la Papelera · ")
                           : QStringLiteral("%1 episodios en la Papelera · ").arg(trashed->count)) +
                          display::bytes(trashed->bytes),
@@ -1640,8 +1654,9 @@ void AnimeView::offerRestore(const QString& text, QList<library::TrashedFile> fi
     undo_ = [this, slug = slug_, files = std::move(files)] {
         const auto restored = services_.library.restore(slug, files);
         if (!restored) {
-            emit message(
-                QStringLiteral("No se pudo guardar el cambio: ") + restored.error().message, true);
+            emit message(QStringLiteral("No se pudo guardar el cambio: ") +
+                             display::storageError(restored.error().message),
+                         true);
         } else if (const auto missing = files.size() - *restored; missing > 0) {
             emit message(
                 missing == 1
@@ -1654,9 +1669,16 @@ void AnimeView::offerRestore(const QString& text, QList<library::TrashedFile> fi
 }
 
 void AnimeView::showFile(double number) {
+    if (services_.settings.isolated()) {
+        return;
+    }
     const auto episode = episodes_.episode(number);
     if (episode && !episode->filePath.isEmpty()) {
-        shell::reveal(episode->filePath);
+        if (services_.shell.reveal) {
+            services_.shell.reveal(episode->filePath);
+        } else {
+            shell::reveal(episode->filePath);
+        }
     }
 }
 
@@ -1666,21 +1688,42 @@ bool AnimeView::hasFolder() const {
 }
 
 void AnimeView::openFolder() {
+    if (services_.settings.isolated()) {
+        return;
+    }
     if (hasFolder()) {
-        shell::open(folderPath());
+        if (services_.shell.open) {
+            services_.shell.open(folderPath());
+        } else {
+            shell::open(folderPath());
+        }
     }
 }
 
 void AnimeView::openTrailer() {
+    if (services_.settings.isolated()) {
+        return;
+    }
     if (const auto url = trailerUrl(); url.isValid()) {
-        QDesktopServices::openUrl(url);
+        if (services_.shell.openUrl) {
+            services_.shell.openUrl(url);
+        } else {
+            QDesktopServices::openUrl(url);
+        }
     }
 }
 
 void AnimeView::openSource() {
+    if (services_.settings.isolated()) {
+        return;
+    }
     if (detail_ && detail_->sourceUrl.isValid() &&
         (detail_->sourceUrl.scheme() == u"https" || detail_->sourceUrl.scheme() == u"http")) {
-        QDesktopServices::openUrl(detail_->sourceUrl);
+        if (services_.shell.openUrl) {
+            services_.shell.openUrl(detail_->sourceUrl);
+        } else {
+            QDesktopServices::openUrl(detail_->sourceUrl);
+        }
     }
 }
 

@@ -69,8 +69,7 @@ QColor parseColorQuery(const QString& id) {
 }
 
 bool isCustomIcon(const QString& name) {
-    return name == u"pot-play" || name == u"pot-pause" || name == u"pot-stop" ||
-           name == u"bookmark-ribbon";
+    return name == u"pot-play" || name == u"pot-pause" || name == u"bookmark-ribbon";
 }
 
 QImage renderCustomIcon(const QString& name, int side, const QColor& color) {
@@ -116,11 +115,6 @@ QImage renderCustomIcon(const QString& name, int side, const QColor& color) {
 
         painter.drawRoundedRect(QRectF(leftX, topY, barW, barH), r, r);
         painter.drawRoundedRect(QRectF(rightX, topY, barW, barH), r, r);
-    } else if (name == u"pot-stop") {
-        // Solid filled rounded square.
-        const qreal box = s * 0.60;
-        const qreal r = std::clamp(s * 0.08, 0.9, 2.0);
-        painter.drawRoundedRect(QRectF(cx - box * 0.5, cy - box * 0.5, box, box), r, r);
     } else if (name == u"bookmark-ribbon") {
         // Solid vertical bookmark ribbon silhouette with clean V-notch tail at bottom.
         const qreal w = s * 0.64;

@@ -141,16 +141,17 @@ void JDownloaderView::testConnection(bool local) {
         downloads::Task probe;
         probe.engine = downloads::DownloadEngine::JDownloaderLocal;
         probe.engineEndpoint = settings_.jdEndpoint();
-        downloads::jd::request(network_, nullptr, probe, QStringLiteral("/jd/version"), {}, this,
-                               [this](const auto& answer) {
-                                   if (!answer) {
-                                       testFailed(QStringLiteral(
-                                           "JDownloader no responde en este PC. Revisa los pasos "
-                                           "y vuelve a probar."));
-                                       return;
-                                   }
-                                   testPassed(AppSettings::JDownloader::Local);
-                               });
+        downloads::jd::request(
+            network_, nullptr, probe, QStringLiteral("/jd/version"), {}, this,
+            [this](const auto& answer) {
+                if (!answer) {
+                    testFailed(
+                        QStringLiteral("JDownloader no responde en este equipo. Revisa los pasos "
+                                       "y vuelve a probar."));
+                    return;
+                }
+                testPassed(AppSettings::JDownloader::Local);
+            });
         return;
     }
     if (!remote_.isConnected()) {

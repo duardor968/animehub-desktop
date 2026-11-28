@@ -201,6 +201,98 @@ private slots:
         QCOMPARE(display::bytes(286'000'000), QStringLiteral("286 MB"));
         QCOMPARE(display::bytes(2'000'000'000), QStringLiteral("2,0 GB"));
     }
+
+    void remainingDurationAndSpanishPlurals() {
+        QCOMPARE(display::remaining(0), QStringLiteral("menos de un minuto"));
+        QCOMPARE(display::remaining(59), QStringLiteral("menos de un minuto"));
+        QCOMPARE(display::remaining(60), QStringLiteral("1 min"));
+        QCOMPARE(display::remaining(61), QStringLiteral("2 min"));
+        QCOMPARE(display::remaining(3599), QStringLiteral("1 h"));
+        QCOMPARE(display::remaining(3600), QStringLiteral("1 h"));
+        QCOMPARE(display::remaining(3660), QStringLiteral("1 h 1 min"));
+        QCOMPARE(display::remaining(7200), QStringLiteral("2 h"));
+        QCOMPARE(display::remaining(7320), QStringLiteral("2 h 2 min"));
+
+        QCOMPARE(display::remainingPhrase(30), QStringLiteral("queda menos de un minuto"));
+        QCOMPARE(display::remainingPhrase(30, true), QStringLiteral("Queda menos de un minuto"));
+        QCOMPARE(display::remainingPhrase(60), QStringLiteral("queda 1 min"));
+        QCOMPARE(display::remainingPhrase(60, true), QStringLiteral("Queda 1 min"));
+        QCOMPARE(display::remainingPhrase(120), QStringLiteral("quedan 2 min"));
+        QCOMPARE(display::remainingPhrase(120, true), QStringLiteral("Quedan 2 min"));
+        QCOMPARE(display::remainingPhrase(3600), QStringLiteral("queda 1 h"));
+        QCOMPARE(display::remainingPhrase(3600, true), QStringLiteral("Queda 1 h"));
+        QCOMPARE(display::remainingPhrase(3660), QStringLiteral("queda 1 h 1 min"));
+        QCOMPARE(display::remainingPhrase(7200), QStringLiteral("quedan 2 h"));
+        QCOMPARE(display::remainingPhrase(7200, true), QStringLiteral("Quedan 2 h"));
+
+        QCOMPARE(display::shortRemaining(0), QString());
+        QCOMPARE(display::shortRemaining(1), QStringLiteral("1 s"));
+        QCOMPARE(display::shortRemaining(45), QStringLiteral("45 s"));
+        QCOMPARE(display::shortRemaining(60), QStringLiteral("1 min"));
+        QCOMPARE(display::shortRemaining(3600), QStringLiteral("1 h"));
+        QCOMPARE(display::shortRemaining(7200), QStringLiteral("2 h"));
+
+        QCOMPARE(display::shortRemainingPhrase(0), QString());
+        QCOMPARE(display::shortRemainingPhrase(1), QStringLiteral("queda 1 s"));
+        QCOMPARE(display::shortRemainingPhrase(2), QStringLiteral("quedan 2 s"));
+        QCOMPARE(display::shortRemainingPhrase(60), QStringLiteral("queda 1 min"));
+        QCOMPARE(display::shortRemainingPhrase(120), QStringLiteral("quedan 2 min"));
+        QCOMPARE(display::shortRemainingPhrase(3600), QStringLiteral("queda 1 h"));
+        QCOMPARE(display::shortRemainingPhrase(7200), QStringLiteral("quedan 2 h"));
+
+        downloads::Task downloading;
+        downloading.state = downloads::TaskState::Downloading;
+        downloading.bytesDone = 0;
+        downloading.bytesTotal = 30'000'000;
+        downloading.bytesPerSecond = 1'000'000;
+        QVERIFY(
+            display::download(downloading).contains(QStringLiteral("queda menos de un minuto")));
+        downloading.bytesTotal = 60'000'000;
+        QVERIFY(display::download(downloading).contains(QStringLiteral("queda 1 min")));
+        downloading.bytesTotal = 3'600'000'000;
+        QVERIFY(display::download(downloading).contains(QStringLiteral("queda 1 h")));
+        QVERIFY(!display::download(downloading).contains(QStringLiteral("0 min")));
+
+        downloads::Task cancelled;
+        cancelled.state = downloads::TaskState::Cancelled;
+        QCOMPARE(display::download(cancelled), QStringLiteral("Cancelado"));
+    }
+
+    void storageAndSpeedLimitErrorsTranslateRawEnglishAndKeepSpanish() {
+        QCOMPARE(
+            display::storageError(
+                QStringLiteral("the library was written by a newer AnimeHub (schema 9)")),
+            QStringLiteral("La biblioteca fue creada por una versión más reciente de AnimeHub."));
+        QCOMPARE(display::storageError(QStringLiteral("database is locked")),
+                 QStringLiteral("La biblioteca está ocupada. Vuelve a intentarlo."));
+        QCOMPARE(display::storageError(QStringLiteral("database or disk is full")),
+                 QStringLiteral("No queda espacio en el disco."));
+        QCOMPARE(
+            display::storageError(QStringLiteral("attempt to write a readonly database")),
+            QStringLiteral(
+                "No se pudo escribir en la biblioteca. Comprueba los permisos de la carpeta."));
+        QCOMPARE(display::storageError(QStringLiteral("database disk image is malformed")),
+                 QStringLiteral("El archivo de la biblioteca está dañado."));
+        QCOMPARE(display::storageError(QStringLiteral("unknown personal anime")),
+                 QStringLiteral("Este anime ya no está en la biblioteca."));
+        QCOMPARE(display::storageError(QStringLiteral("empty franchise title")),
+                 QStringLiteral("El nombre de la franquicia no puede estar vacío."));
+        const auto generic =
+            display::storageError(QStringLiteral("SQLITE_ERROR: near syntax error"));
+        QVERIFY(!generic.contains(QStringLiteral("SQLITE"), Qt::CaseInsensitive));
+        QVERIFY(!generic.contains(QStringLiteral("syntax"), Qt::CaseInsensitive));
+
+        const auto spanish = QStringLiteral(
+            "El archivo Frieren.mkv contiene otros episodios fuera de la selección.");
+        QCOMPARE(display::storageError(spanish), spanish);
+
+        const auto conn_err = display::speedLimitError(QStringLiteral("Connection refused"));
+        QVERIFY(!conn_err.contains(QStringLiteral("Connection"), Qt::CaseInsensitive));
+        QVERIFY(conn_err.contains(QStringLiteral("no respondió")));
+        const auto rpc_err = display::speedLimitError(QStringLiteral("Invalid option value"));
+        QVERIFY(!rpc_err.contains(QStringLiteral("Invalid"), Qt::CaseInsensitive));
+        QVERIFY(rpc_err.contains(QStringLiteral("límite de velocidad")));
+    }
 };
 
 QTEST_GUILESS_MAIN(DisplayTest)

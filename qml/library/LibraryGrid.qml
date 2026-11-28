@@ -31,8 +31,11 @@ Item {
     GridView {
         id: grid
         anchors.fill: parent
-        anchors.leftMargin: Theme.section
+        // Extra 4 px on the left inside the clip rect keeps column 0's 3 px FocusFrame unclipped
+        // while content stays aligned at Theme.section.
+        anchors.leftMargin: Theme.section - 4
         anchors.rightMargin: Theme.pad
+        bottomMargin: 8
         visible: count > 0
         model: root.library.overview
         boundsBehavior: Flickable.StopAtBounds
@@ -45,11 +48,12 @@ Item {
         Accessible.name: root.title
 
         // The same posters as the shelves: their width, their gap, left of the scroll bar.
-        readonly property real span: width - Theme.pad
+        readonly property real span: width - 4 - Theme.pad
         cellWidth: (span + Theme.posterGap) / Theme.posterColumns(span)
         cellHeight: Theme.posterCardHeight(cellWidth - Theme.posterGap)
 
         header: RowLayout {
+            x: 4
             width: grid.span
             height: 76
             spacing: 8
@@ -86,6 +90,7 @@ Item {
             height: grid.cellHeight
 
             PosterCard {
+                x: 4
                 focus: true
                 // The grid is the keyboard's stop, not each card.
                 focusPolicy: Qt.ClickFocus
@@ -134,7 +139,10 @@ Item {
             Layout.alignment: Qt.AlignHCenter
             visible: root.emptyAction !== ""
             text: root.emptyAction
+            Accessible.onPressAction: click()
             onClicked: root.emptyActed()
+            Keys.onReturnPressed: clicked()
+            Keys.onEnterPressed: clicked()
         }
     }
 }

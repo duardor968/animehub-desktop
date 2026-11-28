@@ -14,10 +14,12 @@ Rectangle {
 
     implicitHeight: 32
     implicitWidth: fillWidth ? 208 : segRow.implicitWidth + 6
-    radius: 6
-    color: "#141922"
+    radius: Theme.radius
+    color: Theme.surface
     border.width: 1
-    border.color: "#252c38"
+    border.color: Theme.stroke
+    Accessible.role: Accessible.Grouping
+    Accessible.name: "Vista del horario"
 
     RowLayout {
         id: segRow
@@ -47,34 +49,46 @@ Rectangle {
                 Accessible.checkable: true
                 Accessible.checked: active
                 Accessible.name: modelData.label
+                Accessible.onPressAction: segBtn.clicked()
                 onClicked: root.scopeSelected(modelData.id)
-                Keys.onReturnPressed: clicked()
-                Keys.onEnterPressed: clicked()
-                Keys.onSpacePressed: clicked()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    segBtn.clicked()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    segBtn.clicked()
+                }
+                Keys.onSpacePressed: event => {
+                    event.accepted = true
+                    segBtn.clicked()
+                }
 
                 background: Rectangle {
-                    radius: 4
-                    color: segBtn.active ? "#232b38"
-                           : segBtn.hovered ? Qt.rgba(1, 1, 1, 0.045) : "transparent"
+                    radius: Theme.radiusSm
+                    color: segBtn.active ? Theme.hover
+                           : segBtn.down ? Theme.pressSubtle
+                           : segBtn.hovered ? Theme.hoverSubtle : "transparent"
                     border.width: segBtn.active ? 1 : 0
-                    border.color: "#333f52"
+                    border.color: Theme.stroke
                     Behavior on color { ColorAnimation { duration: 110 } }
                 }
 
                 contentItem: Label {
                     id: segLbl
                     text: segBtn.modelData.label
-                    color: segBtn.active ? "#f2f5f9"
+                    color: segBtn.active ? Theme.ink
                            : segBtn.hovered ? Theme.ink : Theme.muted
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.small
                     font.weight: segBtn.active ? Font.DemiBold : Font.Normal
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
+                    elide: Text.ElideRight
                     Accessible.ignored: true
                 }
 
                 FocusFrame {
-                    radiusInside: 4
+                    radiusInside: Theme.radiusSm
                     visible: segBtn.activeFocus && InputModality.keyboard
                 }
             }

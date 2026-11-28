@@ -44,6 +44,7 @@ Item {
         MenuEntry {
             id: watchedEntry
             text: root.watched ? "Marcar como no visto" : "Marcar como visto"
+            glyph: root.watched ? Theme.icon.undo : Theme.icon.check
             onTriggered: root.watched ? root.view.markUnwatched(root.number)
                                       : root.view.markWatched(root.number)
         }
@@ -51,11 +52,13 @@ Item {
             id: throughEntry
             property bool wanted: !root.first
             text: "Marcar como visto hasta aquí"
+            glyph: Theme.icon.check
             onTriggered: root.view.markWatchedThrough(root.number)
         }
         MenuEntry {
             id: positionEntry
             text: "Indicar dónde te quedaste…"
+            glyph: Theme.icon.clock
             onTriggered: continueDialog.open()
         }
         MenuSeparator {
@@ -66,6 +69,7 @@ Item {
             id: revealEntry
             property bool wanted: root.hasFile
             text: "Mostrar en la carpeta"
+            glyph: Theme.icon.folder
             onTriggered: root.view.showFile(root.number)
         }
         MenuSeparator {
@@ -76,12 +80,14 @@ Item {
             id: cancelEntry
             property bool wanted: root.downloadState !== ""
             text: "Cancelar la descarga"
+            glyph: Theme.icon.cancel
             onTriggered: root.view.cancelDownload(root.number, false)
         }
         MenuEntry {
             id: trashEntry
             property bool wanted: root.hasFile
             text: "Mover a la Papelera"
+            glyph: Theme.icon.trash
             onTriggered: root.view.trashFile(root.number)
         }
     }
@@ -94,21 +100,24 @@ Item {
         readonly property string problem: root.view.clockProblem(root.number, minute.text)
         readonly property bool valid: root.view.clockValid(root.number, minute.text)
 
+        // Windows order: primary action on the left, Cancel on the right.
         footer: DialogButtonBox {
-            Button {
+            AccentButton {
                 text: "Guardar"
-                highlighted: continueDialog.visible // DialogButtonBox clears it while it builds
                 enabled: continueDialog.valid
                 DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
             }
             Button {
                 text: "Cancelar"
                 DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                Accessible.onPressAction: click()
+                Keys.onReturnPressed: event => { event.accepted = true; click() }
+                Keys.onEnterPressed: event => { event.accepted = true; click() }
             }
         }
         onOpened: {
             minute.text = ""
-            minute.forceActiveFocus()
+            minute.forceActiveFocus(InputModality.reason)
         }
         onAccepted: root.view.continueFrom(root.number, minute.text)
 

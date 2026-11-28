@@ -16,23 +16,30 @@ ModalDialog {
     }
 
     // Three buttons of equal width that fit "Seguir en la bandeja".
-    width: Math.min(580, parent.width - 48)
+    width: Math.min(580, parent ? parent.width - 48 : 580)
     title: "¿Seguir en la bandeja?"
     onAboutToShow: remember.checked = false
     // The main button has the keyboard, as in a Windows dialog: Enter takes it, Tab moves on.
-    onOpened: stay.forceActiveFocus()
+    onOpened: stay.forceActiveFocus(InputModality.reason)
 
     ColumnLayout {
         width: dialog.availableWidth
-        spacing: 16
+        spacing: Theme.pad
         // Enter on the check box takes the main button too.
-        Keys.onReturnPressed: dialog.choose(AppSettings.Tray)
-        Keys.onEnterPressed: dialog.choose(AppSettings.Tray)
+        Keys.onReturnPressed: event => {
+            event.accepted = true
+            dialog.choose(AppSettings.Tray)
+        }
+        Keys.onEnterPressed: event => {
+            event.accepted = true
+            dialog.choose(AppSettings.Tray)
+        }
 
         Label {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             color: Theme.ink
+            font.pixelSize: Theme.body
             text: "Las descargas y los avisos siguen en segundo plano."
         }
 
@@ -44,29 +51,42 @@ ModalDialog {
 
     // Windows order: the main action, the other one, then Cancelar.
     footer: DialogButtonBox {
-        Button {
+        AccentButton {
             id: stay
             text: "Seguir en la bandeja"
-            // The button box clears `highlighted` while it lays its buttons out; a binding that
-            // changes on opening sets it again.
-            highlighted: dialog.visible
+            fontPixelSize: Theme.small
+            implicitHeight: 32
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
             onClicked: dialog.choose(AppSettings.Tray)
-            Keys.onReturnPressed: clicked()
-            Keys.onEnterPressed: clicked()
         }
         Button {
+            id: quitButton
             text: "Salir"
             DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
+            Accessible.onPressAction: quitButton.click()
             onClicked: dialog.choose(AppSettings.Quit)
-            Keys.onReturnPressed: clicked()
-            Keys.onEnterPressed: clicked()
+            Keys.onReturnPressed: event => {
+                event.accepted = true
+                quitButton.click()
+            }
+            Keys.onEnterPressed: event => {
+                event.accepted = true
+                quitButton.click()
+            }
         }
         Button {
+            id: cancelButton
             text: "Cancelar"
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            Keys.onReturnPressed: dialog.reject()
-            Keys.onEnterPressed: dialog.reject()
+            Accessible.onPressAction: cancelButton.click()
+            Keys.onReturnPressed: event => {
+                event.accepted = true
+                dialog.reject()
+            }
+            Keys.onEnterPressed: event => {
+                event.accepted = true
+                dialog.reject()
+            }
         }
     }
 }

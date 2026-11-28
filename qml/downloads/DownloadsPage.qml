@@ -67,8 +67,32 @@ Item {
         }
         confirm.ask("¿Descargar " + episodes + " episodios?",
                     "De " + series + (series === 1 ? " anime" : " animes") + ", en "
-                    + app.settings.downloadDirectory + ".",
+                    + app.settings.nativeDownloadDirectory + ".",
                     "Descargar", "Cancelar", start)
+    }
+
+    // Keep whatever the keyboard reaches inside the scroll pane cleanly in view.
+    function ensureVisible(item) {
+        if (!item || !page.visible || !InputModality.keyboard)
+            return
+        let inside = false
+        for (let p = item; p && !inside; p = p.parent)
+            inside = p === sections
+        if (!inside)
+            return
+        const top = item.mapToItem(sections, 0, 0).y
+        if (top - 16 < scroll.contentY)
+            scroll.contentY = Math.max(0, top - 16)
+        else if (top + item.height + 16 > scroll.contentY + scroll.height)
+            scroll.contentY = Math.min(top + item.height + 16 - scroll.height,
+                                       Math.max(0, scroll.contentHeight - scroll.height))
+    }
+
+    Connections {
+        target: page.Window.window
+        function onActiveFocusItemChanged() {
+            page.ensureVisible(page.Window.activeFocusItem)
+        }
     }
 
     // Unfolded series, by slug; kept while a series moves between sections.
@@ -294,7 +318,7 @@ Item {
                                     Layout.maximumWidth: 68
                                     text: "EP."
                                     color: Theme.faint
-                                    font.pixelSize: 11
+                                    font.pixelSize: Theme.micro
                                     font.weight: Font.Bold
                                 }
                                 Label {
@@ -304,7 +328,7 @@ Item {
                                     Layout.maximumWidth: page.narrow ? 132 : 210
                                     text: "PROGRESO"
                                     color: Theme.faint
-                                    font.pixelSize: 11
+                                    font.pixelSize: Theme.micro
                                     font.weight: Font.Bold
                                 }
                                 Label {
@@ -314,7 +338,7 @@ Item {
                                     Layout.maximumWidth: page.narrow ? 92 : 120
                                     text: "ESTADO"
                                     color: Theme.faint
-                                    font.pixelSize: 11
+                                    font.pixelSize: Theme.micro
                                     font.weight: Font.Bold
                                 }
                                 Label {
@@ -325,7 +349,7 @@ Item {
                                     Layout.maximumWidth: 96
                                     text: "VELOCIDAD"
                                     color: Theme.faint
-                                    font.pixelSize: 11
+                                    font.pixelSize: Theme.micro
                                     font.weight: Font.Bold
                                 }
                                 Label {
@@ -333,7 +357,7 @@ Item {
                                     Layout.minimumWidth: 0
                                     text: "TAMAÑO · RESTANTE"
                                     color: Theme.faint
-                                    font.pixelSize: 11
+                                    font.pixelSize: Theme.micro
                                     font.weight: Font.Bold
                                     elide: Text.ElideRight
                                 }
@@ -465,70 +489,90 @@ Item {
                         width: ListView.view ? ListView.view.width : 0
                         height: 84
 
+                        HoverHandler { id: pendingHover }
+
+                        // Row open trigger kept as a sibling of AccentButton (zero nested buttons).
                         AbstractButton {
                             id: pendingRow
                             anchors.fill: parent
                             hoverEnabled: true
                             focusPolicy: Qt.StrongFocus
+                            Accessible.role: Accessible.Button
                             Accessible.name: pendingItem.title + ", " + pendingItem.caption
+                            Accessible.onPressAction: pendingRow.click()
+                            Keys.onReturnPressed: event => {
+                                event.accepted = true
+                                pendingRow.click()
+                            }
+                            Keys.onEnterPressed: event => {
+                                event.accepted = true
+                                pendingRow.click()
+                            }
                             onClicked: page.openAnime(pendingItem.slug)
 
                             background: Rectangle {
+                                x: 16
+                                width: parent.width - 32
+                                radius: Theme.radius
                                 color: pendingRow.down ? Theme.raised
-                                       : pendingRow.hovered ? Theme.hover : "transparent"
-                                FocusFrame { visible: pendingRow.activeFocus && InputModality.keyboard }
+                                       : (pendingRow.hovered || pendingHover.hovered)
+                                         ? Theme.hover : "transparent"
+                                FocusFrame {
+                                    visible: pendingRow.activeFocus && InputModality.keyboard
+                                    radiusInside: Theme.radius
+                                }
                             }
 
-                            contentItem: Item {
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 32
-                                    anchors.rightMargin: 32
-                                    spacing: 16
+                            contentItem: Item {}
+                        }
 
-                                    Poster {
-                                        Layout.preferredWidth: 48
-                                        Layout.preferredHeight: 68
-                                        Layout.alignment: Qt.AlignVCenter
-                                        source: pendingItem.posterUrl
-                                        Accessible.ignored: true
-                                    }
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 32
+                            anchors.rightMargin: 32
+                            spacing: 16
 
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        Layout.alignment: Qt.AlignVCenter
-                                        spacing: 3
+                            Poster {
+                                Layout.preferredWidth: 48
+                                Layout.preferredHeight: 68
+                                Layout.alignment: Qt.AlignVCenter
+                                source: pendingItem.posterUrl
+                                Accessible.ignored: true
+                            }
 
-                                        Label {
-                                            Layout.fillWidth: true
-                                            text: pendingItem.title
-                                            color: Theme.ink
-                                            font.pixelSize: Theme.body
-                                            font.weight: Font.DemiBold
-                                            elide: Text.ElideRight
-                                        }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignVCenter
+                                spacing: 3
 
-                                        Label {
-                                            Layout.fillWidth: true
-                                            text: pendingItem.caption
-                                            color: Theme.muted
-                                            font.pixelSize: Theme.caption
-                                            elide: Text.ElideRight
-                                        }
-                                    }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: pendingItem.title
+                                    color: Theme.ink
+                                    font.pixelSize: Theme.body
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
+                                }
 
-                                    AccentButton {
-                                        Layout.alignment: Qt.AlignVCenter
-                                        text: "Descargar"
-                                        emphasized: page.empty && page.library.pendingCount === 1
-                                        glyphCode: Theme.icon.download
-                                        Accessible.name: "Descargar " + pendingItem.title
-                                        onClicked: {
-                                            const failure = page.library.downloadPendingOf(pendingItem.slug)
-                                            if (failure)
-                                                page.app.message(failure, true)
-                                        }
-                                    }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: pendingItem.caption
+                                    color: Theme.muted
+                                    font.pixelSize: Theme.caption
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            AccentButton {
+                                Layout.alignment: Qt.AlignVCenter
+                                text: "Descargar"
+                                emphasized: page.empty && page.library.pendingCount === 1
+                                glyphCode: Theme.icon.download
+                                Accessible.name: "Descargar " + pendingItem.title
+                                onClicked: {
+                                    const failure = page.library.downloadPendingOf(pendingItem.slug)
+                                    if (failure)
+                                        page.app.message(failure, true)
                                 }
                             }
                         }
@@ -631,11 +675,22 @@ Item {
                 folded: page.completedFolded
                 onClicked: page.completedFolded = !page.completedFolded
 
-                // The files stay; only the list empties.
+                // The files stay; confirm before clearing the completed list.
                 Button {
+                    id: clearCompletedButton
                     visible: page.downloads.completed.count > 0
                     text: "Quitar todas"
-                    onClicked: page.downloads.clearCompleted()
+                    Accessible.name: "Quitar todas las descargas completadas de la lista"
+                    Accessible.onPressAction: clearCompletedButton.click()
+                    Keys.onReturnPressed: event => {
+                        event.accepted = true
+                        clearCompletedButton.click()
+                    }
+                    Keys.onEnterPressed: event => {
+                        event.accepted = true
+                        clearCompletedButton.click()
+                    }
+                    onClicked: clearCompletedDialog.open()
                 }
             }
 
@@ -815,23 +870,35 @@ Item {
         property string action: "Cancelar la descarga"
 
         width: Math.min(Math.max(460, implicitHeaderWidth), parent.width - 48)
+        onOpened: cancelPrimary.forceActiveFocus(InputModality.reason)
 
         Label {
             width: cancelDialog.availableWidth
             text: cancelDialog.consequence
             color: Theme.ink
+            font.pixelSize: Theme.body
             wrapMode: Text.Wrap
         }
 
         footer: DialogButtonBox {
-            Button {
+            AccentButton {
+                id: cancelPrimary
                 text: cancelDialog.action
-                highlighted: cancelDialog.visible
                 DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
             }
             Button {
+                id: keepDownloadingButton
                 text: "Seguir descargando"
                 DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                Accessible.onPressAction: keepDownloadingButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    keepDownloadingButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    keepDownloadingButton.click()
+                }
             }
         }
 
@@ -845,34 +912,99 @@ Item {
         property string consequence
 
         width: Math.min(Math.max(520, implicitHeaderWidth), parent.width - 48)
+        onOpened: removePrimary.forceActiveFocus(InputModality.reason)
 
         Label {
             width: removeDialog.availableWidth
             text: removeDialog.consequence
             color: Theme.ink
+            font.pixelSize: Theme.body
             wrapMode: Text.Wrap
         }
 
         footer: DialogButtonBox {
-            Button {
+            AccentButton {
+                id: removePrimary
                 text: "Quitar de la lista"
-                highlighted: removeDialog.visible
                 DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
             }
             Button {
+                id: trashSeriesButton
                 text: "Mover a la Papelera"
                 DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
+                Accessible.onPressAction: trashSeriesButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    trashSeriesButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    trashSeriesButton.click()
+                }
                 onClicked: {
                     removeDialog.close()
                     page.downloads.trashSeries(removeDialog.slug)
                 }
             }
             Button {
+                id: removeCancelButton
                 text: "Cancelar"
                 DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                Accessible.onPressAction: removeCancelButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    removeCancelButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    removeCancelButton.click()
+                }
             }
         }
 
         onAccepted: page.downloads.forgetSeries(slug)
+    }
+
+    ModalDialog {
+        id: clearCompletedDialog
+
+        width: Math.min(480, parent ? parent.width - 48 : 480)
+        onAboutToShow: title = page.downloads.completed.count === 1
+                               ? "¿Quitar 1 anime de Completadas?"
+                               : "¿Quitar " + page.downloads.completed.count + " animes de Completadas?"
+        onOpened: clearCompletedPrimary.forceActiveFocus(InputModality.reason)
+
+        Label {
+            width: Math.max(0, clearCompletedDialog.width - clearCompletedDialog.leftPadding
+                               - clearCompletedDialog.rightPadding)
+            text: "Se vaciará la lista de Completadas. Los archivos descargados seguirán intactos en el disco."
+            color: Theme.ink
+            font.pixelSize: Theme.body
+            wrapMode: Text.Wrap
+        }
+
+        footer: DialogButtonBox {
+            AccentButton {
+                id: clearCompletedPrimary
+                text: "Quitar todas"
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+            Button {
+                id: clearCompletedCancelButton
+                text: "Cancelar"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                Accessible.onPressAction: clearCompletedCancelButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    clearCompletedCancelButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    clearCompletedCancelButton.click()
+                }
+            }
+        }
+
+        onAccepted: page.downloads.clearCompleted()
     }
 }

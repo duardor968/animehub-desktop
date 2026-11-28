@@ -60,11 +60,23 @@ Item {
         spacing: 8
 
         Label {
+            id: titleLabel
+            Layout.fillWidth: true
+            Layout.preferredWidth: implicitWidth
+            Layout.maximumWidth: implicitWidth
+            Layout.minimumWidth: 0
             text: root.title
             color: Theme.ink
             font.pixelSize: Theme.subtitle
             font.weight: Font.DemiBold
+            elide: Text.ElideRight
             Accessible.role: Accessible.Heading
+            ToolTip.visible: titleHover.hovered && truncated
+            ToolTip.delay: Theme.tooltipDelay
+            ToolTip.timeout: Theme.tooltipTimeout
+            ToolTip.text: text
+
+            HoverHandler { id: titleHover }
         }
 
         Label {
@@ -77,38 +89,50 @@ Item {
         // A nested layout would fill the row by default and push the hairline away.
         RowLayout {
             id: actionsRow
+            visible: children.length > 0
             Layout.fillWidth: false
-            Layout.leftMargin: 12
+            Layout.minimumWidth: 0
+            Layout.maximumWidth: Math.max(0, root.width - 180)
+            Layout.leftMargin: implicitWidth > 0 ? 4 : 0
             spacing: 8
+            clip: true
         }
 
         // As Steam's shelves: a hairline to the edge, or to the arrows.
         Rectangle {
             Layout.fillWidth: true
-            Layout.leftMargin: 4
+            Layout.preferredWidth: 0
+            Layout.minimumWidth: 0
             Layout.preferredHeight: 1
+            opacity: width >= 12 ? 1 : 0
             color: Theme.stroke
         }
 
         ToolButton {
             visible: list.count > root.columns
             enabled: root.first > 0
-            icon.source: Theme.source("e76b")
+            icon.source: Theme.source(Theme.icon.chevronLeft)
             display: AbstractButton.IconOnly
             text: "Anteriores"
-            ToolTip.visible: hovered
+            ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+            ToolTip.delay: Theme.tooltipDelay
+            ToolTip.timeout: Theme.tooltipTimeout
             ToolTip.text: text
+            Accessible.onPressAction: click()
             onClicked: root.page(-1)
         }
 
         ToolButton {
             visible: list.count > root.columns
             enabled: root.first + root.columns < list.count
-            icon.source: Theme.source("e76c")
+            icon.source: Theme.source(Theme.icon.chevronRight)
             display: AbstractButton.IconOnly
             text: "Siguientes"
-            ToolTip.visible: hovered
+            ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+            ToolTip.delay: Theme.tooltipDelay
+            ToolTip.timeout: Theme.tooltipTimeout
             ToolTip.text: text
+            Accessible.onPressAction: click()
             onClicked: root.page(1)
         }
     }

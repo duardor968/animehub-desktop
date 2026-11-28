@@ -20,6 +20,7 @@ class AppSettings final : public QObject {
 
     Q_PROPERTY(
         QString downloadDirectory READ downloadDirectory WRITE setDownloadDirectory NOTIFY changed)
+    Q_PROPERTY(QString nativeDownloadDirectory READ nativeDownloadDirectory NOTIFY changed)
     Q_PROPERTY(QStringList providerOrder READ providerOrder WRITE setProviderOrder NOTIFY changed)
     // Ajustes' provider switches, MEGA to 1Fichier: [{key, name, checked, enabled, reason}].
     // MP4Upload and 1Fichier are off and unavailable while JDownloader is not used; the last
@@ -83,6 +84,7 @@ public:
     int remoteProfileRevision(const QByteArray& fingerprint);
 
     [[nodiscard]] QString downloadDirectory() const;
+    [[nodiscard]] QString nativeDownloadDirectory() const;
     void setDownloadDirectory(const QString& directory);
     [[nodiscard]] QStringList providerOrder() const;
     void setProviderOrder(const QStringList& order);

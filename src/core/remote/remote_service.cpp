@@ -395,7 +395,7 @@ void RemoteService::generatePairingCode() {
         return;
     publish(Mode::User, [this](bool ok) {
         if (!ok) {
-            fail(QStringLiteral("Revisa el perfil de descarga antes de vincular."));
+            fail(QStringLiteral("Configura una carpeta de descargas en Ajustes → Descargas."));
             return;
         }
         request("POST", QStringLiteral("devices/me/pairing"), {},

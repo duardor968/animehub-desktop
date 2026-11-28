@@ -138,14 +138,14 @@ Item {
         }
     }
 
-    // Flush day-jump strip for Semana mode in strict Mon..Sun order.
+    // Flush day-jump strip for Semana mode in strict Mon..Sun order (unified with DayUnderlinePivot).
     component WeekJumpStrip: Item {
         id: jumpStrip
 
         property bool compact: width < 860
         signal jumpRequested(int weekday)
 
-        implicitHeight: 34
+        implicitHeight: 38
 
         Rectangle {
             anchors.left: parent.left
@@ -153,7 +153,7 @@ Item {
             anchors.bottom: parent.bottom
             height: 1
             color: Theme.stroke
-            opacity: 0.75
+            opacity: 0.85
         }
 
         RowLayout {
@@ -164,7 +164,7 @@ Item {
                 visible: !jumpStrip.compact
                 text: "Ir a:"
                 color: Theme.faint
-                font.pixelSize: 12
+                font.pixelSize: Theme.caption
                 rightPadding: 2
             }
 
@@ -179,7 +179,7 @@ Item {
                     readonly property bool active: root.activeWeekday === modelData.weekday
 
                     Layout.fillHeight: true
-                    implicitWidth: jRow.implicitWidth + (jumpStrip.compact ? 12 : 16)
+                    implicitWidth: jRow.implicitWidth + (jumpStrip.compact ? 14 : 18)
                     enabled: cnt > 0
                     opacity: cnt > 0 ? 1.0 : 0.38
                     hoverEnabled: true
@@ -187,20 +187,39 @@ Item {
                     text: modelData.todayLabel
                     Accessible.name: "Ir a " + modelData.fullName + (modelData.isToday ? " (Hoy)" : "")
                                      + ", " + cnt + (cnt === 1 ? " emisión" : " emisiones")
+                    Accessible.onPressAction: if (jBtn.enabled) jBtn.clicked()
+                    ToolTip.visible: jumpStrip.compact && (hovered || (activeFocus && InputModality.keyboard))
+                    ToolTip.delay: Theme.tooltipDelay
+                    ToolTip.timeout: Theme.tooltipTimeout
+                    ToolTip.text: modelData.todayLabel
                     onClicked: {
                         root.selectDay(modelData.weekday)
                         jumpStrip.jumpRequested(modelData.weekday)
                     }
-                    Keys.onReturnPressed: clicked()
-                    Keys.onEnterPressed: clicked()
+                    Keys.onReturnPressed: event => {
+                        event.accepted = true
+                        if (jBtn.enabled)
+                            jBtn.clicked()
+                    }
+                    Keys.onEnterPressed: event => {
+                        event.accepted = true
+                        if (jBtn.enabled)
+                            jBtn.clicked()
+                    }
+                    Keys.onSpacePressed: event => {
+                        event.accepted = true
+                        if (jBtn.enabled)
+                            jBtn.clicked()
+                    }
 
                     background: Item {
                         Rectangle {
                             anchors.fill: parent
                             anchors.topMargin: 2
                             anchors.bottomMargin: 3
-                            radius: 4
-                            color: jBtn.hovered && !jBtn.active ? Qt.rgba(1, 1, 1, 0.04) : "transparent"
+                            radius: Theme.radiusSm
+                            color: !jBtn.active && jBtn.down ? Theme.pressSubtle
+                                   : !jBtn.active && jBtn.hovered ? Theme.hoverSubtle : "transparent"
                         }
 
                         Rectangle {
@@ -218,13 +237,13 @@ Item {
                     contentItem: Row {
                         id: jRow
                         anchors.centerIn: parent
-                        spacing: 5
+                        spacing: 6
 
                         Rectangle {
                             visible: jBtn.modelData.isToday
                             anchors.verticalCenter: parent.verticalCenter
-                            width: 5
-                            height: 5
+                            width: 6
+                            height: 6
                             radius: 3
                             color: Theme.success
                         }
@@ -234,8 +253,8 @@ Item {
                             text: jumpStrip.compact
                                   ? (jBtn.modelData.isToday ? "Hoy" : jBtn.modelData.shortName)
                                   : jBtn.modelData.todayLabel
-                            color: jBtn.active ? "#f2f5f9" : jBtn.hovered ? Theme.ink : Theme.muted
-                            font.pixelSize: 12
+                            color: jBtn.active ? Theme.ink : jBtn.hovered ? Theme.ink : Theme.muted
+                            font.pixelSize: Theme.small
                             font.weight: jBtn.active || jBtn.modelData.isToday ? Font.DemiBold : Font.Normal
                             Accessible.ignored: true
                         }
@@ -244,13 +263,14 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             text: String(jBtn.cnt)
                             color: jBtn.active ? Theme.accentText : Theme.faint
-                            font.pixelSize: 11
+                            font.pixelSize: Theme.caption
+                            font.weight: jBtn.active ? Font.DemiBold : Font.Normal
                             Accessible.ignored: true
                         }
                     }
 
                     FocusFrame {
-                        radiusInside: 4
+                        radiusInside: Theme.radiusSm
                         visible: jBtn.activeFocus && InputModality.keyboard
                     }
                 }
@@ -264,7 +284,7 @@ Item {
         id: flick
         anchors.fill: parent
         contentWidth: width
-        contentHeight: col.implicitHeight + col.y + 32
+        contentHeight: col.implicitHeight + col.y + Theme.section
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {}
@@ -272,7 +292,7 @@ Item {
         ColumnLayout {
             id: col
 
-            readonly property int padX: flick.width < 900 ? 22 : 30
+            readonly property int padX: flick.width < 900 ? 20 : Theme.section
             readonly property bool compactV: flick.height < 500
             readonly property bool wrapHeader: headerTitleGroup.implicitWidth
                                                + headerControlsGroup.implicitWidth + 24 > width
@@ -280,7 +300,7 @@ Item {
             x: padX
             y: compactV ? 12 : 20
             width: Math.min(Math.max(0, flick.width - 2 * padX), 1220)
-            spacing: compactV ? 12 : 16
+            spacing: compactV ? 12 : Theme.pad
 
             // Header row: Horario -> Hora local · N en emisión -> 22 px -> Por día | Semana -> 16 px -> Solo los que sigo -> fillWidth
             GridLayout {
@@ -296,8 +316,8 @@ Item {
 
                     Label {
                         text: "Horario"
-                        color: "#f2f5f9"
-                        font.pixelSize: col.width < 860 ? 21 : 24
+                        color: Theme.ink
+                        font.pixelSize: col.width < 860 ? Theme.heading : Theme.title
                         font.weight: Font.DemiBold
                         Accessible.role: Accessible.Heading
                     }
@@ -317,14 +337,14 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Hora local: " + (root.library ? root.library.localTimeText : "")
                             color: Theme.muted
-                            font.pixelSize: 13
+                            font.pixelSize: Theme.small
                         }
 
                         Label {
                             anchors.verticalCenter: parent.verticalCenter
                             text: "·"
                             color: Theme.faint
-                            font.pixelSize: 13
+                            font.pixelSize: Theme.small
                         }
 
                         Label {
@@ -334,7 +354,7 @@ Item {
                                      + (root.totalFilteredCount === 1 ? " seguido" : " seguidos"))
                                   : (root.totalFilteredCount + " en emisión")
                             color: Theme.faint
-                            font.pixelSize: 13
+                            font.pixelSize: Theme.small
                         }
                     }
                 }
@@ -342,7 +362,7 @@ Item {
                 RowLayout {
                     id: headerControlsGroup
                     Layout.alignment: Qt.AlignVCenter
-                    spacing: 16
+                    spacing: Theme.pad
 
                     SegmentedScopeControl {
                         currentScope: root.scope
@@ -355,12 +375,14 @@ Item {
                         Label {
                             text: "Solo los que sigo"
                             color: Theme.ink
-                            font.pixelSize: 13
+                            font.pixelSize: Theme.small
                         }
 
                         Switch {
+                            id: followSwitch
                             checked: root.followingOnly
                             Accessible.name: "Solo los que sigo"
+                            Accessible.onPressAction: followSwitch.click()
                             onToggled: root.app.settings.scheduleFollowingOnly = checked
                         }
                     }
@@ -399,9 +421,10 @@ Item {
 
                     Label {
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         text: "No se ha podido actualizar el horario; se muestra la última información disponible."
                         color: Theme.ink
-                        font.pixelSize: 13
+                        font.pixelSize: Theme.small
                         wrapMode: Text.Wrap
                     }
                 }
@@ -433,7 +456,7 @@ Item {
                 Label {
                     text: "Cargando el horario…"
                     color: Theme.muted
-                    font.pixelSize: 14
+                    font.pixelSize: Theme.body
                 }
             }
 
@@ -444,7 +467,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.topMargin: 2
 
-                readonly property int gap: 16
+                readonly property int gap: Theme.posterGap
                 readonly property int maxCols: 5
                 readonly property int minCardWidth: 168
                 readonly property int maxCardWidth: 236
@@ -484,17 +507,20 @@ Item {
 
                 Label {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: (root.followingOnly && root.activeDayUnfilteredCount > 0)
                           ? "No sigues ningún anime en emisión este día"
-                          : "Sin episodios este día"
+                          : "Sin emisiones este día"
                     color: Theme.muted
-                    font.pixelSize: 14
+                    font.pixelSize: Theme.body
                     wrapMode: Text.Wrap
                 }
 
                 Button {
+                    id: showAllDayButton
                     visible: root.followingOnly && root.activeDayUnfilteredCount > 0
                     text: "Mostrar todos"
+                    Accessible.onPressAction: showAllDayButton.click()
                     onClicked: root.app.settings.scheduleFollowingOnly = false
                 }
             }
@@ -539,7 +565,7 @@ Item {
                                 Layout.preferredHeight: 17
                                 Layout.alignment: Qt.AlignVCenter
                                 radius: 2
-                                color: daySec.modelData.isToday ? Theme.accent : "#343d4d"
+                                color: daySec.modelData.isToday ? Theme.accent : Theme.stroke
                             }
 
                             Rectangle {
@@ -554,8 +580,8 @@ Item {
                             Label {
                                 Layout.alignment: Qt.AlignVCenter
                                 text: daySec.modelData.todayLabel
-                                color: daySec.modelData.isToday ? "#f3f6fa" : Theme.ink
-                                font.pixelSize: 16
+                                color: Theme.ink
+                                font.pixelSize: Theme.subtitle
                                 font.weight: Font.DemiBold
                                 Accessible.role: Accessible.Heading
                             }
@@ -565,7 +591,7 @@ Item {
                                 text: daySec.dayItems.length
                                       + (daySec.dayItems.length === 1 ? " emisión" : " emisiones")
                                 color: Theme.faint
-                                font.pixelSize: 12
+                                font.pixelSize: Theme.caption
                             }
 
                             Rectangle {
@@ -599,11 +625,24 @@ Item {
                                                  + (modelData.time ? ", " + modelData.time : "")
                                                  + (modelData.stateLabel ? ", " + modelData.stateLabel : "")
                                                  + (modelData.inLibrary ? ", en tu biblioteca" : "")
+                                Accessible.onPressAction: rowBtn.clicked()
                                 onClicked: root.openAnime(modelData.slug)
-                                Keys.onReturnPressed: clicked()
-                                Keys.onEnterPressed: clicked()
-                                ToolTip.visible: hovered && rowTitle.truncated
-                                ToolTip.delay: 500
+                                Keys.onReturnPressed: event => {
+                                    event.accepted = true
+                                    rowBtn.clicked()
+                                }
+                                Keys.onEnterPressed: event => {
+                                    event.accepted = true
+                                    rowBtn.clicked()
+                                }
+                                Keys.onSpacePressed: event => {
+                                    event.accepted = true
+                                    rowBtn.clicked()
+                                }
+                                ToolTip.visible: (hovered || (activeFocus && InputModality.keyboard))
+                                                 && rowTitle.truncated
+                                ToolTip.delay: Theme.tooltipDelay
+                                ToolTip.timeout: Theme.tooltipTimeout
                                 ToolTip.text: modelData.title ?? ""
 
                                 background: Item {
@@ -611,9 +650,9 @@ Item {
                                         anchors.fill: parent
                                         anchors.leftMargin: -10
                                         anchors.rightMargin: -10
-                                        radius: 6
-                                        color: rowBtn.down ? Qt.rgba(1, 1, 1, 0.08)
-                                               : rowBtn.hovered ? Qt.rgba(1, 1, 1, 0.04) : "transparent"
+                                        radius: Theme.radius
+                                        color: rowBtn.down ? Theme.pressSubtle
+                                               : rowBtn.hovered ? Theme.hoverSubtle : "transparent"
                                         Behavior on color { ColorAnimation { duration: 100 } }
                                     }
 
@@ -629,13 +668,13 @@ Item {
                                 }
 
                                 contentItem: RowLayout {
-                                    spacing: 16
+                                    spacing: Theme.pad
 
                                     Label {
                                         Layout.preferredWidth: 50
                                         text: rowBtn.modelData.time ?? ""
                                         color: daySec.modelData.isToday ? Theme.accentText : Theme.muted
-                                        font.pixelSize: 14
+                                        font.pixelSize: Theme.body
                                         font.weight: Font.DemiBold
                                         Accessible.ignored: true
                                     }
@@ -676,8 +715,8 @@ Item {
                                             id: rowTitle
                                             Layout.fillWidth: true
                                             text: rowBtn.modelData.title ?? ""
-                                            color: rowBtn.hovered ? "#ffffff" : Theme.ink
-                                            font.pixelSize: 14
+                                            color: rowBtn.hovered ? Theme.accentInk : Theme.ink
+                                            font.pixelSize: Theme.body
                                             font.weight: Font.DemiBold
                                             elide: Text.ElideRight
                                             Accessible.ignored: true
@@ -685,10 +724,10 @@ Item {
 
                                         Label {
                                             Layout.fillWidth: true
-                                            text: (rowBtn.modelData.episode ? ("Ep. " + rowBtn.modelData.episode + "  ·  ") : "")
+                                            text: (rowBtn.modelData.episode ? ("Ep. " + rowBtn.modelData.episode + " · ") : "")
                                                   + (rowBtn.modelData.inLibrary ? "En tu biblioteca" : "Catálogo")
                                             color: Theme.muted
-                                            font.pixelSize: 12
+                                            font.pixelSize: Theme.caption
                                             elide: Text.ElideRight
                                             Accessible.ignored: true
                                         }
@@ -702,7 +741,7 @@ Item {
                                 }
 
                                 FocusFrame {
-                                    radiusInside: 6
+                                    radiusInside: Theme.radius
                                     visible: rowBtn.activeFocus && InputModality.keyboard
                                 }
                             }
@@ -720,17 +759,20 @@ Item {
 
                 Label {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: (root.followingOnly && root.totalUnfilteredCount > 0)
                           ? "No sigues ningún anime en emisión esta semana"
                           : "Sin emisiones esta semana"
                     color: Theme.muted
-                    font.pixelSize: 14
+                    font.pixelSize: Theme.body
                     wrapMode: Text.Wrap
                 }
 
                 Button {
+                    id: showAllWeekButton
                     visible: root.followingOnly && root.totalUnfilteredCount > 0
                     text: "Mostrar todos"
+                    Accessible.onPressAction: showAllWeekButton.click()
                     onClicked: root.app.settings.scheduleFollowingOnly = false
                 }
             }

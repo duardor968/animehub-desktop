@@ -31,8 +31,6 @@ Item {
     property string genres
     // Interactive genre chips: [{name, slug}].
     property var genreChips: []
-    // Preserved for compatibility with callers passing status chips.
-    property var chips: []
     property url posterUrl
     property url backdropUrl
     // Surface colour the bottom edge fades seamlessly into.
@@ -63,8 +61,8 @@ Item {
 
     // Compact hero proportions (~262 px on desktop, ~236 px on compact panes) so episodes start
     // cleanly above the fold with zero empty top void.
-    readonly property int titleSize: compact ? 22 : 28
-    readonly property int smallerTitle: compact ? 20 : 24
+    readonly property int titleSize: compact ? 22 : Theme.title
+    readonly property int smallerTitle: compact ? Theme.heading : 24
     readonly property int posterWidth: compact ? 112 : 138
     readonly property int posterHeight: compact ? 160 : 196
     readonly property int topBand: steps.length > 0 ? 48 : 24
@@ -327,7 +325,7 @@ Item {
                         selectByMouse: true
                         activeFocusOnTab: false
                         selectionColor: Theme.accent
-                        selectedTextColor: "#ffffff"
+                        selectedTextColor: Theme.accentInk
                         text: root.title
                         color: Theme.ink
                         font.family: fontProbe.font.family
@@ -372,8 +370,13 @@ Item {
                     display: AbstractButton.IconOnly
                     text: "Copiar título"
                     Accessible.name: "Copiar título"
-                    ToolTip.visible: hovered
+                    Accessible.onPressAction: click()
+                    ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                    ToolTip.delay: Theme.tooltipDelay
+                    ToolTip.timeout: Theme.tooltipTimeout
                     ToolTip.text: root.copiedJustNow ? "Título copiado" : "Copiar título"
+                    Keys.onReturnPressed: event => { event.accepted = true; click() }
+                    Keys.onEnterPressed: event => { event.accepted = true; click() }
                     onClicked: root.copyTitle()
                 }
 
@@ -387,11 +390,11 @@ Item {
                 selectByMouse: true
                 activeFocusOnTab: false
                 selectionColor: Theme.accent
-                selectedTextColor: "#ffffff"
+                selectedTextColor: Theme.accentInk
                 text: root.subtitle
                 color: Theme.muted
                 font.family: fontProbe.font.family
-                font.pixelSize: 13
+                font.pixelSize: Theme.small
                 wrapMode: Text.Wrap
                 padding: 0
                 leftPadding: 0
@@ -405,11 +408,14 @@ Item {
             // Franchise fallback (no statusText/metaLine): one clean wrapping line of facts.
             Label {
                 readonly property string star: "<span style=\"font-family:'" + Theme.iconFont
-                                                + "'; font-size:13px; color:" + Theme.warning + "\">"
+                                                + "'; font-size:" + Theme.small + "px; color:" + Theme.warning + "\">"
                                                 + Theme.glyph(Theme.icon.starFilled) + "</span>"
+                readonly property string escapedScore: root.inlineScore
+                                                       .replace(/&/g, "&amp;")
+                                                       .replace(/</g, "&lt;")
                 readonly property string scored: root.inlineScore === "" ? ""
                     : star + "&nbsp;<span style=\"color:" + Theme.ink + "; font-weight:600\">"
-                      + root.inlineScore + "</span>"
+                      + escapedScore + "</span>"
                 readonly property string described: [root.facts, root.genres].filter(part => part !== "")
                                                                              .join(" · ")
 
@@ -458,7 +464,7 @@ Item {
                     implicitWidth: statusLabel.implicitWidth + 16
                     implicitHeight: 22
                     height: 22
-                    radius: 4
+                    radius: Theme.radiusSm
                     color: toneFill
                     border.width: 1
                     border.color: toneBorder
@@ -487,7 +493,7 @@ Item {
                     Glyph {
                         anchors.verticalCenter: parent.verticalCenter
                         glyph: Theme.icon.starFilled
-                        size: 13
+                        size: Theme.small
                         color: Theme.warning
                     }
 
@@ -505,7 +511,7 @@ Item {
                         visible: root.scoreText !== "" && root.scoreSource !== ""
                         text: "· " + root.scoreSource
                         color: Theme.muted
-                        font.pixelSize: 13
+                        font.pixelSize: Theme.small
                         Accessible.ignored: true
                     }
                 }
@@ -555,8 +561,10 @@ Item {
                         text: modelData.name ?? ""
                         Accessible.role: Accessible.Button
                         Accessible.name: "Filtrar catálogo por " + text
-                        ToolTip.visible: hovered
-                        ToolTip.delay: 400
+                        Accessible.onPressAction: clicked()
+                        ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                        ToolTip.delay: Theme.tooltipDelay
+                        ToolTip.timeout: Theme.tooltipTimeout
                         ToolTip.text: "Ver animes de " + text + " en el catálogo"
                         onClicked: if (modelData.slug) root.genreSelected(modelData.slug)
                         Keys.onReturnPressed: event => { event.accepted = true; clicked() }

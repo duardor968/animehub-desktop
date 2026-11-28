@@ -10,6 +10,8 @@
 #include <QTimer>
 #include <QtQmlIntegration>
 
+#include <functional>
+
 namespace animehub::app {
 
 // The Downloads page, by series as in Steam, and the bar at the bottom of the window: the
@@ -45,7 +47,6 @@ class DownloadsView final : public QObject {
     // What holds it back beyond a failure (MEGA's quota); empty when nothing.
     Q_PROPERTY(QString headerNotice READ headerNotice NOTIFY summaryChanged)
     Q_PROPERTY(double headerProgress READ headerProgress NOTIFY summaryChanged)
-    Q_PROPERTY(QUrl headerArt READ headerArt NOTIFY summaryChanged)
     // Real backdrop URL of the hero anime when available (different from poster); empty otherwise.
     Q_PROPERTY(QString headerBackdrop READ headerBackdrop NOTIFY summaryChanged)
     // The series' poster, beside its title: the art behind is only ambience.
@@ -106,8 +107,14 @@ public:
     Q_ENUM(Mode)
     enum class Offer { None, JDownloader, Servers };
 
+    struct Shell {
+        std::function<void(const QString&)> open;
+        std::function<void(const QString&)> reveal;
+    };
+
     DownloadsView(downloads::DownloadManager& manager, library::LibraryService& library,
-                  playback::Player& player, AppSettings& settings, QObject* parent = nullptr);
+                  playback::Player& player, AppSettings& settings, QObject* parent = nullptr,
+                  Shell shell = {});
 
     [[nodiscard]] DownloadSeriesModel* queue() {
         return &queue_;
@@ -158,9 +165,6 @@ public:
     }
     [[nodiscard]] double headerProgress() const {
         return header_.progress;
-    }
-    [[nodiscard]] QUrl headerArt() const {
-        return header_.art;
     }
     [[nodiscard]] QString headerBackdrop() const {
         return header_.backdrop;
@@ -281,6 +285,7 @@ public:
     Q_INVOKABLE void forgetSeries(const QString& slug);
     // Moves the series' downloaded files to the Recycle Bin, then it leaves the list.
     Q_INVOKABLE void trashSeries(const QString& slug);
+    Q_INVOKABLE void undo();
     // Every completed series leaves the list; the files stay.
     Q_INVOKABLE void clearCompleted();
     // The series' completed episodes whose files are gone go in line again.
@@ -302,13 +307,13 @@ signals:
     void speedChanged();
     void totalChanged();
     void message(const QString& text, bool problem);
+    void undoable(const QString& text);
     void offerChanged();
     void windowShownChanged();
 
 private:
     // What the page needs from the library about a series, read once per change.
     struct SeriesInfo {
-        QUrl art;      // backdrop, else poster: the top of the page
         QUrl backdrop; // real backdrop only (empty when none or same as poster)
         QUrl poster;
         std::optional<double> resumeNumber;
@@ -323,7 +328,6 @@ private:
         QString activeSummary;
         QString notice;
         double progress = 0;
-        QUrl art;
         QString backdrop;
         QUrl poster;
         bool singleEpisode = false;
@@ -385,6 +389,7 @@ private:
     library::LibraryService& library_;
     playback::Player& player_;
     AppSettings& settings_;
+    Shell shell_;
     DownloadSeriesModel queue_;
     DownloadSeriesModel completed_;
     DownloadSeriesModel current_;
@@ -394,6 +399,7 @@ private:
     QHash<QString, SeriesInfo> infos_;
     QHash<QString, bool> file_exists_cache_;
     QHash<QString, bool> dir_exists_cache_;
+    std::function<void()> undo_;
     bool completed_dirty_ = true;
     QTimer rebuild_timer_;
 

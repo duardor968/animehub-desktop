@@ -18,8 +18,13 @@ Item {
     signal actionFailed(string text)
     readonly property var franchise: model.franchise
     readonly property var workList: franchise.works || []
+    readonly property int slugCount: franchise.slugs ? franchise.slugs.length : 0
     property var lastFranchiseId: 0
     property bool positioningOnOpen: false
+    function openAddDialog() {
+        choices.model = root.model.memberChoices(root.franchise.id)
+        addDialog.open()
+    }
     function positionBeginningWhenReady() {
         if (!positioningOnOpen || width <= 0 || height <= 0)
             return
@@ -62,6 +67,7 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: Theme.section
         anchors.rightMargin: Theme.pad
+        bottomMargin: 8
         model: root.workList
         activeFocusOnTab: true
         // A card reached by keyboard brings itself into view; the header stays on opening.
@@ -72,7 +78,7 @@ Item {
         cellHeight: Theme.posterCardHeight(cellWidth - Theme.posterGap) + 40
         ScrollBar.vertical: ScrollBar {}
         keyNavigationEnabled: true
-        Accessible.name: "Obras de la franquicia"
+        Accessible.name: "Animes de la franquicia"
         header: Column {
             readonly property real barY: barSlot.y
             function focusTitle(reason) { franchiseHeader.focusTitle(reason) }
@@ -114,6 +120,49 @@ Item {
                 Item { Layout.fillWidth: true }
             }
         }
+        footer: Item {
+            visible: root.workList.length === 0
+            width: works.span
+            height: visible ? emptyFranchise.implicitHeight + 48 : 0
+
+            ColumnLayout {
+                id: emptyFranchise
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 24
+                width: Math.min(parent.width, 420)
+                spacing: Theme.pad
+
+                Label {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                    text: root.model.archivedOnly
+                          ? "No hay entregas de esta franquicia en Archivo"
+                          : "Esta franquicia no tiene animes todavía"
+                    color: Theme.ink
+                    font.pixelSize: Theme.subtitle
+                    font.weight: Font.DemiBold
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: !root.model.archivedOnly
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                    text: "Añade animes de tu biblioteca para agruparlos aquí."
+                    color: Theme.muted
+                    font.pixelSize: Theme.body
+                }
+
+                AccentButton {
+                    Layout.alignment: Qt.AlignHCenter
+                    visible: !root.model.archivedOnly
+                    text: "Añadir anime…"
+                    glyphCode: Theme.icon.add
+                    onClicked: root.openAddDialog()
+                }
+            }
+        }
         // A scope, so the card inside takes the keyboard when the grid makes it current.
         delegate: FocusScope {
             id: work
@@ -138,8 +187,18 @@ Item {
                 progress: work.modelData.progress
                 fresh: work.modelData.fresh
                 quickAction: work.modelData.action
-                // The whole title and what it takes on disk, whether or not the title is cut.
-                ToolTip.visible: hovered
+                readonly property bool overActionDisc: {
+                    if (!card.showAction || !cardPointer.hovered)
+                        return false
+                    const dx = cardPointer.point.position.x - card.width / 2
+                    const dy = cardPointer.point.position.y - Math.round(card.width * 1.42) / 2
+                    return dx * dx + dy * dy <= 23 * 23
+                }
+                // The whole title and what it takes on disk, yielding to the centered action disc.
+                ToolTip.visible: (hovered && !overActionDisc)
+                                 || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: work.modelData.title + (work.disk !== "" ? "\n" + work.disk : "")
                 onClicked: {
                     works.currentIndex = work.index
@@ -149,6 +208,7 @@ Item {
                 Accessible.name: work.modelData.title + ", " + work.modelData.facts + ", "
                                  + work.modelData.state + (work.disk !== "" ? ", " + work.disk : "")
                 Keys.onMenuPressed: workMenu.openFor(work.modelData, card)
+                HoverHandler { id: cardPointer }
                 TapHandler { acceptedButtons: Qt.RightButton; onTapped: workMenu.openFor(work.modelData, null) }
             }
         }
@@ -156,7 +216,7 @@ Item {
     ActionMenu {
         id: workMenu
         property var workData: ({})
-        entries: [open, detach, restore, remove]
+        entries: [open, detach, workMenuSeparator, restore, remove]
         function openFor(data, anchor) {
             workData = data || ({})
             if (anchor)
@@ -164,18 +224,29 @@ Item {
             else
                 showAtPointer()
         }
-        MenuEntry { id: open; text: "Abrir anime"; onTriggered: root.activated(workMenu.workData.slug) }
+        MenuEntry {
+            id: open
+            glyph: Theme.icon.openExternal
+            text: "Abrir anime"
+            onTriggered: root.activated(workMenu.workData.slug)
+        }
         MenuEntry {
             id: detach
+            glyph: Theme.icon.remove
             text: "Quitar de esta franquicia"
             onTriggered: {
                 if (!root.model.setFranchiseMember(root.franchise.id, workMenu.workData.slug, false))
                     root.actionFailed(root.model.error)
             }
         }
+        MenuSeparator {
+            id: workMenuSeparator
+            property bool separator: true
+        }
         MenuEntry {
             id: restore
             property bool wanted: root.model.archivedOnly
+            glyph: Theme.icon.undo
             text: "Restaurar a la biblioteca"
             onTriggered: {
                 if (!root.model.archive([workMenu.workData.slug], false))
@@ -184,6 +255,7 @@ Item {
         }
         MenuEntry {
             id: remove
+            glyph: root.model.archivedOnly ? Theme.icon.trash : Theme.icon.remove
             text: root.model.archivedOnly ? "Eliminar registro personal…" : "Quitar de la biblioteca…"
             onTriggered: root.removeRequested([workMenu.workData.slug], workMenu.workData.title)
         }
@@ -222,9 +294,6 @@ Item {
                        : Theme.icon.download
             iconSize: 14
             onClicked: root.continueWith(root.franchise.nextSlug)
-            Keys.onReturnPressed: event => { event.accepted = true; clicked() }
-            Keys.onEnterPressed: event => { event.accepted = true; clicked() }
-            Keys.onSpacePressed: event => { event.accepted = true; clicked() }
         }
         trailing: [
             ToolButton {
@@ -232,7 +301,10 @@ Item {
                 text: "Más opciones"
                 icon.source: Theme.source(Theme.icon.more)
                 display: AbstractButton.IconOnly
-                ToolTip.visible: hovered
+                Accessible.onPressAction: click()
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
                 onClicked: groupMenu.show(more, true)
             }
@@ -240,18 +312,21 @@ Item {
     }
     ActionMenu {
         id: groupMenu
-        entries: [addWork, restoreGroup, removeGroup]
+        entries: [addWork, groupMenuSeparator, restoreGroup, removeGroup]
         MenuEntry {
             id: addWork
-            text: "Añadir obra…"
-            onTriggered: {
-                choices.model = root.model.memberChoices(root.franchise.id)
-                addDialog.open()
-            }
+            glyph: Theme.icon.add
+            text: "Añadir anime…"
+            onTriggered: root.openAddDialog()
+        }
+        MenuSeparator {
+            id: groupMenuSeparator
+            property bool separator: true
         }
         MenuEntry {
             id: restoreGroup
-            property bool wanted: root.model.archivedOnly
+            property bool wanted: root.model.archivedOnly && root.slugCount > 0
+            glyph: Theme.icon.undo
             text: "Restaurar a la biblioteca"
             onTriggered: {
                 if (!root.model.archive(root.franchise.slugs, false))
@@ -260,7 +335,11 @@ Item {
         }
         MenuEntry {
             id: removeGroup
-            text: root.model.archivedOnly ? "Eliminar registros personales…" : "Quitar de la biblioteca…"
+            property bool wanted: root.slugCount > 0
+            glyph: root.model.archivedOnly ? Theme.icon.trash : Theme.icon.remove
+            text: root.model.archivedOnly
+                  ? (root.slugCount === 1 ? "Eliminar registro personal…" : "Eliminar registros personales…")
+                  : "Quitar de la biblioteca…"
             onTriggered: root.removeRequested(root.franchise.slugs, root.franchise.title)
         }
     }
@@ -268,25 +347,54 @@ Item {
         id: addDialog
         property string failure: ""
         width: 480
-        title: "Añadir obra a la franquicia"
-        onAboutToShow: { failure = ""; choices.forceActiveFocus(InputModality.reason) }
+        title: "Añadir anime a la franquicia"
+        onAboutToShow: failure = ""
+        onOpened: (choices.count > 0 ? choices : addCancelButton).forceActiveFocus(InputModality.reason)
         ColumnLayout {
             width: 432
+            spacing: 12
             ComboBox {
                 id: choices
                 Layout.fillWidth: true
                 textRole: "title"
                 valueRole: "slug"
-                Accessible.name: "Obra de la biblioteca"
+                Accessible.name: "Anime de la biblioteca"
             }
-            Label { Layout.fillWidth: true; visible: choices.count === 0; text: "Todas las obras de la biblioteca están en esta franquicia."; wrapMode: Text.Wrap }
-            Label { Layout.fillWidth: true; visible: text !== ""; text: addDialog.failure; wrapMode: Text.Wrap; color: Theme.muted }
+            Label {
+                Layout.fillWidth: true
+                visible: choices.count === 0
+                text: "Todos los animes de la biblioteca están en esta franquicia."
+                color: Theme.muted
+                wrapMode: Text.Wrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                visible: addDialog.failure !== ""
+                spacing: 6
+
+                Glyph {
+                    Layout.alignment: Qt.AlignTop
+                    Layout.topMargin: 2
+                    glyph: Theme.icon.warning
+                    size: 13
+                    color: Theme.danger
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: addDialog.failure
+                    wrapMode: Text.Wrap
+                    color: Theme.danger
+                    font.pixelSize: Theme.caption
+                }
+            }
         }
         footer: DialogButtonBox {
-            Button {
-                text: "Añadir obra"
+            AccentButton {
+                text: "Añadir anime"
+                implicitHeight: 32
                 enabled: choices.currentIndex >= 0
-                highlighted: addDialog.visible // DialogButtonBox clears it while it builds
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
                 onClicked: {
                     if (root.model.setFranchiseMember(root.franchise.id, choices.currentValue, true))
                         addDialog.close()
@@ -294,7 +402,13 @@ Item {
                         addDialog.failure = root.model.error
                 }
             }
-            Button { text: "Cancelar"; onClicked: addDialog.reject() }
+            Button {
+                id: addCancelButton
+                text: "Cancelar"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                Keys.onReturnPressed: addDialog.reject()
+                Keys.onEnterPressed: addDialog.reject()
+            }
         }
     }
 }

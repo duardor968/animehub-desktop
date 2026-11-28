@@ -587,6 +587,37 @@ private slots:
         const auto missing = repository.anime(QStringLiteral("missing"));
         QVERIFY(missing && !*missing);
     }
+
+    void pairingFailureSuggestsConfiguringDownloadFolder() {
+        HttpTestServer server;
+        QVERIFY(server.listen());
+        server.route("PUT", "/api/v1/remote/devices/me/profiles", [](const auto&) {
+            return HttpTestServer::Response{.status = 400, .body = R"({"error":"bad"})"};
+        });
+        server.route("GET", "/api/v1/remote/devices/me/links", [](const auto&) {
+            return HttpTestServer::Response{.status = 200, .body = R"({"links":[]})"};
+        });
+        server.route("GET", "/api/v1/remote/devices/me/inbox", [](const auto&) {
+            return HttpTestServer::Response{.status = 200, .body = R"({"requests":[]})"};
+        });
+        QNetworkAccessManager network;
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        RemoteService service(
+            network, server.url(QStringLiteral("/api/v1/")), dir.path(),
+            [](const QString&, std::function<void(Readiness)> done) { done(Readiness::Ready); },
+            [](const Submission&) { return true; });
+        signIn(service);
+        service.setProfiles(1, {});
+        service.start();
+        QTRY_VERIFY(service.registered() && !service.busy());
+
+        service.generatePairingCode();
+        QTRY_VERIFY(!service.busy() && !service.error().isEmpty());
+        QCOMPARE(service.error(),
+                 QStringLiteral("Configura una carpeta de descargas en Ajustes → Descargas."));
+        QVERIFY(!service.error().contains(QStringLiteral("perfil de descarga")));
+    }
 };
 QTEST_GUILESS_MAIN(RemoteServiceTest)
 #include "remote_service_test.moc"

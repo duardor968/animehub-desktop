@@ -167,6 +167,16 @@ QList<double> LibraryModel::pendingOf(const LibraryEntry& entry) const {
     return pending;
 }
 
+namespace {
+
+bool isSingle(const library::LibraryEntry& entry) {
+    return entry.episodeCount.value_or(0) == 1 ||
+           (!entry.episodeCount && entry.knownEpisodes == 1 &&
+            entry.status == api::AnimeStatus::Finished);
+}
+
+} // namespace
+
 // Where the user is with the anime; whether it airs is the page's business, not the list's.
 QString LibraryModel::captionOf(const LibraryEntry& entry) {
     if (entry.newEpisodes > 0) {
@@ -175,7 +185,9 @@ QString LibraryModel::captionOf(const LibraryEntry& entry) {
                    : QStringLiteral("%1 episodios nuevos").arg(entry.newEpisodes);
     }
     if (entry.resumeNumber && entry.resumePositionMs > 0) {
-        return QStringLiteral("Continuar · ") + display::shortEpisode(*entry.resumeNumber);
+        return isSingle(entry)
+                   ? QStringLiteral("Continuar")
+                   : QStringLiteral("Continuar ep. ") + display::episodeNumber(*entry.resumeNumber);
     }
     if (entry.resumeNumber && entry.watchedEpisodes > 0) {
         return QStringLiteral("Siguiente · ") + display::shortEpisode(*entry.resumeNumber);
@@ -200,6 +212,17 @@ QString LibraryModel::seenCaption(const LibraryEntry& entry) {
 
 // "Ep. 6 · 3/12 vistos", "Ep. 6 · 8:12 de 24:00" while it is under way.
 QString LibraryModel::readyCaption(const LibraryEntry& entry) {
+    if (isSingle(entry)) {
+        if (entry.resumePositionMs > 0) {
+            auto caption = display::clock(entry.resumePositionMs);
+            if (entry.resumeDurationMs > 0) {
+                caption += QStringLiteral(" de ") + display::clock(entry.resumeDurationMs);
+            }
+            return caption;
+        }
+        return entry.category.isEmpty() ? QStringLiteral("En disco")
+                                        : display::category(entry.category);
+    }
     auto caption = display::shortEpisode(*entry.resumeNumber);
     if (entry.resumePositionMs > 0) {
         caption += QStringLiteral(" · ") + display::clock(entry.resumePositionMs);
@@ -539,7 +562,7 @@ QString LibraryModel::downloadPendingOf(const QString& slug) {
     }
     const auto queued =
         downloads_.enqueueMany(slug, pending, entry->title, downloads::TaskOrigin::Manual);
-    return queued ? QString() : queued.error();
+    return queued ? QString() : display::storageError(queued.error());
 }
 
 QString LibraryModel::downloadPending() {
@@ -555,7 +578,7 @@ QString LibraryModel::downloadPending() {
         const auto queued =
             downloads_.enqueueMany(entry.slug, pending, entry.title, downloads::TaskOrigin::Manual);
         if (!queued) {
-            failed.append(queued.error());
+            failed.append(display::storageError(queued.error()));
         }
     }
     failed.removeDuplicates();
@@ -723,8 +746,7 @@ void LibraryModel::updateFeatured() {
                 static_cast<double>(entry->resumePositionMs) / entry->resumeDurationMs, 0.0, 1.0);
             if (entry->resumeDurationMs > entry->resumePositionMs) {
                 const qint64 secs = (entry->resumeDurationMs - entry->resumePositionMs) / 1000;
-                remaining_text = secs < 60 ? QStringLiteral("Queda menos de un minuto")
-                                           : QStringLiteral("Quedan ") + display::remaining(secs);
+                remaining_text = display::remainingPhrase(secs, true);
             }
         } else if (entry->resumePositionMs <= 0) {
             progress = progressOf(*entry);
@@ -738,7 +760,8 @@ void LibraryModel::updateFeatured() {
                     {QStringLiteral("progress"), progress},
                     {QStringLiteral("actionText"),
                      started(*entry) ? QStringLiteral("Continuar") : QStringLiteral("Empezar")},
-                    {QStringLiteral("episodeLabel"), display::episode(*entry->resumeNumber)},
+                    {QStringLiteral("episodeLabel"),
+                     isSingle(*entry) ? QString() : display::episode(*entry->resumeNumber)},
                     {QStringLiteral("unwatchedOnDisk"), entry->unwatchedOnDisk},
                     {QStringLiteral("statusText"), display::status(entry->status)},
                     {QStringLiteral("genres"), formatGenres(entry->genres)},
@@ -1105,9 +1128,7 @@ void LibraryModel::collapseAll() {
 }
 
 QVariantMap LibraryModel::workMap(const LibraryEntry& entry) const {
-    const bool single =
-        entry.episodeCount.value_or(0) == 1 || (!entry.episodeCount && entry.knownEpisodes == 1 &&
-                                                entry.status == api::AnimeStatus::Finished);
+    const bool single = isSingle(entry);
     // "TV · 2012 · 26 ep.": what the work is, short enough for a card.
     QStringList facts;
     if (!entry.category.isEmpty()) {
@@ -1123,7 +1144,9 @@ QVariantMap LibraryModel::workMap(const LibraryEntry& entry) const {
     // Where the user is with it: "Siguiente: Ep. 6".
     QString state = QStringLiteral("Sin empezar");
     if (entry.resumeNumber && entry.resumePositionMs > 0) {
-        state = QStringLiteral("Continuar: ") + display::shortEpisode(*entry.resumeNumber);
+        state =
+            single ? QStringLiteral("Continuar")
+                   : QStringLiteral("Continuar ep. ") + display::episodeNumber(*entry.resumeNumber);
     } else if (entry.resumeNumber && entry.watchedEpisodes > 0) {
         state = QStringLiteral("Siguiente: ") + display::shortEpisode(*entry.resumeNumber);
     } else if (entry.finished()) {
@@ -1155,7 +1178,9 @@ QVariantMap LibraryModel::workMap(const LibraryEntry& entry) const {
             {QStringLiteral("diskText"),
              entry.downloadedEpisodes > 0
                  ? (single ? QStringLiteral("En disco")
-                           : QStringLiteral("%1 episodios en disco").arg(entry.downloadedEpisodes))
+                    : entry.downloadedEpisodes == 1
+                        ? QStringLiteral("1 episodio en disco")
+                        : QStringLiteral("%1 episodios en disco").arg(entry.downloadedEpisodes))
                  : QStringLiteral("Sin archivos locales")}};
 }
 
@@ -1311,7 +1336,10 @@ void LibraryModel::rebuildFranchise() {
 }
 
 bool LibraryModel::report(const library::Stored<void>& result) {
-    const auto error = result ? QString() : result.error().message;
+    if (!result) {
+        qWarning("library model: %s", qPrintable(result.error().message));
+    }
+    const auto error = result ? QString() : display::storageError(result.error().message);
     if (error_ != error) {
         error_ = error;
         emit errorChanged();

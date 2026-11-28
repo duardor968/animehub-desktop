@@ -50,9 +50,9 @@ ColumnLayout {
                     height: 28
                     radius: 14
                     color: section.updater.state === "uptodate"
-                           ? Qt.rgba(0.30, 0.72, 0.51, 0.16)
+                           ? Qt.rgba(Theme.success.r, Theme.success.g, Theme.success.b, 0.16)
                            : section.updater.error
-                             ? Qt.rgba(0.90, 0.33, 0.29, 0.16)
+                             ? Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.16)
                              : Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
 
                     BusyIndicator {
@@ -104,7 +104,7 @@ ColumnLayout {
                         }
                     }
                     color: Theme.ink
-                    font.pixelSize: Theme.body - 1
+                    font.pixelSize: Theme.small
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
@@ -138,11 +138,13 @@ ColumnLayout {
                     }
                     visible: text !== ""
                     color: section.updater.error ? Theme.danger : Theme.muted
-                    font.pixelSize: Theme.caption - 1
+                    font.pixelSize: Theme.micro
                     elide: Text.ElideRight
 
                     HoverHandler { id: subtitleHover }
                     ToolTip.visible: subtitleHover.hovered && subtitleLabel.truncated
+                    ToolTip.delay: Theme.tooltipDelay
+                    ToolTip.timeout: Theme.tooltipTimeout
                     ToolTip.text: subtitleLabel.text
                 }
             }
@@ -154,74 +156,98 @@ ColumnLayout {
             spacing: 8
 
             Button {
+                id: checkNowButton
                 visible: section.updater.state === "uptodate" || section.updater.checking
                 enabled: !section.updater.checking
                 text: "Buscar actualizaciones"
                 Accessible.name: "Buscar actualizaciones"
+                Accessible.onPressAction: checkNowButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    checkNowButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    checkNowButton.click()
+                }
                 onClicked: section.updater.checkNow()
             }
 
             Button {
+                id: cancelDownloadButton
                 visible: section.updater.downloading
                 enabled: section.updater.state === "downloading"
                 text: "Cancelar"
                 Accessible.name: "Cancelar descarga de actualización"
+                Accessible.onPressAction: cancelDownloadButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    cancelDownloadButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    cancelDownloadButton.click()
+                }
                 onClicked: section.updater.cancelDownload()
             }
 
             Button {
+                id: notesButton
                 visible: section.canExpandNotes
                 flat: true
                 text: "Novedades"
-                icon.source: Theme.source(section.notesExpanded
-                                          ? Theme.icon.collapseAll : Theme.icon.expandAll)
-                icon.width: 10
-                icon.height: 10
-                LayoutMirroring.enabled: true
                 Accessible.name: "Novedades de la versión " + section.updater.targetVersion
                 Accessible.checkable: true
                 Accessible.checked: section.notesExpanded
+                Accessible.onPressAction: notesButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    notesButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    notesButton.click()
+                }
                 onClicked: section.notesExpanded = !section.notesExpanded
+
+                contentItem: RowLayout {
+                    spacing: 6
+
+                    Label {
+                        text: notesButton.text
+                        color: notesButton.enabled ? Theme.ink : Theme.muted
+                        font: notesButton.font
+                        Accessible.ignored: true
+                    }
+
+                    Glyph {
+                        glyph: section.notesExpanded ? Theme.icon.chevronUp : Theme.icon.chevronDown
+                        size: 10
+                        color: notesButton.hovered ? Theme.ink : Theme.muted
+                    }
+                }
             }
 
             AccentButton {
                 visible: section.updater.available && !section.updater.manualOnly
                 text: "Descargar"
                 glyphCode: Theme.icon.download
-                fontPixelSize: Theme.body - 1
+                fontPixelSize: Theme.small
                 implicitHeight: 32
                 leftPadding: 13
                 rightPadding: 13
-                Accessible.onPressAction: click()
                 onClicked: section.updater.downloadNow()
-                Keys.onReturnPressed: event => {
-                    event.accepted = true
-                    click()
-                }
-                Keys.onEnterPressed: event => {
-                    event.accepted = true
-                    click()
-                }
             }
 
             AccentButton {
                 visible: section.updater.available && section.updater.manualOnly
                 text: "Descargar manualmente"
                 glyphCode: Theme.icon.openExternal
-                fontPixelSize: Theme.body - 1
+                fontPixelSize: Theme.small
                 implicitHeight: 32
                 leftPadding: 13
                 rightPadding: 13
-                Accessible.onPressAction: click()
                 onClicked: section.updater.openManualDownload()
-                Keys.onReturnPressed: event => {
-                    event.accepted = true
-                    click()
-                }
-                Keys.onEnterPressed: event => {
-                    event.accepted = true
-                    click()
-                }
             }
 
             AccentButton {
@@ -229,27 +255,28 @@ ColumnLayout {
                 enabled: !section.updater.busy
                 text: "Actualizar y reiniciar"
                 glyphCode: Theme.icon.update
-                fontPixelSize: Theme.body - 1
+                fontPixelSize: Theme.small
                 implicitHeight: 32
                 leftPadding: 13
                 rightPadding: 13
-                Accessible.onPressAction: click()
                 onClicked: section.updater.requestApply()
-                Keys.onReturnPressed: event => {
-                    event.accepted = true
-                    click()
-                }
-                Keys.onEnterPressed: event => {
-                    event.accepted = true
-                    click()
-                }
             }
 
             Button {
+                id: manualErrorButton
                 visible: section.updater.error
                 flat: true
                 text: "Descargar manualmente"
                 Accessible.name: "Descargar actualización manualmente"
+                Accessible.onPressAction: manualErrorButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    manualErrorButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    manualErrorButton.click()
+                }
                 onClicked: section.updater.openManualDownload()
             }
 
@@ -257,20 +284,11 @@ ColumnLayout {
                 visible: section.updater.error
                 text: "Reintentar"
                 glyphCode: Theme.icon.retry
-                fontPixelSize: Theme.body - 1
+                fontPixelSize: Theme.small
                 implicitHeight: 32
                 leftPadding: 13
                 rightPadding: 13
-                Accessible.onPressAction: click()
                 onClicked: section.updater.checkNow()
-                Keys.onReturnPressed: event => {
-                    event.accepted = true
-                    click()
-                }
-                Keys.onEnterPressed: event => {
-                    event.accepted = true
-                    click()
-                }
             }
         }
     }
@@ -285,7 +303,7 @@ ColumnLayout {
         visible: section.notesExpanded && section.canExpandNotes
         Layout.fillWidth: true
         implicitHeight: notesCol.implicitHeight + 20
-        radius: 5
+        radius: Theme.radius
         color: Qt.rgba(0, 0, 0, 0.22)
         border.width: 1
         border.color: Qt.rgba(1, 1, 1, 0.07)

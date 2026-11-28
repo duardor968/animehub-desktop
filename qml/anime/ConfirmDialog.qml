@@ -21,18 +21,8 @@ ModalDialog {
     }
 
     width: 480
+    onOpened: acceptButton.forceActiveFocus(InputModality.reason)
     onAccepted: if (action) action()
-
-    // Fluent's header, wrapping: the question names the anime and must not be cut.
-    header: Label {
-        text: dialog.title
-        topPadding: dialog.padding
-        leftPadding: dialog.padding
-        rightPadding: dialog.padding
-        wrapMode: Text.Wrap
-        font.pixelSize: 20
-        font.weight: Font.DemiBold
-    }
 
     // Fixed widths on both sides: Fluent's Dialog loops when its content follows it.
     Label {
@@ -42,15 +32,19 @@ ModalDialog {
         text: dialog.detail
     }
 
+    // Windows order: primary action on the left, Cancel on the right.
     footer: DialogButtonBox {
-        Button {
+        AccentButton {
+            id: acceptButton
             text: dialog.acceptText
-            highlighted: dialog.visible // DialogButtonBox clears it while it builds
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
         }
         Button {
             text: dialog.rejectText
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            Accessible.onPressAction: click()
+            Keys.onReturnPressed: event => { event.accepted = true; click() }
+            Keys.onEnterPressed: event => { event.accepted = true; click() }
         }
     }
 }

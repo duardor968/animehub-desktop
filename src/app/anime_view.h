@@ -20,11 +20,18 @@
 namespace animehub::app {
 
 struct Services {
+    struct Shell {
+        std::function<void(const QString&)> open;
+        std::function<void(const QString&)> reveal;
+        std::function<void(const QUrl&)> openUrl;
+    };
+
     api::ApiClient& api;
     library::LibraryService& library;
     downloads::DownloadManager& downloads;
     playback::Player& player;
     AppSettings& settings;
+    Shell shell{};
 };
 
 // One anime's page: its details, the user's flags, the main action and the figures beside it,
@@ -66,7 +73,8 @@ class AnimeView final : public QObject {
     Q_PROPERTY(bool mature READ mature NOTIFY changed)
     // Semantic status chip only (empty when status is unknown): [{text, tone}].
     Q_PROPERTY(QVariantList chips READ chips NOTIFY changed)
-    // Structured metadata rows for the page's side column: [{label, name, value}], empty omitted.
+    // Structured metadata rows for the page's side column: [{label, name, value, icon?}], empty
+    // omitted.
     Q_PROPERTY(QVariantList details READ details NOTIFY changed)
     Q_PROPERTY(bool hasDetails READ hasDetails NOTIFY changed)
     Q_PROPERTY(QUrl trailerUrl READ trailerUrl NOTIFY changed)
@@ -101,7 +109,6 @@ class AnimeView final : public QObject {
     Q_PROPERTY(int missingCount READ missingCount NOTIFY changed)
     Q_PROPERTY(QString missingText READ missingText NOTIFY changed)
     Q_PROPERTY(int unwatchedMissingCount READ unwatchedMissingCount NOTIFY changed)
-    Q_PROPERTY(QString unwatchedMissingText READ unwatchedMissingText NOTIFY changed)
     Q_PROPERTY(double firstMissing READ firstMissing NOTIFY changed)
     Q_PROPERTY(double firstNumber READ firstNumber NOTIFY changed)
     Q_PROPERTY(double lastNumber READ lastNumber NOTIFY changed)
@@ -202,9 +209,6 @@ public:
     }
     [[nodiscard]] int unwatchedMissingCount() const {
         return static_cast<int>(summary_.unwatchedMissing.size());
-    }
-    [[nodiscard]] QString unwatchedMissingText() const {
-        return EpisodeModel::countText(summary_.unwatchedMissing);
     }
     [[nodiscard]] double firstMissing() const {
         return summary_.missing.isEmpty() ? firstNumber() : summary_.missing.first();

@@ -31,6 +31,7 @@ Item {
     Layout.fillWidth: true
     implicitHeight: stacked ? name.height + end.implicitHeight + 30
                             : Math.max(52, end.implicitHeight + 20, name.height + 20)
+    Accessible.description: unavailable !== "" ? unavailable : info
 
     Item {
         id: name
@@ -41,23 +42,72 @@ Item {
 
         Label {
             id: title
-            width: Math.min(implicitWidth, name.width - (mark.visible ? mark.width + 6 : 0))
+            width: Math.min(implicitWidth, name.width - (mark.visible ? mark.width + 4 : 0))
             text: row.label
             color: row.unavailable === "" ? Theme.ink : Theme.muted
             wrapMode: Text.Wrap
             maximumLineCount: 2
             elide: Text.ElideRight
         }
-        Glyph {
+        AbstractButton {
             id: mark
-            x: title.contentWidth + 6
+            property bool toggledOpen: false
+
+            x: title.contentWidth + 4
             y: (row.nameLine - height) / 2
+            width: 22
+            height: 22
+            padding: 0
             visible: row.info !== ""
-            glyph: Theme.icon.info
-            color: Theme.muted
-            HoverHandler { id: hover }
-            ToolTip.visible: hover.hovered
+            hoverEnabled: true
+            focusPolicy: Qt.StrongFocus
+            activeFocusOnTab: visible
+            onActiveFocusChanged: if (!activeFocus) toggledOpen = false
+            onClicked: toggledOpen = !toggledOpen
+            Keys.onReturnPressed: event => {
+                event.accepted = true
+                mark.click()
+            }
+            Keys.onEnterPressed: event => {
+                event.accepted = true
+                mark.click()
+            }
+            Keys.onEscapePressed: event => {
+                if (mark.toggledOpen) {
+                    mark.toggledOpen = false
+                    event.accepted = true
+                }
+            }
+            Accessible.role: Accessible.Button
+            Accessible.name: "Más información sobre " + row.label
+            Accessible.description: row.info
+            Accessible.onPressAction: mark.click()
+            ToolTip.visible: row.info !== ""
+                             && (hovered || toggledOpen || (activeFocus && InputModality.keyboard))
+            ToolTip.delay: toggledOpen || (activeFocus && InputModality.keyboard)
+                           ? 0 : Theme.tooltipDelay
+            ToolTip.timeout: toggledOpen ? 0 : Theme.tooltipTimeout
             ToolTip.text: row.info
+
+            background: Rectangle {
+                radius: Theme.radiusSm
+                color: mark.down ? Theme.pressSubtle
+                       : mark.hovered ? Theme.hoverSubtle : "transparent"
+
+                FocusFrame {
+                    visible: mark.activeFocus && InputModality.keyboard
+                    radiusInside: Theme.radiusSm
+                }
+            }
+
+            contentItem: Item {
+                Glyph {
+                    anchors.centerIn: parent
+                    glyph: Theme.icon.info
+                    size: 14
+                    color: mark.hovered || mark.activeFocus ? Theme.ink : Theme.muted
+                }
+            }
         }
         Label {
             id: detailLabel
@@ -69,6 +119,8 @@ Item {
             font.pixelSize: Theme.caption
             elide: Text.ElideMiddle
             ToolTip.visible: detailHover.hovered && truncated
+            ToolTip.delay: Theme.tooltipDelay
+            ToolTip.timeout: Theme.tooltipTimeout
             ToolTip.text: text
             HoverHandler { id: detailHover }
         }
@@ -80,7 +132,7 @@ Item {
         // A long value gives way down to the room its name keeps.
         readonly property real room: row.width - 24
                                      - Math.min(row.nameWidth, title.implicitWidth
-                                                + (mark.visible ? mark.width + 6 : 0))
+                                                + (mark.visible ? mark.width + 4 : 0))
 
         width: row.stacked ? row.width : Math.min(implicitWidth, room)
         x: row.width - width
@@ -100,6 +152,8 @@ Item {
             color: row.valueColor
             elide: Text.ElideMiddle
             ToolTip.visible: valueHover.hovered && truncated
+            ToolTip.delay: Theme.tooltipDelay
+            ToolTip.timeout: Theme.tooltipTimeout
             ToolTip.text: text
             HoverHandler { id: valueHover }
         }
@@ -115,16 +169,30 @@ Item {
         Item { Layout.fillWidth: true }
     }
 
-    // A disabled control gets no hover of its own: the reason shows over it.
+    // A disabled control gets no hover or focus of its own: expose the reason to hover,
+    // keyboard navigation, and screen readers.
     Item {
+        id: reasonTarget
         x: end.x + slot.x
         y: end.y + slot.y
         width: slot.width
         height: slot.height
         visible: row.unavailable !== ""
+        activeFocusOnTab: visible
+        Accessible.role: Accessible.StaticText
+        Accessible.name: row.label + ", no disponible"
+        Accessible.description: row.unavailable
         HoverHandler { id: reasonHover }
-        ToolTip.visible: reasonHover.hovered
+        ToolTip.visible: row.unavailable !== ""
+                         && (reasonHover.hovered || (activeFocus && InputModality.keyboard))
+        ToolTip.delay: activeFocus && InputModality.keyboard ? 0 : Theme.tooltipDelay
+        ToolTip.timeout: Theme.tooltipTimeout
         ToolTip.text: row.unavailable
+
+        FocusFrame {
+            visible: reasonTarget.activeFocus && InputModality.keyboard
+            radiusInside: Theme.radius
+        }
     }
 
     Rectangle {

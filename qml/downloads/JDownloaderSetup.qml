@@ -58,10 +58,10 @@ ModalDialog {
     readonly property int columnWidth: 472
     width: 520
     title: "Usar JDownloader"
-    onOpened: primary.forceActiveFocus()
+    onOpened: primary.forceActiveFocus(InputModality.reason)
     // The main button is off while the test runs; the keyboard goes back to it after.
     readonly property bool testing: jd.testing
-    onTestingChanged: if (!testing && visible) primary.forceActiveFocus()
+    onTestingChanged: if (!testing && visible) primary.forceActiveFocus(InputModality.reason)
     onClosed: password.text = ""
     // Installed meanwhile (from the browser): on to how it is reached.
     onFoundChanged: if (visible && step === 0 && found) step = 1
@@ -89,7 +89,7 @@ ModalDialog {
             Layout.rightMargin: dialog.padding
             text: dialog.title
             color: Theme.ink
-            font.pixelSize: 20
+            font.pixelSize: Theme.heading
             font.weight: Font.DemiBold
             Accessible.role: Accessible.Heading
         }
@@ -106,11 +106,13 @@ ModalDialog {
     component Line: Label {
         Layout.preferredWidth: dialog.columnWidth
         color: Theme.ink
+        font.pixelSize: Theme.body
         wrapMode: Text.Wrap
     }
     component Note: Label {
         Layout.preferredWidth: dialog.columnWidth
         color: Theme.muted
+        font.pixelSize: Theme.body
         wrapMode: Text.Wrap
     }
     component Field: TextField {
@@ -119,8 +121,16 @@ ModalDialog {
     }
     // Enter acts on a button inside the steps, not on the footer's main one.
     component StepButton: Button {
-        Keys.onReturnPressed: clicked()
-        Keys.onEnterPressed: clicked()
+        id: stepBtn
+        Accessible.onPressAction: stepBtn.click()
+        Keys.onReturnPressed: event => {
+            event.accepted = true
+            stepBtn.click()
+        }
+        Keys.onEnterPressed: event => {
+            event.accepted = true
+            stepBtn.click()
+        }
     }
 
     // Fixed widths: Fluent's Dialog loops when its content follows it. Only the step on view
@@ -129,21 +139,27 @@ ModalDialog {
         width: dialog.columnWidth
         spacing: 0
         // Enter anywhere else is the footer's main button.
-        Keys.onReturnPressed: dialog.forward()
-        Keys.onEnterPressed: dialog.forward()
+        Keys.onReturnPressed: event => {
+            event.accepted = true
+            dialog.forward()
+        }
+        Keys.onEnterPressed: event => {
+            event.accepted = true
+            dialog.forward()
+        }
 
-        // Installing it; shown only when this PC has none.
+        // Installing it; shown only when this computer has none.
         ColumnLayout {
             visible: dialog.step === 0
             spacing: 12
 
-            Line { text: "JDownloader no está instalado en este PC." }
+            Line { text: "JDownloader no está instalado en este equipo." }
             RowLayout {
                 spacing: 8
 
                 StepButton {
                     text: "Descargar JDownloader"
-                    icon.source: Theme.source(Theme.icon.download)
+                    icon.source: Theme.source(Theme.icon.openExternal)
                     onClicked: dialog.jd.openDownloadPage()
                     Accessible.name: "Descargar JDownloader desde jdownloader.org"
                 }
@@ -164,7 +180,7 @@ ModalDialog {
             ButtonGroup { id: reach }
             RadioButton {
                 id: localRadio
-                text: "En este PC"
+                text: "En este equipo"
                 enabled: dialog.found
                 ButtonGroup.group: reach
                 onToggled: if (checked) dialog.local = true
@@ -265,6 +281,7 @@ ModalDialog {
                 visible: !dialog.jd.testing && text !== ""
                 text: dialog.jd.testProblem
                 color: Theme.danger
+                font.pixelSize: Theme.body
                 wrapMode: Text.Wrap
             }
         }
@@ -273,29 +290,42 @@ ModalDialog {
     // Windows' wizard order: Atrás, the main action, Cancelar.
     footer: DialogButtonBox {
         Button {
+            id: backButton
             visible: dialog.step > dialog.first
             text: "Atrás"
             enabled: !dialog.jd.testing
             DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+            Accessible.onPressAction: backButton.click()
             onClicked: dialog.step -= 1
-            Keys.onReturnPressed: clicked()
-            Keys.onEnterPressed: clicked()
+            Keys.onReturnPressed: event => {
+                event.accepted = true
+                backButton.click()
+            }
+            Keys.onEnterPressed: event => {
+                event.accepted = true
+                backButton.click()
+            }
         }
-        Button {
+        AccentButton {
             id: primary
             text: dialog.step < 2 ? "Siguiente" : dialog.jd.testProblem !== "" ? "Probar otra vez" : "Probar"
             enabled: dialog.canGoOn && !dialog.jd.testing
-            highlighted: dialog.visible // DialogButtonBox clears it while it builds
             DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: dialog.forward()
-            Keys.onReturnPressed: clicked()
-            Keys.onEnterPressed: clicked()
         }
         Button {
+            id: cancelButton
             text: "Cancelar"
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            Keys.onReturnPressed: dialog.reject()
-            Keys.onEnterPressed: dialog.reject()
+            Accessible.onPressAction: dialog.reject()
+            Keys.onReturnPressed: event => {
+                event.accepted = true
+                dialog.reject()
+            }
+            Keys.onEnterPressed: event => {
+                event.accepted = true
+                dialog.reject()
+            }
         }
     }
 

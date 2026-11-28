@@ -14,6 +14,14 @@ TabButton {
     icon.color: checked ? Theme.ink : Theme.muted
     font.pixelSize: Theme.body
     font.weight: checked ? Font.DemiBold : Font.Normal
+    Keys.onReturnPressed: event => {
+        event.accepted = true
+        click()
+    }
+    Keys.onEnterPressed: event => {
+        event.accepted = true
+        click()
+    }
     // Screen readers activate a tab with their "press" action.
     Accessible.onPressAction: click()
 }

@@ -277,6 +277,8 @@ ApplicationWindow {
                 Accessible.onPressAction: click()
                 ToolTip.visible: (hovered || (activeFocus && InputModality.keyboard))
                                  && window.app.updater.pillTooltip !== ""
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: window.app.updater.pillTooltip
                 onClicked: window.app.updater.handlePillClick()
 
@@ -323,10 +325,14 @@ ApplicationWindow {
             }
 
             ToolButton {
+                id: settingsButton
                 icon.source: Theme.source(Theme.icon.settings)
                 display: AbstractButton.IconOnly
                 text: "Ajustes"
-                ToolTip.visible: hovered
+                Accessible.onPressAction: settingsButton.click()
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: "Ajustes (Ctrl+,)"
                 onClicked: settingsDialog.open()
             }
@@ -403,11 +409,13 @@ ApplicationWindow {
     MouseArea {
         anchors.fill: parent
         z: 100
+        enabled: window.modalLayers === 0
         acceptedButtons: Qt.BackButton | Qt.ForwardButton
         onClicked: mouse => window.travel(mouse.button === Qt.BackButton ? -1 : 1)
     }
 
     footer: DownloadBar {
+        id: downloadBar
         downloads: window.app.downloads
         visible: window.app.downloads.barVisible && tabs.currentIndex !== 3
         onClicked: window.showPage(3)
@@ -415,10 +423,12 @@ ApplicationWindow {
 
     Toast {
         id: toast
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 24
-        z: 10
+        readonly property bool selectionBarVisible:
+            (tabs.currentIndex === 0 && libraryPage.selected !== ""
+             && window.app.libraryAnime.episodes.selectedCount > 0)
+            || (tabs.currentIndex === 1 && catalogPage.selectionBarVisible)
+        bottomInset: (downloadBar.visible ? downloadBar.height : 0)
+                     + (selectionBarVisible ? 68 : 0) + 24
     }
 
     Connections {
@@ -455,18 +465,19 @@ ApplicationWindow {
     Connections {
         target: window.app.libraryAnime
         function onAddedToLibrary(slug, title) {
-            toast.show("Añadido a la biblioteca", false, "Ver", () => window.openAnime(slug))
+            toast.show("Añadido a la biblioteca", false, "Abrir", () => window.openAnime(slug))
         }
     }
     Connections {
         target: window.app.catalogAnime
         function onAddedToLibrary(slug, title) {
-            toast.show("Añadido a la biblioteca", false, "Ver", () => window.openAnime(slug))
+            toast.show("Añadido a la biblioteca", false, "Abrir", () => window.openAnime(slug))
         }
     }
     Connections {
         target: window.app.downloads
         function onMessage(text, problem) { toast.show(text, problem) }
+        function onUndoable(text) { toast.show(text, false, "Deshacer", () => window.app.downloads.undo()) }
     }
 
     SettingsDialog {
@@ -505,13 +516,13 @@ ApplicationWindow {
         app: window.app
     }
 
-    Shortcut { sequence: "Alt+Left"; onActivated: window.travel(-1) }
-    Shortcut { sequence: "Alt+Right"; onActivated: window.travel(1) }
-    Shortcut { sequence: "Ctrl+1"; onActivated: window.showPage(0) }
-    Shortcut { sequence: "Ctrl+2"; onActivated: window.showPage(1) }
-    Shortcut { sequence: "Ctrl+3"; onActivated: window.showPage(2) }
-    Shortcut { sequence: "Ctrl+4"; onActivated: window.showPage(3) }
-    Shortcut { sequences: [StandardKey.Find]; onActivated: window.focusSearch() }
-    Shortcut { sequence: "Ctrl+,"; onActivated: settingsDialog.open() }
-    Shortcut { sequence: "Ctrl+Q"; onActivated: window.app.quit() }
+    Shortcut { sequence: "Alt+Left"; enabled: window.modalLayers === 0; onActivated: window.travel(-1) }
+    Shortcut { sequence: "Alt+Right"; enabled: window.modalLayers === 0; onActivated: window.travel(1) }
+    Shortcut { sequence: "Ctrl+1"; enabled: window.modalLayers === 0; onActivated: window.showPage(0) }
+    Shortcut { sequence: "Ctrl+2"; enabled: window.modalLayers === 0; onActivated: window.showPage(1) }
+    Shortcut { sequence: "Ctrl+3"; enabled: window.modalLayers === 0; onActivated: window.showPage(2) }
+    Shortcut { sequence: "Ctrl+4"; enabled: window.modalLayers === 0; onActivated: window.showPage(3) }
+    Shortcut { sequences: [StandardKey.Find]; enabled: window.modalLayers === 0; onActivated: window.focusSearch() }
+    Shortcut { sequence: "Ctrl+,"; enabled: window.modalLayers === 0; onActivated: settingsDialog.open() }
+    Shortcut { sequence: "Ctrl+Q"; enabled: window.modalLayers === 0; onActivated: window.app.quit() }
 }

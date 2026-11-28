@@ -6,9 +6,10 @@ import AnimeHub
 // One episode, as a streaming app lists them: its still, then on two lines what it is and where
 // it stands (when it came out, how far it was watched, on disk, its download), and one action
 // in words for what comes next with it; the rest under ⋯, shown on hover or with the keyboard.
-// Built on AbstractButton (not Fluent ItemDelegate) so mouse focus never leaves a stray left bar,
-// and selected rows weld a 2 px #2f81f7 border around the 16:9 still with a soft row tint.
-AbstractButton {
+// Structured as a FocusScope with sibling background AbstractButton and action buttons (never
+// nesting interactive buttons inside an AbstractButton), preserving keyboard navigation and
+// SelectionMark's welded 2 px #2f81f7 border on selected rows.
+FocusScope {
     id: row
 
     required property AnimeView view
@@ -32,10 +33,22 @@ AbstractButton {
     required property bool selected
     required property bool first
 
+    property real leftPadding: 0
+    property real rightPadding: 0
+    property real topPadding: 8
+    property real bottomPadding: 8
+    property real leftInset: 0
+    property real rightInset: 0
+    property real topInset: 2
+    property real bottomInset: 2
+
+    signal keyboardFocused(Item target)
+
+    readonly property bool compact: width < 520
     readonly property bool watched: watchState === 2
     readonly property bool transferring: downloadState !== "" && downloadState !== "failed"
-    readonly property bool rowHovered: row.hovered || still.containsMouse || mark.hovered
-                                       || actionButton.hovered || more.hovered
+    readonly property bool rowHovered: rowHover.hovered || rowButton.hovered || still.containsMouse
+                                       || mark.hovered || actionButton.hovered || more.hovered
     // "Visto · En disco", "8:12 de 24:00 · En disco"; nothing for an episode with nothing to it
     // yet. While it downloads, the download's own words follow.
     readonly property string status: {
@@ -65,7 +78,7 @@ AbstractButton {
         return hasFile ? "play" : downloadState === "" ? "download" : ""
     }
     readonly property bool showsMore: rowHovered
-                                      || (activeFocus && InputModality.keyboard)
+                                      || (rowButton.activeFocus && InputModality.keyboard)
                                       || (actionButton.activeFocus && InputModality.keyboard)
                                       || (more.activeFocus && InputModality.keyboard) || more.pressed
 
@@ -94,51 +107,91 @@ AbstractButton {
     }
 
     height: 88
-    topPadding: 8
-    bottomPadding: 8
-    topInset: 2
-    bottomInset: 2
-    hoverEnabled: true
-    focusPolicy: Qt.StrongFocus
-    Accessible.role: Accessible.ListItem
-    Accessible.name: label + (title ? ", " + title : "") + (date ? ", " + date : "")
-                     + (status ? ", " + status : "") + (downloadText ? ", " + downloadText : "")
-                     + (selected ? ", seleccionado" : "")
-    onDoubleClicked: if (!selecting && hasFile) view.play(number)
-    // While selecting, a click anywhere on the row toggles it; otherwise it takes mouse focus
-    // (without keyboard highlight) so Space/Enter can act on it.
-    onClicked: {
-        if (ListView.view)
-            ListView.view.currentIndex = index
-        forceActiveFocus(Qt.MouseFocusReason)
-        if (selecting)
-            toggle(false)
-    }
-    Keys.onReturnPressed: if (!selecting && hasFile) view.play(number)
-    Keys.onEnterPressed: if (!selecting && hasFile) view.play(number)
-    // Space marks the episode, as its check box would; Mayús+Espacio extends the span.
-    Keys.onSpacePressed: event => {
-        toggle(event.modifiers & Qt.ShiftModifier)
+    activeFocusOnTab: false
+    Keys.onMenuPressed: event => {
         event.accepted = true
-    }
-    Keys.onMenuPressed: menu.show(row, more)
-
-    // Subtle blue fill when selected (NO outer row border), quiet surface lift on hover.
-    background: Rectangle {
-        radius: Theme.radius
-        color: row.selected
-               ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b,
-                         row.rowHovered ? 0.14 : 0.09)
-               : (row.down ? Qt.rgba(1, 1, 1, 0.07)
-                  : row.rowHovered ? Qt.rgba(1, 1, 1, 0.045) : "transparent")
-        Behavior on color { ColorAnimation { duration: 120 } }
+        menu.show(row, more)
     }
 
-    // Keyboard focus frame only while navigating by keyboard.
-    FocusFrame {
-        target: row.background
-        visible: row.activeFocus && InputModality.keyboard
-        radiusInside: Theme.radius
+    HoverHandler { id: rowHover }
+
+    // Background row click/focus target (sibling to inner controls, never enclosing them).
+    AbstractButton {
+        id: rowButton
+        anchors.fill: parent
+        anchors.leftMargin: row.leftInset
+        anchors.rightMargin: row.rightInset
+        anchors.topMargin: row.topInset
+        anchors.bottomMargin: row.bottomInset
+        focus: true
+        hoverEnabled: true
+        focusPolicy: Qt.StrongFocus
+        activeFocusOnTab: true
+        Accessible.role: Accessible.ListItem
+        Accessible.name: row.label + (row.title ? ", " + row.title : "")
+                         + (row.date ? ", " + row.date : "")
+                         + (row.status ? ", " + row.status : "")
+                         + (row.downloadText ? ", " + row.downloadText : "")
+                         + (row.selected ? ", seleccionado" : "")
+        Accessible.onPressAction: {
+            if (row.selecting)
+                row.toggle(false)
+            else if (row.hasFile)
+                row.view.play(row.number)
+            else
+                row.act()
+        }
+        onActiveFocusChanged: if (activeFocus && InputModality.keyboard)
+                                  row.keyboardFocused(row)
+        onDoubleClicked: if (!row.selecting && row.hasFile) row.view.play(row.number)
+        // While selecting, a click anywhere on the row toggles it; otherwise it takes mouse focus
+        // (without keyboard highlight) so Space/Enter can act on it.
+        onClicked: {
+            if (row.ListView.view)
+                row.ListView.view.currentIndex = row.index
+            rowButton.forceActiveFocus(Qt.MouseFocusReason)
+            if (row.selecting)
+                row.toggle(false)
+        }
+        Keys.onReturnPressed: event => {
+            event.accepted = true
+            if (row.selecting)
+                row.toggle(false)
+            else if (row.hasFile)
+                row.view.play(row.number)
+        }
+        Keys.onEnterPressed: event => {
+            event.accepted = true
+            if (row.selecting)
+                row.toggle(false)
+            else if (row.hasFile)
+                row.view.play(row.number)
+        }
+        // Space marks the episode, as its check box would; Mayús+Espacio extends the span.
+        Keys.onSpacePressed: event => {
+            row.toggle(event.modifiers & Qt.ShiftModifier)
+            event.accepted = true
+        }
+
+        // Subtle blue fill when selected (NO outer row border), quiet surface lift on hover.
+        background: Rectangle {
+            radius: Theme.radius
+            color: row.selected
+                   ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b,
+                             row.rowHovered ? 0.14 : 0.09)
+                   : (rowButton.down ? Theme.pressSubtle
+                      : row.rowHovered ? Theme.hoverSubtle : "transparent")
+            Behavior on color { ColorAnimation { duration: 120 } }
+        }
+
+        contentItem: null
+
+        // Keyboard focus frame only while navigating by keyboard.
+        FocusFrame {
+            target: rowButton.background
+            visible: rowButton.activeFocus && InputModality.keyboard
+            radiusInside: Theme.radius
+        }
     }
 
     // Rows apart by a hairline under the content's column, as a list of episodes is drawn.
@@ -151,8 +204,14 @@ AbstractButton {
         opacity: 0.6
     }
 
-    contentItem: RowLayout {
-        spacing: 16
+    RowLayout {
+        id: contentRow
+        anchors.fill: parent
+        anchors.leftMargin: row.leftPadding
+        anchors.rightMargin: row.rightPadding
+        anchors.topMargin: row.topPadding
+        anchors.bottomMargin: row.bottomPadding
+        spacing: row.compact ? 10 : 16
 
         Item {
             // 16:9, as the episodes' stills.
@@ -197,7 +256,7 @@ AbstractButton {
                     anchors.centerIn: parent
                     glyph: Theme.icon.play
                     size: 22
-                    color: "white"
+                    color: Theme.accentInk
                 }
             }
 
@@ -210,11 +269,11 @@ AbstractButton {
                 size: 42
                 checked: row.selected
                 selecting: row.selecting
-                rowHovered: row.rowHovered || (row.activeFocus && InputModality.keyboard)
+                rowHovered: row.rowHovered || (rowButton.activeFocus && InputModality.keyboard)
                 Accessible.name: "Seleccionar " + row.label.toLowerCase()
                 // The row takes the focus, so Esc and Space reach the page from here.
                 onChosen: extend => {
-                    row.forceActiveFocus(Qt.MouseFocusReason)
+                    rowButton.forceActiveFocus(Qt.MouseFocusReason)
                     row.toggle(extend)
                 }
             }
@@ -229,28 +288,37 @@ AbstractButton {
             }
         }
 
-        // What it is, then where it stands; never narrower than "Episodio 12 Nuevo".
+        // What it is, then where it stands; shrinks cleanly so ⋯ never clips at 820×600.
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.minimumWidth: 120
+            Layout.minimumWidth: 0
             Layout.alignment: Qt.AlignVCenter
             spacing: 4
 
             RowLayout {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 spacing: 8
 
                 Label {
+                    id: titleLabel
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     Layout.maximumWidth: Math.ceil(implicitWidth)
                     text: row.title !== "" ? row.label + " · " + row.title : row.label
                     color: row.watched ? Theme.muted : Theme.ink
                     font.pixelSize: Theme.body
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
-                    ToolTip.visible: row.rowHovered && truncated
-                    ToolTip.delay: 600
+                    ToolTip.visible: (titleHover.hovered
+                                      || (rowButton.activeFocus && InputModality.keyboard))
+                                     && !actionButton.hovered && !more.hovered && !mark.hovered
+                                     && truncated
+                    ToolTip.delay: Theme.tooltipDelay
+                    ToolTip.timeout: Theme.tooltipTimeout
                     ToolTip.text: text
+
+                    HoverHandler { id: titleHover }
                 }
 
                 Label {
@@ -263,19 +331,23 @@ AbstractButton {
 
                 Item {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                 }
             }
 
             // Kept when empty: every title sits at one height. The check sits directly beside "Visto".
             RowLayout {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 spacing: 6
 
                 Label {
                     visible: row.date !== ""
+                    Layout.minimumWidth: 0
                     text: row.date + (row.watched || row.progressText !== "" || row.hasFile ? " ·" : "")
                     color: Theme.muted
                     font.pixelSize: Theme.caption
+                    elide: Text.ElideRight
                 }
 
                 Glyph {
@@ -288,6 +360,7 @@ AbstractButton {
                 Label {
                     visible: row.status !== ""
                     Layout.fillWidth: row.downloadText === ""
+                    Layout.minimumWidth: 0
                     Layout.maximumWidth: Math.ceil(implicitWidth)
                     text: row.status
                     color: Theme.muted
@@ -298,6 +371,7 @@ AbstractButton {
                 Label {
                     visible: row.downloadText !== ""
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: (row.date !== "" || row.status !== "" ? "· " : "") + row.downloadText
                     color: row.downloadState === "failed" ? Theme.danger : Theme.muted
                     font.pixelSize: Theme.caption
@@ -308,6 +382,7 @@ AbstractButton {
             // Fluent's bar while it transfers, no longer than a glance needs.
             ProgressBar {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 Layout.maximumWidth: 260
                 Layout.topMargin: 2
                 visible: row.transferring
@@ -320,14 +395,18 @@ AbstractButton {
         }
 
         // While choosing, a press on the row chooses: its own actions step aside, keeping their
-        // place so nothing moves. Fixed action slot left-aligns every row icon on one crisp axis.
+        // place so nothing moves. Fixed action slot left-aligns every row icon on one crisp axis
+        // on desktop and compacts on narrow panes so ⋯ is never clipped.
         RowLayout {
-            spacing: 4
+            spacing: row.compact ? 2 : 4
             opacity: row.selecting ? 0 : 1
             enabled: !row.selecting
 
             Item {
-                Layout.preferredWidth: 118
+                Layout.preferredWidth: row.compact
+                                       ? (actionButton.visible ? actionButton.width : 0)
+                                       : 118
+                Layout.minimumWidth: 0
                 Layout.preferredHeight: Math.max(32, actionButton.implicitHeight)
                 Layout.alignment: Qt.AlignVCenter
 
@@ -341,8 +420,8 @@ AbstractButton {
                                        : implicitWidth
                     visible: row.step !== ""
                     flat: true
-                    leftPadding: 10
-                    rightPadding: 10
+                    leftPadding: row.compact ? 6 : 10
+                    rightPadding: row.compact ? 6 : 10
                     text: ({ play: "Ver", download: "Descargar", pause: "Pausar", resume: "Reanudar",
                              retry: "Reintentar" })[row.step] ?? ""
                     // Play is for watching: resuming a download keeps the download glyph.
@@ -353,6 +432,11 @@ AbstractButton {
                                         download: "Descargar " + row.label.toLowerCase(),
                                         pause: "Pausar la descarga", resume: "Reanudar la descarga",
                                         retry: "Reintentar la descarga" })[row.step] ?? ""
+                    Accessible.onPressAction: click()
+                    Keys.onReturnPressed: event => { event.accepted = true; click() }
+                    Keys.onEnterPressed: event => { event.accepted = true; click() }
+                    onActiveFocusChanged: if (activeFocus && InputModality.keyboard)
+                                              row.keyboardFocused(row)
                     onClicked: row.act()
                 }
             }
@@ -365,8 +449,15 @@ AbstractButton {
                 icon.source: Theme.source(Theme.icon.more)
                 display: AbstractButton.IconOnly
                 text: "Opciones de " + row.label.toLowerCase()
-                ToolTip.visible: hovered
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: "Más opciones"
+                Accessible.onPressAction: click()
+                Keys.onReturnPressed: event => { event.accepted = true; click() }
+                Keys.onEnterPressed: event => { event.accepted = true; click() }
+                onActiveFocusChanged: if (activeFocus && InputModality.keyboard)
+                                          row.keyboardFocused(row)
                 onClicked: row.menu.show(row, more)
             }
         }

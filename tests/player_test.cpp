@@ -144,6 +144,28 @@ private slots:
         QVERIFY(!result);
         QCOMPARE(result.error(), QStringLiteral("El archivo ya no está en el disco."));
     }
+
+    void missingMpvUsesPlatformSpecificWording() {
+        Player player(*library_,
+                      [this] {
+                          return PlayerSettings{.kind = PlayerKind::Bundled,
+                                                .mpvExecutable =
+                                                    dir_->filePath(QStringLiteral("no-mpv")),
+                                                .configDirectory = dir_->path()};
+                      },
+                      {});
+        const auto result = player.play({.slug = QStringLiteral("clip"),
+                                         .number = 1,
+                                         .filePath = clip_,
+                                         .title = QStringLiteral("Clip")});
+        QVERIFY(!result);
+#ifdef Q_OS_WIN
+        QVERIFY(result.error().contains(QStringLiteral("reproductor incluido (mpv)")));
+#else
+        QVERIFY(!result.error().contains(QStringLiteral("reproductor incluido")));
+        QVERIFY(result.error().contains(QStringLiteral("mpv")));
+#endif
+    }
 };
 
 QTEST_GUILESS_MAIN(PlayerTest)

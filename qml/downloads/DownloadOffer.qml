@@ -19,7 +19,8 @@ ModalDialog {
         const never = remember.checked
         // Read before the offer goes.
         const setup = accepted && jdownloader
-        close()
+        if (visible)
+            close()
         if (accepted)
             downloads.acceptOffer(never)
         else
@@ -32,7 +33,8 @@ ModalDialog {
     title: downloads.offerTitle
     closePolicy: Popup.CloseOnEscape
     onAboutToShow: remember.checked = false
-    onOpened: action.forceActiveFocus()
+    onOpened: acceptButton.forceActiveFocus(InputModality.reason)
+    onAccepted: decide(true)
     onRejected: decide(false)
 
     Connections {
@@ -46,28 +48,24 @@ ModalDialog {
         }
     }
 
-    // Fluent's header, wrapping: it names the anime and must not be cut.
-    header: Label {
-        text: dialog.title
-        topPadding: dialog.padding
-        leftPadding: dialog.padding
-        rightPadding: dialog.padding
-        wrapMode: Text.Wrap
-        font.pixelSize: 20
-        font.weight: Font.DemiBold
-    }
-
     // Fixed widths: Fluent's Dialog loops when its content follows it.
     ColumnLayout {
         width: 432
         spacing: 16
-        Keys.onReturnPressed: dialog.decide(true)
-        Keys.onEnterPressed: dialog.decide(true)
+        Keys.onReturnPressed: event => {
+            event.accepted = true
+            dialog.accept()
+        }
+        Keys.onEnterPressed: event => {
+            event.accepted = true
+            dialog.accept()
+        }
 
         Label {
             Layout.preferredWidth: 432
             wrapMode: Text.Wrap
             color: Theme.ink
+            font.pixelSize: Theme.body
             text: dialog.downloads.offerText
         }
 
@@ -78,20 +76,24 @@ ModalDialog {
     }
 
     footer: DialogButtonBox {
-        Button {
-            id: action
+        AccentButton {
+            id: acceptButton
             text: dialog.jdownloader ? "Usar JDownloader" : "Activar y reintentar"
-            highlighted: dialog.visible // DialogButtonBox clears it while it builds
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: dialog.decide(true)
-            Keys.onReturnPressed: clicked()
-            Keys.onEnterPressed: clicked()
         }
         Button {
+            id: closeButton
             text: "Cerrar"
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            Keys.onReturnPressed: dialog.reject()
-            Keys.onEnterPressed: dialog.reject()
+            Accessible.onPressAction: dialog.reject()
+            Keys.onReturnPressed: event => {
+                event.accepted = true
+                dialog.reject()
+            }
+            Keys.onEnterPressed: event => {
+                event.accepted = true
+                dialog.reject()
+            }
         }
     }
 }

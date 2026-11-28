@@ -162,6 +162,7 @@ Item {
             text: "Aplicar"
             emphasized: toggle.checked
             enabled: toggle.checked
+            Accessible.name: "Aplicar límite de velocidad"
             onClicked: {
                 editor.commit()
                 editor.applied()

@@ -2,7 +2,6 @@
 
 #include "display.h"
 
-#include <QLocale>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -69,9 +68,7 @@ QString CatalogView::ago(const QDateTime& when, const QDateTime& now) {
     if (days < 7) {
         return QStringLiteral("hace %1 días").arg(days);
     }
-    return QLocale(QLocale::Spanish, QLocale::Spain)
-        .toString(date, date.year() == today.year() ? QStringLiteral("d MMM")
-                                                    : QStringLiteral("d MMM yyyy"));
+    return display::date(when, today);
 }
 
 QString CatalogView::captionOf(const api::AnimeSummary& anime) {

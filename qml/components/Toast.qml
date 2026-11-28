@@ -3,24 +3,34 @@ import QtQuick.Controls
 import AnimeHub
 
 // A short outcome at the bottom of the window ("12 episodios en cola"), with an
-// optional action such as "Deshacer".
+// optional action such as "Deshacer". Lives on Overlay.overlay so it stays above ModalDialogs.
 Rectangle {
     id: root
 
     function show(text, problem, actionText, action) {
         label.text = text
-        root.problem = problem
+        root.problem = Boolean(problem)
         root.actionText = actionText || ""
         root.action = action || null
         opacity = 1
         timer.restart()
+        if (text !== "")
+            root.Accessible.announce(text, root.problem ? Accessible.AnnouncementPoliteness.Assertive
+                                                        : Accessible.AnnouncementPoliteness.Polite)
     }
 
     property bool problem: false
     property string actionText
     property var action: null
+    // Bottom clearance above DownloadBar / SelectionBar; callers bind this when bars show.
+    property real bottomInset: 24
 
-    width: Math.min(row.implicitWidth + 32, parent.width - 48)
+    parent: Overlay.overlay
+    anchors.horizontalCenter: parent ? parent.horizontalCenter : undefined
+    anchors.bottom: parent ? parent.bottom : undefined
+    anchors.bottomMargin: bottomInset
+    z: 200
+    width: Math.min(row.implicitWidth + 32, parent ? Math.max(0, parent.width - 48) : row.implicitWidth + 32)
     height: row.implicitHeight + 20
     radius: Theme.radius
     color: Theme.raised
@@ -46,16 +56,26 @@ Rectangle {
             id: label
             color: Theme.ink
             font.pixelSize: Theme.body
-            width: Math.min(implicitWidth, root.parent ? root.parent.width - 240 : 600)
+            width: Math.min(implicitWidth, root.parent ? Math.max(120, root.parent.width - 240) : 600)
             wrapMode: Text.Wrap
             anchors.verticalCenter: parent.verticalCenter
         }
 
         Button {
+            id: actionButton
             visible: root.actionText !== ""
             flat: true
             text: root.actionText
             anchors.verticalCenter: parent.verticalCenter
+            Keys.onReturnPressed: event => {
+                event.accepted = true
+                actionButton.click()
+            }
+            Keys.onEnterPressed: event => {
+                event.accepted = true
+                actionButton.click()
+            }
+            Accessible.onPressAction: actionButton.click()
             onClicked: {
                 const action = root.action
                 root.opacity = 0

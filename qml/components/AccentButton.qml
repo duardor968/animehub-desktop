@@ -13,8 +13,21 @@ AbstractButton {
     property int fontPixelSize: Theme.body
     property bool emphasized: true
 
+    // Qt's DialogButtonBox resets a button's width to implicitWidth when its text changes
+    // dynamically (e.g. DownloadOffer, ConfirmDialog, JDownloaderSetup) without re-stretching it.
+    function syncDialogButtonWidth() {
+        const box = DialogButtonBox.buttonBox
+        if (!box || box.alignment !== 0 || box.count <= 0 || box.availableWidth <= 0)
+            return
+        const w = (box.availableWidth - (box.count - 1) * box.spacing) / box.count
+        if (w > 0 && Math.abs(width - w) > 0.5)
+            width = w
+    }
+
     implicitWidth: Math.max(88, row.implicitWidth + leftPadding + rightPadding)
     implicitHeight: 34
+    onImplicitWidthChanged: Qt.callLater(syncDialogButtonWidth)
+    onVisibleChanged: if (visible) Qt.callLater(syncDialogButtonWidth)
     leftPadding: 14
     rightPadding: 14
     topPadding: 0
@@ -23,12 +36,23 @@ AbstractButton {
     focusPolicy: Qt.StrongFocus
     Accessible.role: Accessible.Button
     Accessible.name: text
+    Accessible.onPressAction: if (control.enabled) control.clicked()
+    Keys.onReturnPressed: event => {
+        event.accepted = true
+        if (control.enabled)
+            control.clicked()
+    }
+    Keys.onEnterPressed: event => {
+        event.accepted = true
+        if (control.enabled)
+            control.clicked()
+    }
 
     background: Rectangle {
         radius: 5
         color: {
             if (!control.enabled)
-                return Theme.accentDisabled
+                return control.emphasized ? Theme.accentDisabled : Theme.controlDisabled
             if (!control.emphasized)
                 return control.down ? "#252b34" : (control.hovered ? "#2c3340" : Theme.raised)
             return control.down ? "#246bd1" : (control.hovered ? "#3d8bfd" : Theme.accent)

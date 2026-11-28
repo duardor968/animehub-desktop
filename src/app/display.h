@@ -16,7 +16,18 @@ namespace animehub::app::display {
 [[nodiscard]] QString bytes(qint64 value);          // "350 MB", "1,2 GB"
 [[nodiscard]] QString speed(qint64 bytes_per_second);
 [[nodiscard]] QString clock(qint64 ms);          // "8:12", "1:02:03"
-[[nodiscard]] QString remaining(qint64 seconds); // "4 min"
+[[nodiscard]] QString remaining(qint64 seconds); // "4 min", "1 h", "1 h 5 min"
+// "queda menos de un minuto", "queda 1 min", "quedan 4 min", "queda 1 h", "quedan 2 h".
+[[nodiscard]] QString remainingPhrase(qint64 seconds, bool capitalized = false);
+// Compact seconds-precision ETA ("1 s", "45 s", "1 min", "1 h", "1 h 5 min"); empty when <= 0.
+[[nodiscard]] QString shortRemaining(qint64 seconds);
+// "queda 1 s", "quedan 45 s", "queda 1 min", "quedan 4 min", "queda 1 h"; empty when <= 0.
+[[nodiscard]] QString shortRemainingPhrase(qint64 seconds);
+// Translates raw English SQLite / repository / queue errors into Spanish while keeping Spanish
+// messages intact.
+[[nodiscard]] QString storageError(const QString& raw);
+// Translates raw aria2 speed-limit RPC/network errors into Spanish (never leaks raw English).
+[[nodiscard]] QString speedLimitError(const QString& raw);
 [[nodiscard]] QString status(api::AnimeStatus status);
 // What the work is, as cards name it: "TV" for "TV Anime", since everything here is anime.
 [[nodiscard]] QString category(const QString& name);

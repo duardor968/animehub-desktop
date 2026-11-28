@@ -111,8 +111,13 @@ Rectangle {
                     icon.source: Theme.source(Theme.icon.retry)
                     display: AbstractButton.IconOnly
                     text: figure.modelData.action ?? ""
-                    ToolTip.visible: hovered
+                    ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                    ToolTip.delay: Theme.tooltipDelay
+                    ToolTip.timeout: Theme.tooltipTimeout
                     ToolTip.text: text
+                    Accessible.onPressAction: click()
+                    Keys.onReturnPressed: event => { event.accepted = true; click() }
+                    Keys.onEnterPressed: event => { event.accepted = true; click() }
                     onClicked: root.figureAction(figure.modelData)
                 }
             }
@@ -128,15 +133,30 @@ Rectangle {
         }
     }
 
-    // The bar's ends in the Tab order, which hand the keyboard on: before its first control, back
-    // to the title; after its last one, on to what follows the title.
-    Item {
+    // The bar's ends in the Tab order, which hand the keyboard on:
+    // - Shift+Tab from the bar's first control lands on `head` (BacktabFocusReason) -> back to title.
+    // - Forward Tab past the end of the page lands on `head` (TabFocusReason) -> skip the bar cleanly
+    //   so Tab never loops back to the title.
+    Control {
         id: head
+        width: 0
+        height: 0
+        padding: 0
+        background: null
+        contentItem: null
+        focusPolicy: Qt.TabFocus
         activeFocusOnTab: root.titleItem !== null
         Accessible.ignored: true
         onActiveFocusChanged: {
-            if (activeFocus && root.titleItem)
+            if (!activeFocus || !root.titleItem)
+                return
+            if (focusReason === Qt.BacktabFocusReason) {
                 root.titleItem.forceActiveFocus(Qt.BacktabFocusReason)
+            } else {
+                const next = tail.nextItemInFocusChain(true)
+                if (next && next !== head && next !== tail)
+                    next.forceActiveFocus(Qt.TabFocusReason)
+            }
         }
     }
 
@@ -195,7 +215,7 @@ Rectangle {
                                                   Math.max(0, root.identityRoom - 62))
                     text: root.title
                     color: Theme.ink
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.small
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
@@ -279,14 +299,26 @@ Rectangle {
         font.weight: Font.DemiBold
     }
 
-    Item {
+    Control {
         id: tail
+        width: 0
+        height: 0
+        padding: 0
+        background: null
+        contentItem: null
+        focusPolicy: Qt.TabFocus
         activeFocusOnTab: root.titleItem !== null
         Accessible.ignored: true
         onActiveFocusChanged: {
-            if (activeFocus && root.titleItem) {
+            if (!activeFocus || !root.titleItem)
+                return
+            if (focusReason === Qt.BacktabFocusReason) {
+                const prev = head.nextItemInFocusChain(false)
+                if (prev && prev !== head && prev !== tail)
+                    prev.forceActiveFocus(Qt.BacktabFocusReason)
+            } else {
                 const next = root.titleItem.nextItemInFocusChain(true)
-                if (next)
+                if (next && next !== head && next !== tail)
                     next.forceActiveFocus(Qt.TabFocusReason)
             }
         }

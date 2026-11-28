@@ -53,13 +53,29 @@ AbstractButton {
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
     Accessible.name: (caption ? text + ", " + caption : text) + (owned ? ", en tu biblioteca" : "")
-    Keys.onReturnPressed: clicked()
-    Keys.onEnterPressed: clicked()
+    Accessible.description: root.quickAction !== "" ? (actionBtn.text + " (Mayús+Intro)") : ""
+    Accessible.onPressAction: clicked()
+    Keys.onReturnPressed: event => {
+        event.accepted = true
+        if ((event.modifiers & Qt.ShiftModifier) && root.quickAction !== "")
+            root.act()
+        else
+            root.clicked()
+    }
+    Keys.onEnterPressed: event => {
+        event.accepted = true
+        if ((event.modifiers & Qt.ShiftModifier) && root.quickAction !== "")
+            root.act()
+        else
+            root.clicked()
+    }
     onActiveFocusChanged: if (activeFocus && InputModality.keyboard) reveal()
 
     background: null
-    ToolTip.visible: root.hovered && !actionBtn.hovered && !ownedHover.hovered && titleLabel.truncated
-    ToolTip.delay: 500
+    ToolTip.visible: (root.hovered || (root.activeFocus && InputModality.keyboard))
+                     && !actionBtn.hovered && !ownedHover.hovered && titleLabel.truncated
+    ToolTip.delay: Theme.tooltipDelay
+    ToolTip.timeout: Theme.tooltipTimeout
     ToolTip.text: text
 
     HoverHandler { id: cardHover }
@@ -119,6 +135,8 @@ AbstractButton {
                 width: 26
                 height: 32
                 ToolTip.visible: ownedHover.hovered
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: "En tu biblioteca"
 
                 HoverHandler { id: ownedHover }
@@ -160,9 +178,13 @@ AbstractButton {
                 visible: opacity > 0
                 hoverEnabled: true
                 focusPolicy: Qt.NoFocus
-                text: root.quickAction === "play" ? "Reproducir" : "Descargar"
+                text: root.quickAction === "play" ? "Ver" : "Descargar"
+                Accessible.role: Accessible.Button
                 Accessible.name: text + ", " + root.text
+                Accessible.onPressAction: root.act()
                 ToolTip.visible: hovered
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
                 onClicked: root.act()
                 Behavior on opacity { NumberAnimation { duration: 140 } }

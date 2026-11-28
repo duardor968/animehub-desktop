@@ -302,8 +302,7 @@ private slots:
         const auto& series = view.completed()->rows().first();
         // One date format on the page: "31 oct", as every date it shows.
         QCOMPARE(series.summary, QStringLiteral("2 episodios · 286 MB · ") +
-                                     QLocale(QLocale::Spanish, QLocale::Spain)
-                                         .toString(QDate::currentDate(), QStringLiteral("d MMM")));
+                                     app::display::date(QDateTime::currentDateTime()));
         QCOMPARE(series.poster, f.anime.posterUrl);
         QVERIFY(series.hasFolder);
         QVERIFY(!series.filesGone);
@@ -722,7 +721,7 @@ private slots:
     }
 
     // 1 anime, 2 parallel active episodes: Hero summary names both episodes with percents,
-    // and the bottom bar shows "2 eps activos" with combined progress.
+    // and the bottom bar shows "2 ep. activos" with combined progress.
     void singleAnimeParallelActiveEpisodes() {
         Fixture f;
         QVERIFY(f.open());
@@ -747,7 +746,7 @@ private slots:
         QCOMPARE(view.activeSeriesCount(), 1);
         QCOMPARE(view.activeTaskCount(), 2);
         QCOMPARE(view.pendingTaskCount(), 3);
-        QCOMPARE(view.barText(), QStringLiteral("Descargando Frieren · 2 eps activos · Ep. 4"));
+        QCOMPARE(view.barText(), QStringLiteral("Descargando Frieren · 2 ep. activos · Ep. 4"));
         QCOMPARE(view.barProgress(), 0.465);
         QCOMPARE(view.barPercentText(), QStringLiteral("47 %"));
         QCOMPARE(view.headerProgress(), 0.465);
@@ -791,7 +790,7 @@ private slots:
             QVERIFY2(view.barText().startsWith(QStringLiteral("Descargando 2 animes")),
                      qPrintable(view.barText()));
             QCOMPARE(view.barText(),
-                     QStringLiteral("Descargando 2 animes · 2 eps activos · Frieren ep. 2"));
+                     QStringLiteral("Descargando 2 animes · 2 ep. activos · Frieren ep. 2"));
             QCOMPARE(view.barProgress(), 0.40);
             QCOMPARE(view.barPercentText(), QStringLiteral("40 %"));
             QCOMPARE(view.current()->rowCount(), 1);
@@ -932,6 +931,61 @@ private slots:
         QVERIFY(err_many_view.barError());
         QCOMPARE(err_many_view.barText(), QStringLiteral("2 descargas con error"));
         QCOMPARE(err_many_view.pendingTaskCount(), 2);
+    }
+
+    void spanishGrammarInHeroAndWatchText() {
+        // Spanish singular/plural ETA phrases used in hero summary & detail.
+        QCOMPARE(app::display::shortRemainingPhrase(1), QStringLiteral("queda 1 s"));
+        QCOMPARE(app::display::shortRemainingPhrase(2), QStringLiteral("quedan 2 s"));
+        QCOMPARE(app::display::shortRemainingPhrase(60), QStringLiteral("queda 1 min"));
+        QCOMPARE(app::display::shortRemainingPhrase(3600), QStringLiteral("queda 1 h"));
+        QCOMPARE(app::display::remainingPhrase(1), QStringLiteral("queda menos de un minuto"));
+        QCOMPARE(app::display::remainingPhrase(3600), QStringLiteral("queda 1 h"));
+        QVERIFY(!app::display::remainingPhrase(3600).contains(QStringLiteral("0 min")));
+
+        // Cancelled task uses masculine "Cancelado" in display::download().
+        downloads::Task cancelled_task;
+        cancelled_task.state = downloads::TaskState::Cancelled;
+        QCOMPARE(app::display::download(cancelled_task), QStringLiteral("Cancelado"));
+
+        // Completed watching episode uses unified "Continuar ep. 1" (no middle dot).
+        Fixture watching;
+        QVERIFY(watching.open());
+        QVERIFY(watching.addOnDisk(1, 100'000'000));
+        QVERIFY(watching.repo->setWatchState(QStringLiteral("a"), 1, library::WatchState::Watching,
+                                             300'000, 1'440'000));
+        watching.manager->start(false);
+        app::DownloadsView vw(*watching.manager, *watching.library, *watching.player,
+                              *watching.settings);
+        QCOMPARE(vw.completed()->rows().size(), 1);
+        QCOMPARE(vw.completed()->rows().first().watchText, QStringLiteral("Continuar ep. 1"));
+    }
+
+    void isolatedProfileBlocksExternalFolderAndFileLaunches() {
+        Fixture f;
+        QVERIFY(f.open());
+        const auto completed = f.addOnDisk(1, 100'000'000);
+        QVERIFY(completed);
+        f.manager->start(false);
+
+        QStringList opened;
+        QStringList revealed;
+        app::DownloadsView view(*f.manager, *f.library, *f.player, *f.settings, nullptr,
+                                app::DownloadsView::Shell{
+                                    .open = [&](const QString& path) { opened.append(path); },
+                                    .reveal = [&](const QString& path) { revealed.append(path); }});
+
+        f.settings->setIsolated(true);
+        view.openSeriesFolder(QStringLiteral("a"));
+        view.showFile(completed->id);
+        QVERIFY(opened.isEmpty());
+        QVERIFY(revealed.isEmpty());
+
+        f.settings->setIsolated(false);
+        view.openSeriesFolder(QStringLiteral("a"));
+        view.showFile(completed->id);
+        QCOMPARE(opened.size(), 1);
+        QCOMPARE(revealed, QStringList{completed->targetPath});
     }
 };
 QTEST_GUILESS_MAIN(DownloadsViewTest)

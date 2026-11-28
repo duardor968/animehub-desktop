@@ -43,6 +43,8 @@ Item {
         const det = f.detail ?? ""
         if (ep !== "" && rem !== "")
             return ep + " · " + rem
+        if (ep === "" && rem !== "")
+            return rem
         if (det !== "") {
             const sep = det.indexOf(" · ")
             if (ep !== "" && sep >= 0)
@@ -179,7 +181,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            radius: 8
+            radius: Theme.radiusLg
             color: "transparent"
             border.width: 1
             border.color: Theme.stroke
@@ -246,19 +248,22 @@ Item {
                 text: root.featured.title ?? ""
                 background: null
                 onClicked: root.open(root.featured.slug)
-                Keys.onReturnPressed: clicked()
-                Keys.onEnterPressed: clicked()
+                Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+                Keys.onEnterPressed: event => { event.accepted = true; clicked() }
                 Keys.onRightPressed: root.next()
                 Accessible.name: text + (root.subtitleText !== "" ? ", " + root.subtitleText : "")
-                ToolTip.visible: hovered && titleLabel.truncated
-                ToolTip.delay: 500
+                Accessible.onPressAction: clicked()
+                ToolTip.visible: (hovered || (activeFocus && InputModality.keyboard))
+                                 && titleLabel.truncated
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
 
                 contentItem: Label {
                     id: titleLabel
                     text: heroTitleBtn.text
-                    color: heroTitleBtn.hovered ? "#ffffff" : Theme.ink
-                    font.pixelSize: root.compact ? 20 : 23
+                    color: heroTitleBtn.hovered ? Theme.accentInk : Theme.ink
+                    font.pixelSize: root.compact ? Theme.heading : 23
                     font.weight: Font.DemiBold
                     wrapMode: Text.Wrap
                     maximumLineCount: 2
@@ -295,8 +300,6 @@ Item {
                     glyphCode: Theme.icon.play
                     iconSize: 13
                     onClicked: root.act(root.featured.slug)
-                    Keys.onReturnPressed: clicked()
-                    Keys.onEnterPressed: clicked()
                     Keys.onRightPressed: root.next()
                     Accessible.name: text + ", " + (root.featured.title ?? "")
                 }
@@ -305,10 +308,11 @@ Item {
                     id: detailsButton
                     text: "Ver ficha"
                     onClicked: root.open(root.featured.slug)
-                    Keys.onReturnPressed: clicked()
-                    Keys.onEnterPressed: clicked()
+                    Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+                    Keys.onEnterPressed: event => { event.accepted = true; clicked() }
                     Keys.onRightPressed: root.next()
                     Accessible.name: "Ver ficha de " + (root.featured.title ?? "")
+                    Accessible.onPressAction: click()
                 }
             }
         }
@@ -317,7 +321,7 @@ Item {
     // Card-level keyboard focus frame matching PosterCard, never boxing only the headline text.
     FocusFrame {
         anchors.fill: parent
-        radiusInside: 8
+        radiusInside: Theme.radiusLg
         visible: heroTitleBtn.activeFocus && InputModality.keyboard
     }
 }

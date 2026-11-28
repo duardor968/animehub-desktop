@@ -13,4 +13,6 @@ SpeedGraphItem {
     jdColor: Theme.muted
     limitColor: Theme.limitLine
     axisColor: Theme.stroke
+    Accessible.role: Accessible.Graphic
+    Accessible.name: "Gráfica de velocidad de descarga"
 }

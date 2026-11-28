@@ -25,7 +25,7 @@ AbstractButton {
     readonly property int posterHeight: Math.round(width * 1.36)
     readonly property int bodyHeight: 88
     readonly property bool cardHovered: root.hovered || ribbonHover.hovered
-    readonly property color cardSurface: cardHovered ? "#1a202c" : Theme.surface
+    readonly property color cardSurface: cardHovered ? Theme.raised : Theme.surface
 
     implicitWidth: 180
     implicitHeight: posterHeight + bodyHeight
@@ -38,12 +38,24 @@ AbstractButton {
                      + (timeText !== "" ? ", " + timeText : "")
                      + (stateLabel !== "" ? ", " + stateLabel : "")
                      + (followed ? ", en tu biblioteca" : "")
+    Accessible.onPressAction: root.clicked()
     onClicked: root.activated()
-    Keys.onReturnPressed: clicked()
-    Keys.onEnterPressed: clicked()
-    Keys.onSpacePressed: clicked()
-    ToolTip.visible: root.hovered && !ribbonHover.hovered && titleLbl.truncated
-    ToolTip.delay: 500
+    Keys.onReturnPressed: event => {
+        event.accepted = true
+        root.clicked()
+    }
+    Keys.onEnterPressed: event => {
+        event.accepted = true
+        root.clicked()
+    }
+    Keys.onSpacePressed: event => {
+        event.accepted = true
+        root.clicked()
+    }
+    ToolTip.visible: (root.hovered || (root.activeFocus && InputModality.keyboard))
+                     && !ribbonHover.hovered && titleLbl.truncated
+    ToolTip.delay: Theme.tooltipDelay
+    ToolTip.timeout: Theme.tooltipTimeout
     ToolTip.text: title
 
     background: null
@@ -53,7 +65,7 @@ AbstractButton {
         Rectangle {
             id: cardMask
             anchors.fill: parent
-            radius: 8
+            radius: Theme.radiusLg
             visible: false
             layer.enabled: root.width > 0 && root.height > 0
         }
@@ -100,7 +112,7 @@ AbstractButton {
                     height: 34
                     gradient: Gradient {
                         GradientStop { position: 0.0; color: "transparent" }
-                        GradientStop { position: 1.0; color: Qt.rgba(12 / 255, 15 / 255, 21 / 255, 0.34) }
+                        GradientStop { position: 1.0; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0.34) }
                     }
                 }
 
@@ -115,15 +127,15 @@ AbstractButton {
                     topRightRadius: 0
                     bottomLeftRadius: 0
                     bottomRightRadius: 7
-                    color: Qt.rgba(14 / 255, 17 / 255, 22 / 255, 0.88)
+                    color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0.88)
 
                     Label {
                         id: timeLbl
                         anchors.verticalCenter: parent.verticalCenter
                         x: 10
                         text: root.timeText
-                        color: "#f2f5f9"
-                        font.pixelSize: 12
+                        color: Theme.ink
+                        font.pixelSize: Theme.caption
                         font.weight: Font.Bold
                         Accessible.ignored: true
                     }
@@ -139,6 +151,8 @@ AbstractButton {
                     width: 24
                     height: 30
                     ToolTip.visible: ribbonHover.hovered
+                    ToolTip.delay: Theme.tooltipDelay
+                    ToolTip.timeout: Theme.tooltipTimeout
                     ToolTip.text: "En tu biblioteca"
 
                     HoverHandler { id: ribbonHover }
@@ -178,7 +192,7 @@ AbstractButton {
                     height: 27
                     width: epRow.implicitWidth + 22
                     topLeftRadius: 0
-                    topRightRadius: 8
+                    topRightRadius: Theme.radiusLg
                     bottomLeftRadius: 0
                     bottomRightRadius: 0
                     color: root.cardSurface
@@ -203,8 +217,8 @@ AbstractButton {
                         Label {
                             id: epVal
                             text: root.epNumber
-                            color: "#f2f5f9"
-                            font.pixelSize: 12
+                            color: Theme.ink
+                            font.pixelSize: Theme.caption
                             font.weight: Font.Bold
                             Accessible.ignored: true
                         }
@@ -225,8 +239,8 @@ AbstractButton {
                     y: 9
                     width: parent.width - 24
                     text: root.title
-                    color: root.cardHovered ? "#ffffff" : Theme.ink
-                    font.pixelSize: 13
+                    color: root.cardHovered ? Theme.accentInk : Theme.ink
+                    font.pixelSize: Theme.body
                     font.weight: Font.DemiBold
                     lineHeight: 1.18
                     wrapMode: Text.WordWrap
@@ -249,15 +263,15 @@ AbstractButton {
         // Crisp outer 1 px hairline border framing the entire rounded card.
         Rectangle {
             anchors.fill: parent
-            radius: 8
+            radius: Theme.radiusLg
             color: "transparent"
             border.width: 1
-            border.color: root.cardHovered ? Qt.rgba(1, 1, 1, 0.20) : Qt.rgba(1, 1, 1, 0.08)
+            border.color: root.cardHovered ? Qt.rgba(1, 1, 1, 0.20) : Theme.pressSubtle
             Behavior on border.color { ColorAnimation { duration: 120 } }
         }
 
         FocusFrame {
-            radiusInside: 8
+            radiusInside: Theme.radiusLg
             visible: root.activeFocus && InputModality.keyboard
         }
     }

@@ -3,6 +3,7 @@
 #include "display.h"
 
 #include <QDateTime>
+#include <QRegularExpression>
 #include <QStringList>
 
 #include <algorithm>
@@ -32,24 +33,6 @@ QString modeDisplayName(AppSettings::UpdateMode mode) {
         return QStringLiteral("Manuales");
     }
     return QStringLiteral("Automáticas");
-}
-
-QString formatErrorSummary(const QString& raw) {
-    const QString trimmed = raw.trimmed();
-    if (trimmed.isEmpty()) {
-        return QStringLiteral("No se pudo comprobar");
-    }
-    const QString lower = trimmed.toLower();
-    if (lower.contains(QLatin1StringView("sin conexión")) ||
-        lower.contains(QLatin1StringView("host")) ||
-        lower.contains(QLatin1StringView("connection")) ||
-        lower.contains(QLatin1StringView("network")) ||
-        lower.contains(QLatin1StringView("timeout")) ||
-        lower.contains(QLatin1StringView("timed out")) ||
-        lower.contains(QLatin1StringView("unreachable"))) {
-        return QStringLiteral("Sin conexión");
-    }
-    return trimmed;
 }
 
 AppSettings::UpdateMode parsePreviewMode(const QString& mode, AppSettings::UpdateMode fallback) {
@@ -274,6 +257,140 @@ QString UpdateView::readySubtitleText() const {
     return QStringLiteral("Lista para instalar al reiniciar");
 }
 
+QString UpdateView::formatErrorSummary(const QString& raw) {
+    const QString trimmed = raw.trimmed();
+    if (trimmed.isEmpty()) {
+        return QStringLiteral("No se pudo comprobar");
+    }
+    const QString lower = trimmed.toLower();
+    if (lower == QStringLiteral("sin conexión")) {
+        return QStringLiteral("Sin conexión");
+    }
+    // Security / allowlist / redirect rejections MUST be checked before network keywords so
+    // "Blocked redirect to untrusted host" is never misclassified as offline.
+    if (lower.contains(QLatin1StringView("too many redirects"))) {
+        return QStringLiteral("Demasiadas redirecciones al descargar la actualización");
+    }
+    if (lower.contains(QLatin1StringView("redirect"))) {
+        return QStringLiteral("Redirección bloqueada por seguridad");
+    }
+    if (lower.contains(QLatin1StringView("untrusted host")) ||
+        lower.contains(QLatin1StringView("outside allowlist")) ||
+        lower.contains(QLatin1StringView("security policy")) ||
+        lower.contains(QLatin1StringView("not an allowed https")) ||
+        lower.contains(QLatin1StringView("no allowed https")) ||
+        lower.contains(QLatin1StringView("unsafe file path")) ||
+        lower.contains(QLatin1StringView("unsafe solid-tar")) ||
+        lower.contains(QLatin1StringView("non-regular tar"))) {
+        return QStringLiteral("Origen de actualización bloqueado por seguridad");
+    }
+    if (lower.contains(QLatin1StringView("revoked key"))) {
+        return QStringLiteral("Firma de actualización revocada");
+    }
+    if (lower.contains(QLatin1StringView("untrusted key"))) {
+        return QStringLiteral("Firma de actualización no confiable");
+    }
+    if (lower.contains(QLatin1StringView("ed25519")) ||
+        lower.contains(QLatin1StringView("signature"))) {
+        return QStringLiteral("No se pudo verificar la firma de la actualización");
+    }
+    if (lower.contains(QLatin1StringView("downgrade")) ||
+        lower.contains(QLatin1StringView("rollback")) ||
+        lower.contains(QLatin1StringView("releaseseq"))) {
+        return QStringLiteral("Actualización rechazada por seguridad");
+    }
+    if (lower.contains(QLatin1StringView("sha-256")) ||
+        lower.contains(QLatin1StringView("sha256")) ||
+        lower.contains(QLatin1StringView("checksum"))) {
+        return QStringLiteral("Falló la verificación de integridad de la actualización");
+    }
+    if (lower.contains(QLatin1StringView("size mismatch")) ||
+        lower.contains(QLatin1StringView("does not match")) ||
+        lower.contains(QLatin1StringView("truncated")) ||
+        lower.contains(QLatin1StringView("zstd")) ||
+        lower.contains(QLatin1StringView("decompress")) ||
+        lower.contains(QLatin1StringView("solid-tar")) ||
+        lower.contains(QLatin1StringView("ustar")) ||
+        lower.contains(QLatin1StringView("pack slice")) ||
+        lower.contains(QLatin1StringView("incomplete")) ||
+        lower.contains(QLatin1StringView("http 206")) ||
+        lower.contains(QLatin1StringView("offset alignment")) ||
+        lower.contains(QLatin1StringView("unsupported entry encoding"))) {
+        return QStringLiteral("El paquete de actualización llegó dañado o incompleto");
+    }
+    if (lower.contains(QLatin1StringView("no valid .ahpack")) ||
+        lower.contains(QLatin1StringView("no valid appimage")) ||
+        lower.contains(QLatin1StringView("invalid appimage")) ||
+        lower.contains(QLatin1StringView("no download urls")) ||
+        lower.contains(QLatin1StringView("no fallback release url"))) {
+        return QStringLiteral("No hay un paquete de actualización disponible para este sistema");
+    }
+    if (lower.contains(QLatin1StringView("manifest")) ||
+        lower.contains(QLatin1StringView("desktop release json")) ||
+        lower.contains(QLatin1StringView("minupdaterprotocol")) ||
+        lower.contains(QLatin1StringView("bridgeversion")) ||
+        lower.contains(QLatin1StringView("file entry"))) {
+        return QStringLiteral("La información de actualización no es válida");
+    }
+    if (lower.contains(QLatin1StringView("updater helper"))) {
+        return QStringLiteral("No se pudo iniciar el asistente de actualización");
+    }
+    if (lower.contains(QLatin1StringView("back up")) ||
+        lower.contains(QLatin1StringView("backup")) ||
+        lower.contains(QLatin1StringView("sqlite"))) {
+        return QStringLiteral("No se pudo crear la copia de seguridad previa");
+    }
+    if (lower.contains(QLatin1StringView("staging")) ||
+        lower.contains(QLatin1StringView("could not open")) ||
+        lower.contains(QLatin1StringView("could not create")) ||
+        lower.contains(QLatin1StringView("failed writing")) ||
+        lower.contains(QLatin1StringView("could not commit")) ||
+        lower.contains(QLatin1StringView("failed committing")) ||
+        lower.contains(QLatin1StringView("read error")) ||
+        lower.contains(QLatin1StringView("could not move")) ||
+        lower.contains(QLatin1StringView("could not rename")) ||
+        lower.contains(QLatin1StringView("could not finalize")) ||
+        lower.contains(QLatin1StringView("is missing")) ||
+        lower.contains(QLatin1StringView("disk")) ||
+        lower.contains(QLatin1StringView("permission"))) {
+        return QStringLiteral("No se pudieron guardar los archivos de actualización en el disco");
+    }
+    static const QRegularExpression kHttpStatus(QStringLiteral("^http\\s+(\\d{3})\\b"));
+    if (const auto match = kHttpStatus.match(lower); match.hasMatch()) {
+        const int code = match.captured(1).toInt();
+        if (code == 404) {
+            return QStringLiteral("No se encontró la actualización en el servidor");
+        }
+        if (code == 429) {
+            return QStringLiteral("El servidor de actualizaciones pidió esperar");
+        }
+        if (code >= 500) {
+            return QStringLiteral("El servidor de actualizaciones no está disponible");
+        }
+        return QStringLiteral("El servidor de actualizaciones respondió con error (%1)").arg(code);
+    }
+    if (lower.contains(QStringLiteral("sin conexión")) ||
+        lower.contains(QLatin1StringView("host not found")) ||
+        lower.contains(QLatin1StringView("host unreachable")) ||
+        lower.contains(QLatin1StringView("unknown host")) ||
+        lower.contains(QLatin1StringView("host name was not found")) ||
+        (lower.startsWith(QLatin1StringView("host ")) &&
+         lower.contains(QLatin1StringView(" not found"))) ||
+        lower.contains(QLatin1StringView("remote host closed")) ||
+        lower.contains(QLatin1StringView("name resolution")) ||
+        lower.contains(QLatin1StringView("connection")) ||
+        lower.contains(QLatin1StringView("network")) ||
+        lower.contains(QLatin1StringView("timeout")) ||
+        lower.contains(QLatin1StringView("timed out")) ||
+        lower.contains(QLatin1StringView("unreachable")) ||
+        lower.contains(QLatin1StringView("ssl handshake")) ||
+        lower.contains(QLatin1StringView("tls")) || lower.contains(QLatin1StringView("socket")) ||
+        lower.contains(QLatin1StringView("proxy"))) {
+        return QStringLiteral("Sin conexión");
+    }
+    return QStringLiteral("No se pudo completar la actualización");
+}
+
 QString UpdateView::errorDetailText() const {
     return QStringLiteral("%1 · Sigues en la versión %2")
         .arg(formatErrorSummary(effectiveErrorMessage()), service_.currentVersion());
@@ -455,13 +572,13 @@ void UpdateView::previewState(const QString& state_name, const QString& mode_nam
         return;
     }
     Preview p;
-    p.targetVersion = QStringLiteral("0.5.0");
+    p.targetVersion = QStringLiteral("0.6.0");
     p.notes = QStringLiteral(
-        "• Actualización interna automática y manual con respaldo antes de aplicar.\n"
-        "• Instalador de Windows con detección de versión, protección de mpv y modo oscuro.\n"
-        "• Sincronización del inicio automático con el Administrador de tareas de Windows.");
+        "• Consistencia integral de iconos Fluent, menús contextuales, diálogos y barra lateral.\n"
+        "• Actualización de toolchain a Qt 6.12.1 LTS y mpv 0.42.0 MSVC.\n"
+        "• Mejoras de accesibilidad por teclado, plurales en español y vista a 820×600.");
     p.releaseUrl = QUrl(QStringLiteral("https://github.com/duardor968/animehub-desktop/releases/"
-                                       "tag/v0.5.0"));
+                                       "tag/v0.6.0"));
     p.manualDownloadUrl = p.releaseUrl;
     p.lastCheckedAtMs = QDateTime(QDate::currentDate(), QTime(12, 30)).toMSecsSinceEpoch();
 

@@ -58,7 +58,7 @@ struct DownloadSeriesRow {
     QString cancelText;       // what cancelling deletes, said in full; empty when nothing
     int filesOnDisk = 0;      // completed episodes whose file is still there
     QString diskText;         // "26 episodios · 9,1 GB"
-    QString watchText;        // "Ver ep. 5", "Continuar · Ep. 13"; empty when nothing to watch
+    QString watchText;        // "Ver ep. 5", "Continuar ep. 13"; empty when nothing to watch
     bool hasFolder = false;
     // Why it does not go as it should, beyond failures: "MEGA llegó a su límite · se libera a las
     // 15:20 · sigue con Pixeldrain". Empty when nothing to say.

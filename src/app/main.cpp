@@ -247,9 +247,10 @@ int main(int argc, char* argv[]) {
     }
     const auto sizeMatch = QRegularExpression(QStringLiteral("^([0-9]{3,4})x([0-9]{3,4})$"))
                                .match(parser.value(smoke_size));
-    const QStringList smokePages{QStringLiteral("library"),  QStringLiteral("catalog"),
-                                 QStringLiteral("schedule"), QStringLiteral("downloads"),
-                                 QStringLiteral("settings"), QStringLiteral("linked-devices")};
+    const QStringList smokePages{QStringLiteral("library"),       QStringLiteral("library-grid"),
+                                 QStringLiteral("catalog"),       QStringLiteral("schedule"),
+                                 QStringLiteral("downloads"),     QStringLiteral("settings"),
+                                 QStringLiteral("linked-devices")};
     if (smoke && (!sizeMatch.hasMatch() || !smokePages.contains(parser.value(smoke_page))))
         return 2;
     const QStringList smokeSettings{QStringLiteral("downloads"), QStringLiteral("general"),
@@ -429,7 +430,9 @@ int main(int argc, char* argv[]) {
             auto* page = window->findChild<QObject*>(QStringLiteral("libraryPage"));
             if (!page)
                 return 5;
-            if (parser.isSet(smoke_franchise)) {
+            if (parser.value(smoke_page) == u"library-grid") {
+                page->setProperty("showGrid", true);
+            } else if (parser.isSet(smoke_franchise)) {
                 page->setProperty("selected", QString());
                 page->setProperty("selectedGroup", smokeFranchiseId);
                 controller.library()->openFranchise(smokeFranchiseId);

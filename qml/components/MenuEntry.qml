@@ -12,14 +12,15 @@ MenuItem {
 
     // Qt aligns the text of a menu's items to the widest padding; this one leaves the icon column.
     implicitTextPadding: 16 + spacing
+    Accessible.onPressAction: entry.click()
 
     indicator: Glyph {
         x: entry.mirrored ? entry.width - width - entry.rightPadding : entry.leftPadding
         y: entry.topPadding + (entry.availableHeight - height) / 2
         width: 16
         height: 16
-        visible: entry.glyph !== "" || entry.checked
-        glyph: entry.glyph !== "" ? entry.glyph : Theme.icon.check
+        visible: entry.checkable ? entry.checked : entry.glyph !== ""
+        glyph: entry.checkable ? Theme.icon.check : entry.glyph
         color: entry.palette.text
     }
 }

@@ -202,7 +202,11 @@ std::expected<void, QString> Player::playWithMpv(const PlayRequest& request,
     mpv.setStandardOutputFile(QProcess::nullDevice());
     mpv.setStandardErrorFile(QProcess::nullDevice());
     if (!mpv.startDetached()) {
+#ifdef Q_OS_WIN
         return std::unexpected(QStringLiteral("No se pudo abrir el reproductor incluido (mpv)."));
+#else
+        return std::unexpected(QStringLiteral("No se pudo abrir mpv."));
+#endif
     }
     session_ = std::move(session);
     auto* socket = &session_->socket;

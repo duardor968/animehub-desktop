@@ -1,5 +1,6 @@
 #include "app/app_settings.h"
 
+#include <QDir>
 #include <QFile>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -178,8 +179,10 @@ private slots:
         settings.setProviderEnabled(QStringLiteral("PIXELDRAIN"), false);
         settings.setProviderEnabled(QStringLiteral("TRANSFERIT"), false);
         const auto onlyMega =
-            QStringLiteral("MEGA:on!Al menos un proveedor Pixeldrain:off transfer.it:off");
+            QStringLiteral("MEGA:on!Al menos un servidor Pixeldrain:off transfer.it:off");
         QCOMPARE(state(), onlyMega + withoutJd);
+        QCOMPARE(settings.nativeDownloadDirectory(),
+                 QDir::toNativeSeparators(settings.downloadDirectory()));
         settings.setProviderEnabled(QStringLiteral("MEGA"), false);
         QCOMPARE(settings.providers(), QList<api::Provider>{api::Provider::Mega});
         // With JDownloader, MP4Upload comes back as it was left, and MEGA may go off.

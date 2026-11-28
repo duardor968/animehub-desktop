@@ -9,7 +9,7 @@
 namespace animehub::app {
 
 // Serves Segoe Fluent Icons glyphs (`image://glyph/e768`) and solid geometric vector icons
-// (`pot-play`, `pot-pause`, `pot-stop`, `bookmark-ribbon`), with optional `?color=RRGGBB`
+// (`pot-play`, `pot-pause`, `bookmark-ribbon`), with optional `?color=RRGGBB`
 // tinting (default white so controls can still tint with `icon.color`).
 class GlyphProvider final : public QQuickImageProvider {
 public:

@@ -153,7 +153,9 @@ AppController::AppController(AppPaths paths, QObject* parent)
     auto database =
         storage::Database::open(QDir(paths_.data).filePath(QStringLiteral("library.sqlite3")));
     if (!database) {
-        problem_ = QStringLiteral("No se pudo abrir la biblioteca: ") + database.error().message;
+        qWarning("database open: %s", qPrintable(database.error().message));
+        problem_ = QStringLiteral("No se pudo abrir la biblioteca: ") +
+                   display::storageError(database.error().message);
         return;
     }
     database_ = std::move(*database);
@@ -204,7 +206,8 @@ AppController::AppController(AppPaths paths, QObject* parent)
     applyLimit();
     connect(settings_.get(), &AppSettings::speedLimitChanged, this, applyLimit);
     connect(aria2_.get(), &downloads::Aria2::speedLimitFailed, this, [this](const QString& error) {
-        emit message(QStringLiteral("No se pudo aplicar el límite de velocidad: ") + error, true);
+        qWarning("aria2 speed limit: %s", qPrintable(error));
+        emit message(display::speedLimitError(error), true);
     });
     mega_ = std::make_unique<downloads::mega::Api>(network_);
     pixeldrain_ = std::make_unique<downloads::pixeldrain::Api>(network_);
@@ -218,14 +221,15 @@ AppController::AppController(AppPaths paths, QObject* parent)
                 [this] {
                     return paths_.detectJDownloader ? platform::jdownloaderExecutable() : QString();
                 },
-            // A test profile never starts the user's JDownloader nor their browser.
+            // A test or smoke profile never starts the user's JDownloader nor their browser.
             .start =
                 [this](const QString& program) {
-                    return !paths_.isolated && QProcess::startDetached(program, {});
+                    return !paths_.isolated && !paths_.smoke &&
+                           QProcess::startDetached(program, {});
                 },
             .openUrl =
                 [this](const QUrl& url) {
-                    if (!paths_.isolated)
+                    if (!paths_.isolated && !paths_.smoke)
                         QDesktopServices::openUrl(url);
                 }});
     downloads_ = std::make_unique<downloads::DownloadManager>(
@@ -234,8 +238,8 @@ AppController::AppController(AppPaths paths, QObject* parent)
             myjd_.get(),
             // JDownloader opens in the tray ("-minimize") only when a hand-over finds it closed.
             [this] {
-                if (paths_.isolated)
-                    return false; // a test profile never starts the user's JDownloader
+                if (paths_.isolated || paths_.smoke)
+                    return false; // a test or smoke profile never starts the user's JDownloader
                 auto executable = settings_->jdExecutable();
                 if (!QFileInfo(executable).isFile())
                     executable = platform::jdownloaderExecutable();
@@ -296,14 +300,47 @@ AppController::AppController(AppPaths paths, QObject* parent)
                                             .potPlayer = playback::platformPotPlayer(),
                                             .systemApplication = platform::defaultApplication};
         },
-        [](const QString& path) { return shell::open(path); });
+        [this](const QString& path) {
+            return !paths_.isolated && !paths_.smoke && shell::open(path);
+        });
     connect(player_.get(), &playback::Player::progressChanged, library_.get(),
             &library::LibraryService::announce);
 
-    const Services services{*api_, *library_, *downloads_, *player_, *settings_};
+    const Services::Shell anime_shell{.open =
+                                          [this](const QString& path) {
+                                              if (!paths_.isolated && !paths_.smoke) {
+                                                  shell::open(path);
+                                              }
+                                          },
+                                      .reveal =
+                                          [this](const QString& path) {
+                                              if (!paths_.isolated && !paths_.smoke) {
+                                                  shell::reveal(path);
+                                              }
+                                          },
+                                      .openUrl =
+                                          [this](const QUrl& url) {
+                                              if (!paths_.isolated && !paths_.smoke) {
+                                                  QDesktopServices::openUrl(url);
+                                              }
+                                          }};
+    const Services services{*api_, *library_, *downloads_, *player_, *settings_, anime_shell};
     library_model_ = std::make_unique<LibraryModel>(*library_, *downloads_, *api_);
     catalog_view_ = std::make_unique<CatalogView>(*api_, *library_model_);
-    downloads_view_ = std::make_unique<DownloadsView>(*downloads_, *library_, *player_, *settings_);
+    downloads_view_ = std::make_unique<DownloadsView>(
+        *downloads_, *library_, *player_, *settings_, nullptr,
+        DownloadsView::Shell{.open =
+                                 [this](const QString& path) {
+                                     if (!paths_.isolated && !paths_.smoke) {
+                                         shell::open(path);
+                                     }
+                                 },
+                             .reveal =
+                                 [this](const QString& path) {
+                                     if (!paths_.isolated && !paths_.smoke) {
+                                         shell::reveal(path);
+                                     }
+                                 }});
     connect(downloads_view_.get(), &DownloadsView::windowShownChanged, this,
             [this] { library_model_->setWindowShown(downloads_view_->windowShown()); });
     connect(jdownloader_view_.get(), &JDownloaderView::connectionReady, downloads_view_.get(),
@@ -322,7 +359,7 @@ AppController::AppController(AppPaths paths, QObject* parent)
     const QString appimage_env;
     update_ctx.executablePath = QCoreApplication::applicationFilePath();
 #endif
-    update_ctx.currentVersion = update::SemVer::parse(version()).value_or(update::SemVer{0, 4, 0});
+    update_ctx.currentVersion = update::SemVer::parse(version()).value_or(update::SemVer{0, 6, 0});
     update_ctx.installMode = update::UpdateService::detectInstallMode(
         update_ctx.installDir, update_ctx.executablePath, appimage_env);
     update_ctx.apiBaseUrl = api_options.baseUrl;
@@ -669,25 +706,29 @@ void AppController::continueWatching(const QString& slug) {
     const auto episode = library_repository_->episode(slug, number);
     if (episode && *episode && !(*episode)->filePath.isEmpty()) {
         const auto& file = **episode;
+        const bool single = anime.episodeCount.value_or(0) == 1 ||
+                            (!anime.episodeCount && anime.knownEpisodes == 1 &&
+                             anime.status == api::AnimeStatus::Finished);
         const auto started = player_->play(
             {.slug = slug,
              .number = number,
              .filePath = file.filePath,
-             .title = anime.title + QStringLiteral(" · ") + display::episode(number),
+             .title = single ? anime.title
+                             : anime.title + QStringLiteral(" · ") + display::episode(number),
              .startMs = file.state == library::WatchState::Watching ? file.positionMs : 0});
         if (!started) {
             if (!QFile::exists(file.filePath) &&
                 library_repository_->clearEpisodeFile(slug, number)) {
                 library_->announce(slug);
             }
-            emit message(started.error(), true);
+            emit message(display::storageError(started.error()), true);
         }
         return;
     }
     if (const auto queued =
             downloads_->enqueue(slug, number, anime.title, downloads::TaskOrigin::Manual);
         !queued) {
-        emit message(queued.error(), true);
+        emit message(display::storageError(queued.error()), true);
     }
 }
 
@@ -760,12 +801,18 @@ void AppController::quit() {
 }
 
 void AppController::openDownloadFolder() {
+    if (paths_.isolated || paths_.smoke) {
+        return;
+    }
     const auto folder = settings_->downloadDirectory();
     QDir().mkpath(folder);
     shell::open(folder);
 }
 
 void AppController::openDataDirectory() {
+    if (paths_.isolated || paths_.smoke) {
+        return;
+    }
     QDir().mkpath(paths_.data);
     shell::open(paths_.data);
 }
@@ -791,7 +838,9 @@ void AppController::copyToClipboard(const QString& text) {
 }
 
 void AppController::openUrl(const QUrl& url) {
-    QDesktopServices::openUrl(url);
+    if (!paths_.isolated && !paths_.smoke) {
+        QDesktopServices::openUrl(url);
+    }
 }
 
 void AppController::tintTitleBar(QWindow* window, const QColor& background, const QColor& text) {

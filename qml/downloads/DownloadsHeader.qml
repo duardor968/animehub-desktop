@@ -66,16 +66,24 @@ Rectangle {
         focusPolicy: Qt.StrongFocus
         topPadding: 4
         bottomPadding: 4
-        leftPadding: 8
-        rightPadding: 7
+        leftPadding: root.narrow ? 6 : 8
+        rightPadding: root.narrow ? 5 : 7
         Accessible.role: Accessible.Button
         Accessible.name: active ? "Límite de velocidad: " + root.settings.speedLimitText
                                 : "Limitar velocidad de descarga"
         Accessible.description: "Abrir control de límite de velocidad"
-        Accessible.onPressAction: clicked()
-        Keys.onReturnPressed: clicked()
-        Keys.onEnterPressed: clicked()
-        ToolTip.visible: hovered && !limitEditor.opened
+        Accessible.onPressAction: control.click()
+        Keys.onReturnPressed: event => {
+            event.accepted = true
+            control.click()
+        }
+        Keys.onEnterPressed: event => {
+            event.accepted = true
+            control.click()
+        }
+        ToolTip.visible: (hovered || (activeFocus && InputModality.keyboard)) && !limitEditor.opened
+        ToolTip.delay: Theme.tooltipDelay
+        ToolTip.timeout: Theme.tooltipTimeout
         ToolTip.text: active ? "Cambiar o quitar el límite de velocidad"
                              : "Limitar velocidad de descarga"
 
@@ -92,22 +100,28 @@ Rectangle {
             border.color: Qt.rgba(Theme.limitLine.r, Theme.limitLine.g, Theme.limitLine.b,
                                   control.hovered || control.down ? 0.38 : 0.22)
 
-            FocusFrame { visible: control.activeFocus && InputModality.keyboard }
+            FocusFrame {
+                visible: control.activeFocus && InputModality.keyboard
+                radiusInside: Theme.radius
+            }
         }
 
         contentItem: RowLayout {
-            spacing: 5
+            spacing: root.narrow ? 4 : 5
 
             Label {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 text: control.text
                 color: control.ink
-                font.pixelSize: 12
+                font.pixelSize: Theme.caption
                 font.weight: control.active ? Font.DemiBold : Font.Medium
+                elide: Text.ElideRight
                 Accessible.ignored: true
             }
             Glyph {
                 glyph: limitEditor.opened && limitEditor.anchorButton === control
-                       ? Theme.icon.collapseAll : Theme.icon.expandAll
+                       ? Theme.icon.chevronUp : Theme.icon.chevronDown
                 size: 10
                 color: control.ink
             }
@@ -220,8 +234,20 @@ Rectangle {
             icon.source: Theme.source(Theme.icon.more)
             display: AbstractButton.IconOnly
             text: "Más opciones de Descargas"
-            ToolTip.visible: hovered
+            ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+            ToolTip.delay: Theme.tooltipDelay
+            ToolTip.timeout: Theme.tooltipTimeout
             ToolTip.text: "Más opciones"
+            Accessible.name: text
+            Accessible.onPressAction: pageMore.click()
+            Keys.onReturnPressed: event => {
+                event.accepted = true
+                pageMore.click()
+            }
+            Keys.onEnterPressed: event => {
+                event.accepted = true
+                pageMore.click()
+            }
             onClicked: pageMenu.show(pageMore, true)
         }
     }
@@ -270,7 +296,20 @@ Rectangle {
                 Accessible.role: Accessible.Heading
                 Accessible.name: root.downloads.headerTitle
                 Accessible.description: "Abrir ficha del anime"
-                Accessible.onPressAction: clicked()
+                Accessible.onPressAction: titleButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    titleButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    titleButton.click()
+                }
+                ToolTip.visible: (hovered || (activeFocus && InputModality.keyboard))
+                                 && titleLabel.truncated
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
+                ToolTip.text: root.downloads.headerTitle
                 onClicked: root.animeRequested(root.downloads.headerSlug)
 
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
@@ -285,14 +324,12 @@ Rectangle {
                 contentItem: Label {
                     id: titleLabel
                     text: root.downloads.headerTitle
-                    color: titleButton.hovered ? "#ffffff" : Theme.ink
-                    font.pixelSize: root.narrow ? 18 : 20
+                    color: titleButton.hovered ? Theme.accentInk : Theme.ink
+                    font.pixelSize: root.narrow ? Theme.subtitle : Theme.heading
                     font.weight: Font.DemiBold
                     font.underline: titleButton.hovered
                     elide: Text.ElideRight
                     Accessible.ignored: true
-                    ToolTip.visible: titleButton.hovered && truncated
-                    ToolTip.text: text
                 }
             }
 
@@ -301,9 +338,11 @@ Rectangle {
                 Layout.fillWidth: true
                 text: root.summaryLine
                 color: root.summaryColor
-                font.pixelSize: 13
+                font.pixelSize: Theme.small
                 elide: Text.ElideRight
                 ToolTip.visible: summaryHover.hovered && truncated
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
                 HoverHandler { id: summaryHover }
             }
@@ -330,9 +369,11 @@ Rectangle {
                         visible: currentMeta.engineLine !== ""
                         text: currentMeta.engineLine
                         color: Theme.muted
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.caption
                         elide: Text.ElideMiddle
                         ToolTip.visible: engineHover.hovered && truncated
+                        ToolTip.delay: Theme.tooltipDelay
+                        ToolTip.timeout: Theme.tooltipTimeout
                         ToolTip.text: text
                         HoverHandler { id: engineHover }
                     }
@@ -345,14 +386,28 @@ Rectangle {
                             visible: root.mode !== DownloadsView.Failed
                             text: currentMeta.failedText
                             color: Theme.danger
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.caption
                         }
 
                         Button {
+                            id: heroRetryFailedButton
                             visible: currentMeta.canRetry
                             text: currentMeta.failed === 1 ? "Reintentar" : "Reintentar fallidos"
                             topPadding: 4
                             bottomPadding: 4
+                            Accessible.name: (currentMeta.failed === 1
+                                              ? "Reintentar episodio fallido de "
+                                              : "Reintentar episodios fallidos de ")
+                                             + root.downloads.headerTitle
+                            Accessible.onPressAction: heroRetryFailedButton.click()
+                            Keys.onReturnPressed: event => {
+                                event.accepted = true
+                                heroRetryFailedButton.click()
+                            }
+                            Keys.onEnterPressed: event => {
+                                event.accepted = true
+                                heroRetryFailedButton.click()
+                            }
                             onClicked: root.downloads.retryFailed(currentMeta.slug)
                         }
                     }
@@ -370,9 +425,11 @@ Rectangle {
                     Layout.maximumWidth: Math.ceil(implicitWidth)
                     text: root.downloads.headerNotice
                     color: Theme.warning
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.caption
                     elide: Text.ElideRight
                     ToolTip.visible: noticeHover.hovered && truncated
+                    ToolTip.delay: Theme.tooltipDelay
+                    ToolTip.timeout: Theme.tooltipTimeout
                     ToolTip.text: text
                     HoverHandler { id: noticeHover }
                 }
@@ -383,6 +440,16 @@ Rectangle {
                     text: "Reintentar ahora"
                     topPadding: 3
                     bottomPadding: 3
+                    Accessible.name: "Reintentar ahora las descargas en espera"
+                    Accessible.onPressAction: retryNow.click()
+                    Keys.onReturnPressed: event => {
+                        event.accepted = true
+                        retryNow.click()
+                    }
+                    Keys.onEnterPressed: event => {
+                        event.accepted = true
+                        retryNow.click()
+                    }
                     onClicked: root.downloads.retryMegaQuota()
                 }
 
@@ -419,13 +486,25 @@ Rectangle {
                     highlighted: false
                     text: root.expanded
                           ? "Ocultar episodios"
-                          : ("Ver episodios (" + root.downloads.headerTaskCount + ")")
+                          : ("Episodios (" + root.downloads.headerTaskCount + ")")
                     topPadding: 5
                     bottomPadding: 5
                     leftPadding: 12
                     rightPadding: 10
+                    Accessible.name: (root.expanded ? "Ocultar episodios de " : "Ver episodios de ")
+                                     + root.downloads.headerTitle + " ("
+                                     + root.downloads.headerTaskCount + ")"
                     Accessible.checkable: true
                     Accessible.checked: root.expanded
+                    Accessible.onPressAction: heroExpandButton.click()
+                    Keys.onReturnPressed: event => {
+                        event.accepted = true
+                        heroExpandButton.click()
+                    }
+                    Keys.onEnterPressed: event => {
+                        event.accepted = true
+                        heroExpandButton.click()
+                    }
                     onClicked: root.toggled(root.downloads.headerSlug)
 
                     contentItem: RowLayout {
@@ -434,13 +513,13 @@ Rectangle {
                         Label {
                             text: heroExpandButton.text
                             color: Theme.ink
-                            font.pixelSize: 13
+                            font.pixelSize: Theme.small
                             font.weight: Font.Medium
                             Accessible.ignored: true
                         }
 
                         Glyph {
-                            glyph: root.expanded ? Theme.icon.collapseAll : Theme.icon.expandAll
+                            glyph: root.expanded ? Theme.icon.chevronUp : Theme.icon.chevronDown
                             size: 10
                             color: Theme.muted
                         }
@@ -448,17 +527,28 @@ Rectangle {
                 }
 
                 Button {
+                    id: heroTransportAllButton
                     visible: root.downloads.canPauseAll || root.downloads.canResumeAll
                     highlighted: false
                     text: root.downloads.canPauseAll ? "Pausar todo" : "Reanudar todo"
                     icon.source: Theme.source(root.downloads.canPauseAll ? Theme.icon.pause
-                                                                         : Theme.icon.play)
+                                                                         : Theme.icon.download)
                     icon.width: 14
                     icon.height: 14
                     topPadding: 5
                     bottomPadding: 5
                     leftPadding: 12
                     rightPadding: 12
+                    Accessible.name: text
+                    Accessible.onPressAction: heroTransportAllButton.click()
+                    Keys.onReturnPressed: event => {
+                        event.accepted = true
+                        heroTransportAllButton.click()
+                    }
+                    Keys.onEnterPressed: event => {
+                        event.accepted = true
+                        heroTransportAllButton.click()
+                    }
                     onClicked: root.downloads.canPauseAll ? root.downloads.pauseAll()
                                                           : root.downloads.resumeAll()
                 }
@@ -487,8 +577,20 @@ Rectangle {
                             icon.source: Theme.source(Theme.icon.more)
                             display: AbstractButton.IconOnly
                             text: "Más opciones"
-                            ToolTip.visible: hovered
+                            ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                            ToolTip.delay: Theme.tooltipDelay
+                            ToolTip.timeout: Theme.tooltipTimeout
                             ToolTip.text: text
+                            Accessible.name: "Más opciones de " + actions.title
+                            Accessible.onPressAction: more.click()
+                            Keys.onReturnPressed: event => {
+                                event.accepted = true
+                                more.click()
+                            }
+                            Keys.onEnterPressed: event => {
+                                event.accepted = true
+                                more.click()
+                            }
                             onClicked: root.menuRequested(actions, more)
                         }
                     }
@@ -500,8 +602,20 @@ Rectangle {
                     icon.source: Theme.source(Theme.icon.more)
                     display: AbstractButton.IconOnly
                     text: "Más opciones de Descargas"
-                    ToolTip.visible: hovered
+                    ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                    ToolTip.delay: Theme.tooltipDelay
+                    ToolTip.timeout: Theme.tooltipTimeout
                     ToolTip.text: "Más opciones"
+                    Accessible.name: text
+                    Accessible.onPressAction: activeFallbackMore.click()
+                    Keys.onReturnPressed: event => {
+                        event.accepted = true
+                        activeFallbackMore.click()
+                    }
+                    Keys.onEnterPressed: event => {
+                        event.accepted = true
+                        activeFallbackMore.click()
+                    }
                     onClicked: pageMenu.show(activeFallbackMore, true)
                 }
             }
@@ -510,7 +624,7 @@ Rectangle {
         // Right telemetry block: C++ SpeedGraph + live speed + speed limit popover + session totals.
         ColumnLayout {
             id: telemetry
-            Layout.preferredWidth: root.wide ? 292 : root.width >= 1000 ? 268 : 232
+            Layout.preferredWidth: root.wide ? 292 : root.width >= 1000 ? 268 : 248
             Layout.minimumWidth: 224
             Layout.alignment: Qt.AlignVCenter
             spacing: 6
@@ -522,6 +636,9 @@ Rectangle {
                 samples: root.downloads.speedSamples
                 nativeSamples: root.downloads.nativeSpeedSamples
                 limit: root.settings.nativeLimitEnabled ? root.settings.nativeLimitKBps * 1000 : 0
+                Accessible.name: "Gráfica de velocidad: " + root.downloads.totalSpeedText
+                                 + (root.settings.nativeLimitEnabled
+                                    ? ", límite " + root.settings.speedLimitText : "")
 
                 TapHandler {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -532,6 +649,8 @@ Rectangle {
                     cursorShape: Qt.PointingHandCursor
                 }
                 ToolTip.visible: chartHover.hovered && !limitEditor.opened
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: "Cambiar límite de velocidad"
             }
 
@@ -539,11 +658,12 @@ Rectangle {
             RowLayout {
                 Layout.fillWidth: true
                 visible: root.downloads.jdActive
-                spacing: 10
+                spacing: 8
 
                 Item { Layout.fillWidth: true }
 
                 RowLayout {
+                    Layout.minimumWidth: 0
                     spacing: 4
 
                     Rectangle {
@@ -553,13 +673,17 @@ Rectangle {
                         color: Theme.accent
                     }
                     Label {
+                        Layout.minimumWidth: 0
                         text: "AnimeHub · " + root.downloads.nativeSpeedText
                         color: Theme.muted
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.micro
+                        font.features: ({ "tnum": 1 })
+                        elide: Text.ElideRight
                     }
                 }
 
                 RowLayout {
+                    Layout.minimumWidth: 0
                     spacing: 4
 
                     Rectangle {
@@ -569,9 +693,12 @@ Rectangle {
                         color: Theme.muted
                     }
                     Label {
+                        Layout.minimumWidth: 0
                         text: "JD · " + root.downloads.jdSpeedText
                         color: Theme.muted
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.micro
+                        font.features: ({ "tnum": 1 })
+                        elide: Text.ElideRight
                         Accessible.name: "JDownloader: " + root.downloads.jdSpeedText
                     }
                 }
@@ -582,21 +709,29 @@ Rectangle {
                 spacing: 6
 
                 Label {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: root.downloads.active.count > 0
                           ? (root.downloads.totalSpeedText + " total")
                           : root.downloads.totalSpeedText
                     color: Theme.ink
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.small
                     font.weight: Font.DemiBold
+                    font.features: ({ "tnum": 1 })
                     elide: Text.ElideRight
                     Accessible.name: "Velocidad actual: " + root.downloads.totalSpeedText
+                    HoverHandler { id: speedHover }
+                    ToolTip.visible: speedHover.hovered && truncated
+                    ToolTip.delay: Theme.tooltipDelay
+                    ToolTip.timeout: Theme.tooltipTimeout
+                    ToolTip.text: text
                 }
-
-                Item { Layout.fillWidth: true }
 
                 LimitTrigger {
                     id: activeLimitButton
                     objectName: visible ? "nativeLimitButton" : ""
+                    Layout.minimumWidth: 0
+                    Layout.maximumWidth: root.narrow ? 136 : 176
                     visible: !root.idle
                     onClicked: limitEditor.toggleFor(activeLimitButton)
                 }
@@ -607,9 +742,11 @@ Rectangle {
                 spacing: 8
 
                 Label {
+                    Layout.minimumWidth: 0
                     text: "Máx. " + root.downloads.peakText
                     color: Theme.muted
-                    font.pixelSize: 11
+                    font.pixelSize: Theme.micro
+                    font.features: ({ "tnum": 1 })
                     elide: Text.ElideRight
                     Accessible.name: "Velocidad máxima: " + root.downloads.peakText
                 }
@@ -617,9 +754,11 @@ Rectangle {
                 Item { Layout.fillWidth: true }
 
                 Label {
+                    Layout.minimumWidth: 0
                     text: "Sesión " + root.downloads.totalText
                     color: Theme.muted
-                    font.pixelSize: 11
+                    font.pixelSize: Theme.micro
+                    font.features: ({ "tnum": 1 })
                     elide: Text.ElideRight
                     Accessible.name: "Descargado en esta sesión: " + root.downloads.totalText
                 }

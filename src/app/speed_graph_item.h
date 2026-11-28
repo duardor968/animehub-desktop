@@ -21,7 +21,6 @@ class SpeedGraphItem : public QQuickItem {
     Q_PROPERTY(QColor jdColor READ jdColor WRITE setJdColor NOTIFY styleChanged)
     Q_PROPERTY(QColor limitColor READ limitColor WRITE setLimitColor NOTIFY styleChanged)
     Q_PROPERTY(QColor axisColor READ axisColor WRITE setAxisColor NOTIFY styleChanged)
-    Q_PROPERTY(bool showsJd READ showsJd NOTIFY showsJdChanged)
 
 public:
     explicit SpeedGraphItem(QQuickItem* parent = nullptr);
@@ -61,16 +60,11 @@ public:
     }
     void setAxisColor(const QColor& color);
 
-    [[nodiscard]] bool showsJd() const {
-        return shows_jd_;
-    }
-
 signals:
     void samplesChanged();
     void nativeSamplesChanged();
     void limitChanged();
     void styleChanged();
-    void showsJdChanged();
 
 protected:
     QSGNode* updatePaintNode(QSGNode* old_node, UpdatePaintNodeData* data) override;
@@ -80,7 +74,6 @@ protected:
 private:
     [[nodiscard]] qsizetype visibleBarCount(qreal item_width) const;
     [[nodiscard]] qreal nativeSampleAt(qsizetype visible_index, qsizetype bars, qreal total) const;
-    void recomputeShowsJd();
     void scheduleUpdate();
 
     QList<qreal> samples_;
@@ -90,7 +83,6 @@ private:
     QColor jd_color_{0x9a, 0xa1, 0xab};
     QColor limit_color_{0xff, 0x9d, 0x8f};
     QColor axis_color_{0x2a, 0x2f, 0x37};
-    bool shows_jd_ = false;
 };
 
 } // namespace animehub::app

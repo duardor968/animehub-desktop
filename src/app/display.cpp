@@ -70,9 +70,145 @@ QString remaining(qint64 seconds) {
         return QStringLiteral("menos de un minuto");
     }
     if (seconds < 3600) {
-        return QStringLiteral("%1 min").arg((seconds + 59) / 60);
+        const qint64 minutes = (seconds + 59) / 60;
+        return minutes >= 60 ? QStringLiteral("1 h") : QStringLiteral("%1 min").arg(minutes);
     }
-    return QStringLiteral("%1 h %2 min").arg(seconds / 3600).arg((seconds % 3600) / 60);
+    const qint64 hours = seconds / 3600;
+    const qint64 minutes = (seconds % 3600) / 60;
+    return minutes == 0 ? QStringLiteral("%1 h").arg(hours)
+                        : QStringLiteral("%1 h %2 min").arg(hours).arg(minutes);
+}
+
+QString remainingPhrase(qint64 seconds, bool capitalized) {
+    const auto singular = capitalized ? QStringLiteral("Queda ") : QStringLiteral("queda ");
+    const auto plural = capitalized ? QStringLiteral("Quedan ") : QStringLiteral("quedan ");
+    if (seconds < 60) {
+        return singular + QStringLiteral("menos de un minuto");
+    }
+    if (seconds < 3600) {
+        const qint64 minutes = (seconds + 59) / 60;
+        if (minutes >= 60) {
+            return singular + QStringLiteral("1 h");
+        }
+        return (minutes == 1 ? singular : plural) + QStringLiteral("%1 min").arg(minutes);
+    }
+    const qint64 hours = seconds / 3600;
+    const qint64 minutes = (seconds % 3600) / 60;
+    const auto duration = minutes == 0 ? QStringLiteral("%1 h").arg(hours)
+                                       : QStringLiteral("%1 h %2 min").arg(hours).arg(minutes);
+    return (hours == 1 ? singular : plural) + duration;
+}
+
+QString shortRemaining(qint64 seconds) {
+    if (seconds <= 0) {
+        return {};
+    }
+    if (seconds < 60) {
+        return QStringLiteral("%1 s").arg(seconds);
+    }
+    return remaining(seconds);
+}
+
+QString shortRemainingPhrase(qint64 seconds) {
+    if (seconds <= 0) {
+        return {};
+    }
+    if (seconds < 60) {
+        return seconds == 1 ? QStringLiteral("queda 1 s")
+                            : QStringLiteral("quedan %1 s").arg(seconds);
+    }
+    return remainingPhrase(seconds, false);
+}
+
+QString storageError(const QString& raw) {
+    const QString trimmed = raw.trimmed();
+    if (trimmed.isEmpty()) {
+        return QStringLiteral("Error al acceder a la biblioteca local.");
+    }
+    const QString lower = trimmed.toLower();
+    if (lower.contains(QLatin1StringView("written by a newer")) ||
+        lower.contains(QLatin1StringView("newer animehub"))) {
+        return QStringLiteral("La biblioteca fue creada por una versión más reciente de AnimeHub.");
+    }
+    if (lower.contains(QLatin1StringView("schema version"))) {
+        return QStringLiteral("No se pudo leer el formato de la biblioteca.");
+    }
+    if (lower.contains(QLatin1StringView("database is locked")) ||
+        lower.contains(QLatin1StringView("table is locked")) ||
+        lower.contains(QLatin1StringView("sqlite_busy")) ||
+        lower.contains(QLatin1StringView("busy"))) {
+        return QStringLiteral("La biblioteca está ocupada. Vuelve a intentarlo.");
+    }
+    if (lower.contains(QLatin1StringView("disk is full")) ||
+        lower.contains(QLatin1StringView("disk full")) ||
+        lower.contains(QLatin1StringView("no space")) ||
+        lower.contains(QLatin1StringView("sqlite_full"))) {
+        return QStringLiteral("No queda espacio en el disco.");
+    }
+    if (lower.contains(QLatin1StringView("readonly")) ||
+        lower.contains(QLatin1StringView("read-only")) ||
+        lower.contains(QLatin1StringView("permission denied")) ||
+        lower.contains(QLatin1StringView("access is denied")) ||
+        lower.contains(QLatin1StringView("unable to open database"))) {
+        return QStringLiteral(
+            "No se pudo escribir en la biblioteca. Comprueba los permisos de la carpeta.");
+    }
+    if (lower.contains(QLatin1StringView("malformed")) ||
+        lower.contains(QLatin1StringView("not a database")) ||
+        lower.contains(QLatin1StringView("corrupt")) ||
+        lower.contains(QLatin1StringView("file is encrypted"))) {
+        return QStringLiteral("El archivo de la biblioteca está dañado.");
+    }
+    if (lower.contains(QLatin1StringView("unknown personal anime")) ||
+        lower.contains(QLatin1StringView("unknown anime")) ||
+        lower.contains(QLatin1StringView("no such anime"))) {
+        return QStringLiteral("Este anime ya no está en la biblioteca.");
+    }
+    if (lower.contains(QLatin1StringView("empty franchise title"))) {
+        return QStringLiteral("El nombre de la franquicia no puede estar vacío.");
+    }
+    if (lower.contains(QLatin1StringView("unknown franchise"))) {
+        return QStringLiteral("Esta franquicia ya no existe.");
+    }
+    if (lower.contains(QLatin1StringView("invalid media path"))) {
+        return QStringLiteral("No se pudo registrar el archivo de vídeo.");
+    }
+    if (lower.contains(QLatin1StringView("vanished"))) {
+        return QStringLiteral("La descarga ya no existe.");
+    }
+    if (lower.contains(QLatin1StringView("destination outside"))) {
+        return QStringLiteral("La ruta de descarga no es válida.");
+    }
+    if (lower.contains(QLatin1StringView("foreign key")) ||
+        lower.contains(QLatin1StringView("constraint failed")) ||
+        lower.contains(QLatin1StringView("sqlite")) ||
+        lower.contains(QLatin1StringView("no such table")) ||
+        lower.contains(QLatin1StringView("no such column")) ||
+        lower.contains(QLatin1StringView("syntax error")) ||
+        lower.contains(QLatin1StringView("unable to")) ||
+        lower.contains(QLatin1StringView("failed")) ||
+        lower.contains(QLatin1StringView("cannot ")) ||
+        lower.contains(QLatin1StringView("invalid ")) ||
+        lower.startsWith(QLatin1StringView("error:"))) {
+        return QStringLiteral("No se pudo completar la operación en la biblioteca local.");
+    }
+    return trimmed;
+}
+
+QString speedLimitError(const QString& raw) {
+    const QString lower = raw.trimmed().toLower();
+    if (lower.contains(QLatin1StringView("connection")) ||
+        lower.contains(QLatin1StringView("refused")) ||
+        lower.contains(QLatin1StringView("closed")) ||
+        lower.contains(QLatin1StringView("timeout")) ||
+        lower.contains(QLatin1StringView("timed out")) ||
+        lower.contains(QLatin1StringView("not running")) ||
+        lower.contains(QLatin1StringView("stopped")) ||
+        lower.contains(QLatin1StringView("unreachable"))) {
+        return QStringLiteral(
+            "No se pudo aplicar el límite de velocidad: el motor de descargas no respondió.");
+    }
+    return QStringLiteral("No se pudo aplicar el límite de velocidad en el motor de descargas.");
 }
 
 QString status(api::AnimeStatus status) {
@@ -222,8 +358,7 @@ QString download(const downloads::Task& task) {
         }
         parts.append(speed(task.bytesPerSecond));
         if (task.bytesPerSecond > 0 && task.bytesTotal > task.bytesDone) {
-            parts.append(QStringLiteral("quedan ") +
-                         remaining((task.bytesTotal - task.bytesDone) / task.bytesPerSecond));
+            parts.append(remainingPhrase((task.bytesTotal - task.bytesDone) / task.bytesPerSecond));
         }
         return parts.join(QStringLiteral(" · "));
     }
@@ -249,7 +384,7 @@ QString download(const downloads::Task& task) {
     case TaskState::Failed:
         return issue(task);
     case TaskState::Cancelled:
-        return QStringLiteral("Cancelada");
+        return QStringLiteral("Cancelado");
     }
     return {};
 }

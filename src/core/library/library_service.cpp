@@ -155,7 +155,7 @@ Stored<Trashed> LibraryService::trash(const QString& slug,
                         return std::unexpected(storage::StorageError{
                             QStringLiteral(
                                 "El archivo %1 contiene otros episodios fuera de la selección. "
-                                "Selecciona todos sus episodios para moverlo a la papelera.")
+                                "Selecciona todos sus episodios para moverlo a la Papelera.")
                                 .arg(QFileInfo(location.path).fileName())});
                     }
                     protected_paths.insert(location.path);

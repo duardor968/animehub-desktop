@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import AnimeHub
 
 // Today's airing episodes among followed library anime ("Hoy · <Día>"), with a direct
-// "Ver horario ›" jump to the top-level Horario tab. Stays visible with a compact dignified
+// "Ver horario" jump to the top-level Horario tab. Stays visible with a compact dignified
 // empty block when 0 followed anime air today so the full schedule is always one click away.
 Column {
     id: root
@@ -32,7 +32,7 @@ Column {
 
     RowLayout {
         width: root.width
-        spacing: 8
+        spacing: root.rail ? 5 : 8
 
         Rectangle {
             Layout.alignment: Qt.AlignVCenter
@@ -42,13 +42,31 @@ Column {
             color: Theme.success
         }
 
+        TextMetrics {
+            id: headingMetrics
+            font: headingLabel.font
+            text: headingLabel.text
+        }
+
         Label {
+            id: headingLabel
             Layout.alignment: Qt.AlignVCenter
+            Layout.fillWidth: root.rail
+            Layout.preferredWidth: Math.ceil(headingMetrics.advanceWidth) + 2
+            Layout.maximumWidth: root.rail ? (Math.ceil(headingMetrics.advanceWidth) + 2) : 10000
+            Layout.minimumWidth: 0
             text: root.heading !== "" ? root.heading : "Hoy"
             color: Theme.ink
-            font.pixelSize: root.rail ? 15 : Theme.subtitle
+            font.pixelSize: root.rail ? Theme.subheading : Theme.subtitle
             font.weight: Font.DemiBold
+            elide: Text.ElideRight
             Accessible.role: Accessible.Heading
+            ToolTip.visible: headingHover.hovered && truncated
+            ToolTip.delay: Theme.tooltipDelay
+            ToolTip.timeout: Theme.tooltipTimeout
+            ToolTip.text: text
+
+            HoverHandler { id: headingHover }
         }
 
         Label {
@@ -56,7 +74,7 @@ Column {
             Layout.alignment: Qt.AlignVCenter
             text: "(" + root.itemCount + ")"
             color: Theme.muted
-            font.pixelSize: root.rail ? 14 : Theme.subtitle
+            font.pixelSize: root.rail ? Theme.subheading : Theme.subtitle
         }
 
         Control {
@@ -67,7 +85,8 @@ Column {
             Accessible.role: Accessible.StaticText
             Accessible.name: "Horario en caché; los retrasos se ocultan hasta reconectar"
             ToolTip.visible: staleHover.hovered || (activeFocus && InputModality.keyboard)
-            ToolTip.delay: 250
+            ToolTip.delay: Theme.tooltipDelay
+            ToolTip.timeout: Theme.tooltipTimeout
             ToolTip.text: Accessible.name
 
             HoverHandler { id: staleHover }
@@ -98,6 +117,8 @@ Column {
         Item {
             visible: root.rail
             Layout.fillWidth: true
+            Layout.preferredWidth: 0
+            Layout.minimumWidth: 2
         }
 
         AbstractButton {
@@ -106,34 +127,46 @@ Column {
             Layout.alignment: Qt.AlignVCenter
             hoverEnabled: true
             focusPolicy: Qt.StrongFocus
-            leftPadding: 4
-            rightPadding: 4
+            leftPadding: 2
+            rightPadding: 2
             topPadding: 3
             bottomPadding: 3
-            text: "Ver horario ›"
+            text: "Ver horario"
             Accessible.name: "Ver horario completo"
+            Accessible.onPressAction: clicked()
             onClicked: root.openSchedule()
-            Keys.onReturnPressed: clicked()
-            Keys.onEnterPressed: clicked()
+            Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+            Keys.onEnterPressed: event => { event.accepted = true; clicked() }
 
             background: Rectangle {
-                radius: 4
-                color: scheduleLink.down ? Qt.rgba(47 / 255, 129 / 255, 247 / 255, 0.16)
-                       : scheduleLink.hovered ? Qt.rgba(47 / 255, 129 / 255, 247 / 255, 0.08)
+                radius: Theme.radiusSm
+                color: scheduleLink.down ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.16)
+                       : scheduleLink.hovered ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.08)
                        : "transparent"
                 Behavior on color { ColorAnimation { duration: 100 } }
             }
 
-            contentItem: Label {
-                text: scheduleLink.text
-                color: scheduleLink.hovered ? Theme.ink : Theme.accentText
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                Accessible.ignored: true
+            contentItem: RowLayout {
+                spacing: 2
+
+                Label {
+                    text: scheduleLink.text
+                    color: scheduleLink.hovered ? Theme.ink : Theme.accentText
+                    font.pixelSize: Theme.caption
+                    font.weight: Font.DemiBold
+                    Accessible.ignored: true
+                }
+
+                Glyph {
+                    Layout.alignment: Qt.AlignVCenter
+                    glyph: Theme.icon.chevronRight
+                    size: 9
+                    color: scheduleLink.hovered ? Theme.ink : Theme.accentText
+                }
             }
 
             FocusFrame {
-                radiusInside: 4
+                radiusInside: Theme.radiusSm
                 visible: scheduleLink.activeFocus && InputModality.keyboard
             }
         }
@@ -155,7 +188,7 @@ Column {
         bottomPadding: root.rail ? 4 : 0
         text: "Sin emisiones hoy"
         color: Theme.muted
-        font.pixelSize: 13
+        font.pixelSize: Theme.small
     }
 
     // Clean AbstractButton row (replaces ItemDelegate to eliminate FluentWinUI3's stray left bar).
@@ -176,7 +209,7 @@ Column {
             return modelData.caption ?? ""
         }
 
-        implicitHeight: Math.max(64, Math.ceil(rowLayout.implicitHeight) + topPadding + bottomPadding)
+        implicitHeight: 60
         leftPadding: 6
         rightPadding: 6
         topPadding: 6
@@ -185,18 +218,20 @@ Column {
         focusPolicy: Qt.StrongFocus
         text: modelData.title ?? ""
         onClicked: root.activated(modelData.slug)
-        Keys.onReturnPressed: clicked()
-        Keys.onEnterPressed: clicked()
+        Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+        Keys.onEnterPressed: event => { event.accepted = true; clicked() }
         Accessible.name: (modelData.title ?? "") + ", " + root.heading + ", "
                          + (modelData.caption ?? metaText)
-        ToolTip.visible: hovered && name.truncated
-        ToolTip.delay: 500
+        Accessible.onPressAction: clicked()
+        ToolTip.visible: (hovered || (activeFocus && InputModality.keyboard)) && name.truncated
+        ToolTip.delay: Theme.tooltipDelay
+        ToolTip.timeout: Theme.tooltipTimeout
         ToolTip.text: modelData.title ?? ""
 
         background: Rectangle {
-            radius: 6
-            color: entry.down ? Qt.rgba(1, 1, 1, 0.08)
-                   : entry.hovered ? Qt.rgba(1, 1, 1, 0.045) : "transparent"
+            radius: Theme.radius
+            color: entry.down ? Theme.pressSubtle
+                   : entry.hovered ? Theme.hoverSubtle : "transparent"
             Behavior on color { ColorAnimation { duration: 100 } }
         }
 
@@ -221,11 +256,11 @@ Column {
                     id: name
                     Layout.fillWidth: true
                     text: entry.modelData.title ?? ""
-                    color: entry.hovered ? "#ffffff" : Theme.ink
-                    font.pixelSize: root.rail ? 13 : Theme.body
+                    color: entry.hovered ? Theme.accentInk : Theme.ink
+                    font.pixelSize: root.rail ? Theme.small : Theme.body
                     font.weight: Font.Medium
-                    wrapMode: Text.Wrap
-                    maximumLineCount: 2
+                    wrapMode: Text.NoWrap
+                    maximumLineCount: 1
                     elide: Text.ElideRight
                     Accessible.ignored: true
                 }
@@ -255,7 +290,7 @@ Column {
         }
 
         FocusFrame {
-            radiusInside: 6
+            radiusInside: Theme.radius
             visible: entry.activeFocus && InputModality.keyboard
         }
     }

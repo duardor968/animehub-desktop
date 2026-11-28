@@ -68,6 +68,10 @@ QString AppSettings::downloadDirectory() const {
         settings_.value(kDownloadDirectory, default_download_directory_).toString());
 }
 
+QString AppSettings::nativeDownloadDirectory() const {
+    return QDir::toNativeSeparators(downloadDirectory());
+}
+
 void AppSettings::setDownloadDirectory(const QString& directory) {
     if (isolated_)
         return;
@@ -394,7 +398,7 @@ QVariantList AppSettings::providerSwitches() const {
             {QStringLiteral("checked"), checked},
             {QStringLiteral("enabled"), usable(provider) && !last},
             {QStringLiteral("reason"), !usable(provider) ? QStringLiteral("Necesita JDownloader")
-                                       : last            ? QStringLiteral("Al menos un proveedor")
+                                       : last            ? QStringLiteral("Al menos un servidor")
                                                          : QString()}});
     }
     return switches;

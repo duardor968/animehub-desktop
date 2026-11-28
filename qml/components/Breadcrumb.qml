@@ -52,11 +52,12 @@ RowLayout {
             Layout.minimumWidth: 0
             spacing: 6
 
-            Label {
+            Glyph {
                 visible: step.index > 0
-                text: "›"
+                glyph: Theme.icon.chevronRight
+                size: 9
                 color: Theme.faint
-                font.pixelSize: 13
+                Layout.alignment: Qt.AlignVCenter
                 Accessible.ignored: true
             }
 
@@ -78,6 +79,7 @@ RowLayout {
                 hoverEnabled: true
                 focusPolicy: Qt.StrongFocus
                 Accessible.role: Accessible.Link
+                Accessible.onPressAction: clicked()
                 onClicked: step.modelData.go()
                 Keys.onReturnPressed: clicked()
                 Keys.onEnterPressed: clicked()
@@ -86,7 +88,7 @@ RowLayout {
                     text: link.text
                     color: link.hovered || (link.activeFocus && InputModality.keyboard)
                            ? Theme.ink : Theme.muted
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.small
                     font.underline: link.hovered
                     elide: Text.ElideRight
                 }
@@ -105,18 +107,19 @@ RowLayout {
                 Layout.minimumWidth: 0
                 text: step.modelData.text
                 color: Theme.muted
-                font.pixelSize: 13
+                font.pixelSize: Theme.small
                 elide: Text.ElideRight
                 Accessible.role: Accessible.StaticText
             }
         }
     }
 
-    Label {
+    Glyph {
         visible: root.hasCurrent && root.steps.length > 0
-        text: "›"
+        glyph: Theme.icon.chevronRight
+        size: 9
         color: Theme.faint
-        font.pixelSize: 13
+        Layout.alignment: Qt.AlignVCenter
         Accessible.ignored: true
     }
 
@@ -126,7 +129,7 @@ RowLayout {
         Layout.minimumWidth: 0
         text: root.current
         color: Theme.muted
-        font.pixelSize: 13
+        font.pixelSize: Theme.small
         elide: Text.ElideRight
         Accessible.role: Accessible.StaticText
     }

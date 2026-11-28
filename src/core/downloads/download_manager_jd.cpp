@@ -63,8 +63,7 @@ void DownloadManager::jdRequest(qint64 id, const QString& path, const QJsonArray
          path.endsWith(u"/moveToDownloadlist")) &&
         (params.size() != 2 || params.first().toArray().isEmpty() ||
          !params.last().toArray().isEmpty())) {
-        fail(id, TaskIssue::Engine,
-             u"No se puede actuar sin identificadores propios de JDownloader."_s);
+        fail(id, TaskIssue::Engine, u"No se pudo identificar esta descarga en JDownloader."_s);
         return;
     }
     const auto generation = live_[id].generation;
@@ -99,7 +98,7 @@ void DownloadManager::jdRequest(qint64 id, const QString& path, const QJsonArray
                 // Never clear submission/job/IDs on disconnect: reconnect reconciles the same job.
                 retryLater(
                     id, TaskIssue::Engine,
-                    u"JDownloader no está disponible. Se conserva el trabajo para reconciliarlo."_s);
+                    u"JDownloader no está disponible. Se retomará el seguimiento al reconectar."_s);
                 return;
             }
             done(result);
@@ -224,8 +223,9 @@ void DownloadManager::submitJd(qint64 id, const QList<api::ResolvedLink>& links)
     if ((task.engine == DownloadEngine::JDownloaderLocal &&
          !jd::isLocalEndpoint(QUrl(task.engineEndpoint))) ||
         (task.engine == DownloadEngine::JDownloaderCloud && task.engineDevice.isEmpty())) {
-        fail(id, TaskIssue::Engine,
-             u"Configura una API local de loopback o un dispositivo MyJDownloader."_s);
+        fail(
+            id, TaskIssue::Engine,
+            u"Configura JDownloader en este PC o conecta tu cuenta de MyJDownloader en Ajustes."_s);
         return;
     }
     if (!QDir().mkpath(task.engineDestination)) {
@@ -260,7 +260,7 @@ void DownloadManager::submitJd(qint64 id, const QList<api::ResolvedLink>& links)
             if (task.engineJobId <= 0) {
                 fail(
                     id, TaskIssue::Engine,
-                    u"JDownloader no devolvió el identificador del trabajo. No se reenviará automáticamente."_s);
+                    u"JDownloader no confirmó la descarga. No se volverá a enviar automáticamente."_s);
                 return;
             }
             task.enginePhase =
@@ -282,7 +282,7 @@ void DownloadManager::pollJd(qint64 id) {
     if (task.engineJobId <= 0) {
         fail(
             id, TaskIssue::Engine,
-            u"La entrega a JDownloader quedó sin confirmar. Revisa el paquete AnimeHub antes de crear otro trabajo."_s);
+            u"La descarga en JDownloader quedó sin confirmar. Revísala en JDownloader antes de volver a enviarla."_s);
         return;
     }
     if (task.enginePhase == u"cancelling" || task.enginePhase == u"cancel_requested") {

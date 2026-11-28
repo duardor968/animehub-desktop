@@ -23,7 +23,6 @@ Row {
     signal chooseEpisodes()
 
     readonly property int action: view.primaryAction
-    readonly property string chevron: "e70d"
     readonly property bool mainIsAll: !view.single && action === AnimeView.DownloadAll
                                       && view.missingCount > 0
     readonly property bool offersAll: view.showSecondaryDownload
@@ -34,11 +33,11 @@ Row {
     readonly property bool pending: action === AnimeView.None
                                     && (!view.loaded || view.refreshing)
     visible: pending || (action !== AnimeView.None && action !== AnimeView.Upcoming)
-    height: 36
+    height: 34
     spacing: 8
 
-    // Single-piece seamless Fluent SplitButton: left action half, 1 px internal divider, and
-    // right 32 px chevron half inside one rounded surface with zero double-border seam.
+    // Single-piece seamless Fluent SplitButton matching AccentButton geometry & states: left
+    // action half, 1 px internal divider, and right 32 px chevron half inside one rounded surface.
     component SplitAction: Rectangle {
         id: split
 
@@ -56,22 +55,23 @@ Row {
         signal menuRequested()
 
         readonly property int surfaceInset: highlighted ? 0 : 1
-        readonly property color contentColor: !enabled
-                                              ? (highlighted ? Theme.muted : Theme.faint)
+        readonly property color contentColor: !enabled ? Theme.muted
                                               : (highlighted ? Theme.accentInk : Theme.ink)
         readonly property color dividerColor: highlighted
                                               ? Qt.rgba(1, 1, 1, enabled ? 0.22 : 0.12)
                                               : Theme.stroke
 
         implicitWidth: splitRow.implicitWidth
-        implicitHeight: 36
-        height: 36
-        radius: 4
-        color: highlighted
-               ? (enabled ? Theme.accent : Theme.accentDisabled)
-               : (enabled ? Theme.raised : Qt.rgba(Theme.raised.r, Theme.raised.g, Theme.raised.b, 0.55))
+        implicitHeight: 34
+        height: 34
+        radius: 5
+        color: !enabled
+               ? (highlighted ? Theme.accentDisabled : Theme.controlDisabled)
+               : (highlighted ? Theme.accent : Theme.raised)
         border.width: highlighted ? 0 : 1
-        border.color: Theme.stroke
+        border.color: !highlighted && enabled && (actionBtn.hovered || chevronBtn.hovered)
+                      ? "#3b4351" : Theme.stroke
+        Behavior on color { ColorAnimation { duration: 110 } }
 
         Row {
             id: splitRow
@@ -91,15 +91,31 @@ Row {
                 focusPolicy: Qt.StrongFocus
                 activeFocusOnTab: true
                 text: split.text
-                ToolTip.visible: hovered && split.hint !== ""
+                ToolTip.visible: (hovered || (activeFocus && InputModality.keyboard))
+                                 && split.hint !== ""
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: split.hint
                 Accessible.role: Accessible.Button
                 Accessible.name: split.actionAccessibleName
                 Accessible.description: split.hint
+                Accessible.onPressAction: if (actionBtn.enabled) actionBtn.clicked()
                 onClicked: split.activated()
-                Keys.onReturnPressed: event => { event.accepted = true; clicked() }
-                Keys.onEnterPressed: event => { event.accepted = true; clicked() }
-                Keys.onSpacePressed: event => { event.accepted = true; clicked() }
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    if (actionBtn.enabled)
+                        actionBtn.clicked()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    if (actionBtn.enabled)
+                        actionBtn.clicked()
+                }
+                Keys.onSpacePressed: event => {
+                    event.accepted = true
+                    if (actionBtn.enabled)
+                        actionBtn.clicked()
+                }
 
                 background: Item {
                     anchors.fill: parent
@@ -116,10 +132,11 @@ Row {
                         radius: Math.max(0, split.radius - split.surfaceInset)
                         color: !actionBtn.enabled ? "transparent"
                              : split.highlighted
-                               ? (actionBtn.down ? Qt.rgba(0, 0, 0, 0.16)
-                                 : actionBtn.hovered ? Qt.rgba(1, 1, 1, 0.10) : "transparent")
-                               : (actionBtn.down ? Qt.rgba(0, 0, 0, 0.18)
-                                 : actionBtn.hovered ? Theme.hover : "transparent")
+                               ? (actionBtn.down ? "#246bd1"
+                                 : actionBtn.hovered ? "#3d8bfd" : "transparent")
+                               : (actionBtn.down ? "#252b34"
+                                 : actionBtn.hovered ? "#2c3340" : "transparent")
+                        Behavior on color { ColorAnimation { duration: 110 } }
                     }
                 }
 
@@ -192,15 +209,34 @@ Row {
                 focusPolicy: Qt.StrongFocus
                 activeFocusOnTab: true
                 text: split.menuAccessibleName
-                ToolTip.visible: hovered
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: split.menuAccessibleName
                 Accessible.role: Accessible.Button
                 Accessible.name: split.menuAccessibleName
+                Accessible.onPressAction: if (chevronBtn.enabled) chevronBtn.clicked()
                 onClicked: split.menuRequested()
-                Keys.onReturnPressed: event => { event.accepted = true; clicked() }
-                Keys.onEnterPressed: event => { event.accepted = true; clicked() }
-                Keys.onSpacePressed: event => { event.accepted = true; clicked() }
-                Keys.onDownPressed: event => { event.accepted = true; clicked() }
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    if (chevronBtn.enabled)
+                        chevronBtn.clicked()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    if (chevronBtn.enabled)
+                        chevronBtn.clicked()
+                }
+                Keys.onSpacePressed: event => {
+                    event.accepted = true
+                    if (chevronBtn.enabled)
+                        chevronBtn.clicked()
+                }
+                Keys.onDownPressed: event => {
+                    event.accepted = true
+                    if (chevronBtn.enabled)
+                        chevronBtn.clicked()
+                }
 
                 background: Item {
                     anchors.fill: parent
@@ -217,15 +253,16 @@ Row {
                         radius: Math.max(0, split.radius - split.surfaceInset)
                         color: !chevronBtn.enabled ? "transparent"
                              : split.highlighted
-                               ? (chevronBtn.down ? Qt.rgba(0, 0, 0, 0.16)
-                                 : chevronBtn.hovered ? Qt.rgba(1, 1, 1, 0.10) : "transparent")
-                               : (chevronBtn.down ? Qt.rgba(0, 0, 0, 0.18)
-                                 : chevronBtn.hovered ? Theme.hover : "transparent")
+                               ? (chevronBtn.down ? "#246bd1"
+                                 : chevronBtn.hovered ? "#3d8bfd" : "transparent")
+                               : (chevronBtn.down ? "#252b34"
+                                 : chevronBtn.hovered ? "#2c3340" : "transparent")
+                        Behavior on color { ColorAnimation { duration: 110 } }
                     }
                 }
 
                 contentItem: Glyph {
-                    glyph: root.chevron
+                    glyph: Theme.icon.chevronDown
                     size: 12
                     color: split.contentColor
                 }
@@ -263,8 +300,8 @@ Row {
         // Crisp #ffffff text & icon over #2f81f7; steps back to neutral while selecting episodes.
         emphasized: !root.selecting && enabled
         enabled: !root.pending && root.view.primaryEnabled
-        implicitHeight: 36
-        height: 36
+        implicitHeight: 34
+        height: 34
         implicitWidth: Math.max(root.compact ? 112 : 132,
                                 implicitContentWidth + leftPadding + rightPadding)
         text: root.pending ? "Cargando…" : root.view.primaryText
@@ -284,13 +321,13 @@ Row {
             [AnimeView.Failed]: Theme.icon.retry
         })[root.action] ?? Theme.icon.play
         iconSize: 14
-        ToolTip.visible: hovered && root.view.primaryHint !== ""
+        ToolTip.visible: (hovered || (activeFocus && InputModality.keyboard))
+                         && root.view.primaryHint !== ""
+        ToolTip.delay: Theme.tooltipDelay
+        ToolTip.timeout: Theme.tooltipTimeout
         ToolTip.text: root.view.primaryHint
         Accessible.description: root.view.primaryHint
         onClicked: root.view.primary()
-        Keys.onReturnPressed: event => { event.accepted = true; clicked() }
-        Keys.onEnterPressed: event => { event.accepted = true; clicked() }
-        Keys.onSpacePressed: event => { event.accepted = true; clicked() }
 
         // How much of the file is here, along the button's foot.
         Rectangle {
@@ -338,17 +375,20 @@ Row {
             property bool wanted: root.view.unwatchedMissingCount > 0
                                   && root.view.unwatchedMissingCount < root.view.missingCount
             text: "Descargar no vistos (" + root.view.unwatchedMissingCount + ")"
+            glyph: Theme.icon.download
             onTriggered: root.view.downloadUnwatched()
         }
         MenuEntry {
             id: rangeEntry
             text: "Elegir un rango…"
+            glyph: Theme.icon.list
             onTriggered: root.chooseRange()
         }
         MenuEntry {
             id: chooseEntry
             property bool wanted: !root.selecting
             text: "Elegir episodios…"
+            glyph: Theme.icon.multiSelect
             onTriggered: root.chooseEpisodes()
         }
         MenuSeparator {
@@ -358,25 +398,30 @@ Row {
         MenuEntry {
             id: pauseEntry
             property bool wanted: root.view.downloadRunning && root.action !== AnimeView.PauseAll
-            text: "Pausar descargas en curso"
+            text: "Pausar descargas"
+            glyph: Theme.icon.pause
             onTriggered: root.view.pauseSeries()
         }
         MenuEntry {
             id: resumeEntry
             property bool wanted: root.view.downloadPaused && root.action !== AnimeView.ResumeAll
-            text: "Reanudar descargas pausadas"
+            text: "Reanudar descargas"
+            // Play is for watching: resuming a download keeps the download glyph.
+            glyph: Theme.icon.download
             onTriggered: root.view.resumeSeries()
         }
         MenuEntry {
             id: retryEntry
             property bool wanted: root.view.failedCount > 0 && root.action !== AnimeView.Failed
             text: "Reintentar fallidos (" + root.view.failedCount + ")"
+            glyph: Theme.icon.retry
             onTriggered: root.view.retryFailed()
         }
         MenuEntry {
             id: cancelEntry
             property bool wanted: root.view.hasDownloads
-            text: "Cancelar descargas en curso"
+            text: "Cancelar descargas"
+            glyph: Theme.icon.cancel
             onTriggered: root.view.cancelSeries(false)
         }
     }

@@ -29,12 +29,15 @@ Rectangle {
     signal actionFailed(string text)
     signal searchCatalog(string text)
 
-    // By LibraryModel.Filter; the menu lists them in `filterOrder`.
+    // By LibraryModel.Filter.
     readonly property var filterNames: ["Todos", "Viendo", "En emisión", "Sin empezar", "Vistos",
                                         "Favoritos", "Para ver"]
-    readonly property var filterOrder: [LibraryModel.All, LibraryModel.ToWatch, LibraryModel.Watching,
-                                        LibraryModel.Airing, LibraryModel.NotStarted,
-                                        LibraryModel.Watched, LibraryModel.Favorites]
+
+    function selectFilter(value) {
+        root.model.archivedOnly = false
+        root.model.filter = value
+        root.homeRequested()
+    }
 
     function activateRow(index, quiet) {
         const group = model.groupAt(index)
@@ -63,6 +66,82 @@ Rectangle {
         search.forceActiveFocus(InputModality.reason)
     }
 
+    component ViewButton: AbstractButton {
+        id: viewBtn
+
+        property string glyphCode: ""
+        property bool active: false
+
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
+        Layout.minimumWidth: 0
+        Layout.preferredHeight: 36
+        leftPadding: 6
+        rightPadding: 6
+        topPadding: 0
+        bottomPadding: 0
+        hoverEnabled: true
+        focusPolicy: Qt.StrongFocus
+        Accessible.role: Accessible.Button
+        Accessible.onPressAction: clicked()
+        Keys.onReturnPressed: event => { event.accepted = true; clicked() }
+        Keys.onEnterPressed: event => { event.accepted = true; clicked() }
+
+        background: Rectangle {
+            radius: Theme.radius
+            color: viewBtn.active ? "#232b38"
+                   : viewBtn.down ? Theme.pressSubtle
+                   : viewBtn.hovered ? Theme.hoverSubtle : "transparent"
+            border.width: viewBtn.active ? 1 : 0
+            border.color: "#333f52"
+            Behavior on color { ColorAnimation { duration: 110 } }
+
+            Rectangle {
+                visible: viewBtn.active
+                anchors.left: parent.left
+                anchors.leftMargin: 3
+                anchors.verticalCenter: parent.verticalCenter
+                width: 3
+                height: 16
+                radius: 1.5
+                color: Theme.accent
+            }
+        }
+
+        contentItem: Item {
+            RowLayout {
+                anchors.centerIn: parent
+                width: Math.min(implicitWidth, parent.width)
+                spacing: 6
+
+                Glyph {
+                    Layout.alignment: Qt.AlignVCenter
+                    glyph: viewBtn.glyphCode
+                    size: 14
+                    color: viewBtn.active ? Theme.accentInk : Theme.muted
+                }
+
+                Label {
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    text: viewBtn.text
+                    color: viewBtn.active ? Theme.accentInk
+                           : viewBtn.hovered ? Theme.ink : Theme.muted
+                    font.pixelSize: Theme.small
+                    font.weight: viewBtn.active ? Font.DemiBold : Font.Normal
+                    elide: Text.ElideRight
+                    Accessible.ignored: true
+                }
+            }
+        }
+
+        FocusFrame {
+            radiusInside: Theme.radius
+            visible: viewBtn.activeFocus && InputModality.keyboard
+        }
+    }
+
     color: Theme.pane
 
     ColumnLayout {
@@ -74,34 +153,25 @@ Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: 12
             Layout.rightMargin: 12
-            spacing: 4
+            spacing: 6
 
-            ItemDelegate {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 36
-                leftInset: 0
-                rightInset: 0
-                spacing: 12
+            ViewButton {
                 text: "Inicio"
-                icon.source: Theme.source("e80f")
-                highlighted: root.homeShown
-                // A stop for the keyboard, as everything that can be pressed.
-                focusPolicy: Qt.StrongFocus
+                glyphCode: Theme.icon.home
+                active: root.homeShown
                 onClicked: root.homeRequested()
-                Keys.onReturnPressed: clicked()
-                Keys.onEnterPressed: clicked()
                 Accessible.name: "Inicio de la biblioteca"
             }
 
-            ToolButton {
+            ViewButton {
                 text: "Cuadrícula"
-                display: AbstractButton.TextBesideIcon
-                icon.source: Theme.source("f0e2")
-                checkable: true
-                checked: root.gridShown
+                glyphCode: Theme.icon.grid
+                active: root.gridShown
                 onClicked: root.gridRequested()
                 Accessible.name: "Ver la biblioteca como cuadrícula"
-                ToolTip.visible: hovered
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: "Ver la biblioteca como cuadrícula"
             }
         }
@@ -134,6 +204,7 @@ Rectangle {
                 text: label
                 onClicked: filterMenu.show(filterButton)
                 Accessible.name: "Mostrar: " + label
+                Accessible.onPressAction: click()
 
                 contentItem: RowLayout {
                     spacing: 8
@@ -147,7 +218,7 @@ Rectangle {
                     }
 
                     Glyph {
-                        glyph: "e70d"
+                        glyph: Theme.icon.chevronDown
                         size: 12
                         color: Theme.muted
                     }
@@ -155,26 +226,72 @@ Rectangle {
 
                 ActionMenu {
                     id: filterMenu
-                    width: filterButton.width
+                    implicitWidth: filterButton.width
+                    entries: [
+                        filterAll, filterToWatch, filterWatching, filterAiring,
+                        filterNotStarted, filterWatched, filterFavorites,
+                        filterArchived, filterSeparator, filterOnDisk, filterGrouped
+                    ]
 
-                    Repeater {
-                        model: root.filterOrder
-                        delegate: MenuEntry {
-                            required property int modelData
-                            text: root.filterNames[modelData] + " (" + root.model.filterCounts[modelData] + ")"
-                            checkable: true
-                            checked: !root.model.archivedOnly && root.model.filter === modelData
-                            onTriggered: {
-                                root.model.archivedOnly = false
-                                root.model.filter = modelData
-                                root.homeRequested()
-                            }
-                        }
+                    MenuEntry {
+                        id: filterAll
+                        text: root.filterNames[LibraryModel.All] + " (" + root.model.filterCounts[LibraryModel.All] + ")"
+                        checkable: true
+                        checked: !root.model.archivedOnly && root.model.filter === LibraryModel.All
+                        onTriggered: root.selectFilter(LibraryModel.All)
                     }
 
                     MenuEntry {
-                        visible: root.model.archivedCount > 0
-                        height: visible ? implicitHeight : 0
+                        id: filterToWatch
+                        text: root.filterNames[LibraryModel.ToWatch] + " (" + root.model.filterCounts[LibraryModel.ToWatch] + ")"
+                        checkable: true
+                        checked: !root.model.archivedOnly && root.model.filter === LibraryModel.ToWatch
+                        onTriggered: root.selectFilter(LibraryModel.ToWatch)
+                    }
+
+                    MenuEntry {
+                        id: filterWatching
+                        text: root.filterNames[LibraryModel.Watching] + " (" + root.model.filterCounts[LibraryModel.Watching] + ")"
+                        checkable: true
+                        checked: !root.model.archivedOnly && root.model.filter === LibraryModel.Watching
+                        onTriggered: root.selectFilter(LibraryModel.Watching)
+                    }
+
+                    MenuEntry {
+                        id: filterAiring
+                        text: root.filterNames[LibraryModel.Airing] + " (" + root.model.filterCounts[LibraryModel.Airing] + ")"
+                        checkable: true
+                        checked: !root.model.archivedOnly && root.model.filter === LibraryModel.Airing
+                        onTriggered: root.selectFilter(LibraryModel.Airing)
+                    }
+
+                    MenuEntry {
+                        id: filterNotStarted
+                        text: root.filterNames[LibraryModel.NotStarted] + " (" + root.model.filterCounts[LibraryModel.NotStarted] + ")"
+                        checkable: true
+                        checked: !root.model.archivedOnly && root.model.filter === LibraryModel.NotStarted
+                        onTriggered: root.selectFilter(LibraryModel.NotStarted)
+                    }
+
+                    MenuEntry {
+                        id: filterWatched
+                        text: root.filterNames[LibraryModel.Watched] + " (" + root.model.filterCounts[LibraryModel.Watched] + ")"
+                        checkable: true
+                        checked: !root.model.archivedOnly && root.model.filter === LibraryModel.Watched
+                        onTriggered: root.selectFilter(LibraryModel.Watched)
+                    }
+
+                    MenuEntry {
+                        id: filterFavorites
+                        text: root.filterNames[LibraryModel.Favorites] + " (" + root.model.filterCounts[LibraryModel.Favorites] + ")"
+                        checkable: true
+                        checked: !root.model.archivedOnly && root.model.filter === LibraryModel.Favorites
+                        onTriggered: root.selectFilter(LibraryModel.Favorites)
+                    }
+
+                    MenuEntry {
+                        id: filterArchived
+                        property bool wanted: root.model.archivedCount > 0
                         text: "Archivo (" + root.model.archivedCount + ")"
                         checkable: true
                         checked: root.model.archivedOnly
@@ -184,9 +301,13 @@ Rectangle {
                         }
                     }
 
-                    MenuSeparator {}
+                    MenuSeparator {
+                        id: filterSeparator
+                        property bool separator: true
+                    }
 
                     MenuEntry {
+                        id: filterOnDisk
                         text: "Solo en disco"
                         checkable: true
                         checked: root.model.onDiskOnly
@@ -194,6 +315,7 @@ Rectangle {
                     }
 
                     MenuEntry {
+                        id: filterGrouped
                         text: "Agrupar por franquicia"
                         checkable: true
                         checked: root.model.grouped
@@ -202,19 +324,44 @@ Rectangle {
                 }
             }
 
+            // Unambiguous double-chevron collapse/expand-all button so it never collides
+            // visually with the filter dropdown's single chevron right beside it.
             ToolButton {
                 id: toggleGroupsButton
                 objectName: "toggleGroupsButton"
                 visible: root.model.grouped && root.model.hasGroups
-                display: AbstractButton.IconOnly
-                icon.source: Theme.source(root.model.allExpanded ? Theme.icon.collapseAll
-                                                                 : Theme.icon.expandAll)
+                implicitWidth: 34
+                implicitHeight: 32
+                padding: 0
                 text: root.model.allExpanded ? "Contraer todas las franquicias"
                                              : "Expandir todas las franquicias"
                 Accessible.name: text
-                ToolTip.visible: hovered
+                Accessible.onPressAction: click()
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
                 onClicked: root.model.allExpanded ? root.model.collapseAll() : root.model.expandAll()
+
+                contentItem: Item {
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: -3
+
+                        Glyph {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            glyph: root.model.allExpanded ? Theme.icon.collapseAll : Theme.icon.expandAll
+                            size: 9
+                            color: toggleGroupsButton.hovered ? Theme.ink : Theme.muted
+                        }
+                        Glyph {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            glyph: root.model.allExpanded ? Theme.icon.collapseAll : Theme.icon.expandAll
+                            size: 9
+                            color: toggleGroupsButton.hovered ? Theme.ink : Theme.muted
+                        }
+                    }
+                }
             }
         }
 
@@ -302,7 +449,8 @@ Rectangle {
                 }
                 Accessible.name: title + ", " + caption
                 ToolTip.visible: hovered && !chevronBtn.hovered && titleLabel.truncated
-                ToolTip.delay: 600
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: title + "\n" + caption
 
                 // Fluent frames the row reached with Tab; the arrows move the keyboard without
@@ -337,6 +485,7 @@ Rectangle {
                             focusPolicy: Qt.NoFocus
                             text: row.expanded ? "Contraer " + row.title : "Expandir " + row.title
                             Accessible.name: text
+                            Accessible.onPressAction: click()
                             onClicked: root.model.toggleGroup(row.groupId)
 
                             background: Rectangle {
@@ -345,15 +494,15 @@ Rectangle {
                                 anchors.rightMargin: 3
                                 anchors.topMargin: 6
                                 anchors.bottomMargin: 6
-                                radius: 4
-                                color: chevronBtn.down ? Qt.rgba(1, 1, 1, 0.12)
-                                       : chevronBtn.hovered ? Qt.rgba(1, 1, 1, 0.07) : "transparent"
+                                radius: Theme.radiusSm
+                                color: chevronBtn.down ? Theme.pressSubtle
+                                       : chevronBtn.hovered ? Theme.hoverSubtle : "transparent"
                             }
 
                             contentItem: Item {
                                 Glyph {
                                     anchors.centerIn: parent
-                                    glyph: row.expanded ? "e70d" : "e76c"
+                                    glyph: row.expanded ? Theme.icon.chevronDown : Theme.icon.chevronRight
                                     size: 10
                                     color: chevronBtn.hovered ? Theme.ink : Theme.muted
                                 }
@@ -373,12 +522,10 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.alignment: Qt.AlignVCenter
                         text: row.title
-                        // Cut in the middle in either view: titles that share a beginning differ
-                        // at their end ("…Part 2", "…2nd Season"), and both ends stay.
-                        elide: Text.ElideMiddle
+                        elide: Text.ElideRight
                         font.pixelSize: Theme.body
                         font.weight: row.highlighted ? Font.DemiBold : Font.Normal
-                        color: row.highlighted ? "#ffffff" : (row.ready ? Theme.ink : Theme.muted)
+                        color: row.highlighted ? Theme.accentInk : (row.ready ? Theme.ink : Theme.muted)
                     }
 
                     Rectangle {
@@ -415,6 +562,9 @@ Rectangle {
                 Button {
                     Layout.alignment: Qt.AlignHCenter
                     text: parent.searching ? "Buscar en el catálogo" : "Mostrar todos"
+                    Accessible.onPressAction: click()
+                    Keys.onReturnPressed: clicked()
+                    Keys.onEnterPressed: clicked()
                     onClicked: {
                         if (parent.searching) {
                             root.searchCatalog(root.model.search)
@@ -463,6 +613,7 @@ Rectangle {
 
         MenuEntry {
             id: openRow
+            glyph: Theme.icon.openExternal
             text: rowMenu.rowIsGroup ? "Abrir franquicia" : "Abrir anime"
             onTriggered: root.activateRow(rowMenu.rowIndex, false)
         }
@@ -470,6 +621,7 @@ Rectangle {
         MenuEntry {
             id: createRow
             property bool wanted: !rowMenu.rowIsGroup
+            glyph: Theme.icon.add
             text: "Crear franquicia…"
             onTriggered: root.createFranchiseRequested(rowMenu.rowSlug, rowMenu.rowTitle)
         }
@@ -497,6 +649,7 @@ Rectangle {
             id: restoreRow
             objectName: "restoreArchivedEntry"
             property bool wanted: !rowMenu.rowIsGroup && root.model.archivedOnly
+            glyph: Theme.icon.undo
             text: "Restaurar a la biblioteca"
             onTriggered: {
                 if (!root.model.archive([rowMenu.rowSlug], false))
@@ -507,6 +660,7 @@ Rectangle {
         MenuEntry {
             id: removeRow
             property bool wanted: !rowMenu.rowIsGroup
+            glyph: root.model.archivedOnly ? Theme.icon.trash : Theme.icon.remove
             text: root.model.archivedOnly ? "Eliminar…" : "Quitar de la biblioteca…"
             onTriggered: root.removeRequested(rowMenu.rowSlug, rowMenu.rowTitle)
         }

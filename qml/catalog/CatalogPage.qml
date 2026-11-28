@@ -16,6 +16,8 @@ StackView {
     property string from: "catalog"
 
     readonly property CatalogView catalog: app.catalog
+    readonly property bool selectionBarVisible: depth > 1 && currentItem !== null
+                                                && Boolean(currentItem.selecting)
 
     // Esc on an anime: the window goes back as its ← does.
     signal back()
@@ -176,8 +178,8 @@ StackView {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: 16
-            anchors.leftMargin: 32
+            anchors.margins: Theme.pad
+            anchors.leftMargin: Theme.section
             spacing: 8
 
             SearchBox {
@@ -215,9 +217,11 @@ StackView {
             }
 
             Button {
+                id: clearFiltersButton
                 visible: stack.catalog.browsing
                 flat: true
                 text: "Quitar filtros"
+                Accessible.onPressAction: clearFiltersButton.click()
                 onClicked: stack.catalog.clearFilters()
             }
 
@@ -226,13 +230,17 @@ StackView {
 
         GridView {
             id: grid
+            // 4 px left room inside the clip lets FocusFrame on column 0 and Shelf draw whole
+            // while keeping the visual left edge aligned at Theme.section.
+            readonly property int focusPad: 4
+
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: toolbar.bottom
             anchors.bottom: parent.bottom
             anchors.topMargin: 8
-            anchors.leftMargin: 32
-            anchors.rightMargin: 16
+            anchors.leftMargin: Theme.section - focusPad
+            anchors.rightMargin: Theme.pad
             clip: true
             model: stack.catalog.results
             boundsBehavior: Flickable.StopAtBounds
@@ -252,7 +260,7 @@ StackView {
             }
 
             // The same posters as the shelves: their width, their gap, left of the scroll bar.
-            readonly property real span: width - 16
+            readonly property real span: width - Theme.pad - focusPad
             readonly property int columns: Theme.posterColumns(span)
             // Nothing on view yet: the grid shows its shape instead.
             readonly property bool waiting: count === 0 && stack.catalog.loading
@@ -265,10 +273,11 @@ StackView {
             onAtYEndChanged: if (atYEnd) stack.catalog.loadMore()
 
             header: Column {
+                x: grid.focusPad
                 width: grid.span
                 topPadding: 12
-                bottomPadding: 16
-                spacing: 32
+                bottomPadding: Theme.pad
+                spacing: Theme.section
 
                 Shelf {
                     width: parent.width
@@ -382,38 +391,72 @@ StackView {
                     }
 
                     // Why nothing new came, and the way out; what was on view stays under it.
-                    RowLayout {
+                    Rectangle {
                         visible: grid.failed
-                        spacing: 16
+                        width: parent.width
+                        implicitHeight: failedRow.implicitHeight + 20
+                        radius: Theme.radius
+                        color: Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.10)
+                        border.width: 1
+                        border.color: Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.30)
 
-                        Label {
-                            text: stack.catalog.problem
-                            color: Theme.ink
-                            font.pixelSize: Theme.body
-                        }
-                        Button {
-                            text: "Reintentar"
-                            onClicked: stack.catalog.reload()
+                        RowLayout {
+                            id: failedRow
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 10
+
+                            Glyph {
+                                glyph: Theme.icon.warning
+                                size: 14
+                                color: Theme.danger
+                                Layout.alignment: Qt.AlignVCenter
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                text: stack.catalog.problem
+                                color: Theme.ink
+                                font.pixelSize: Theme.body
+                                wrapMode: Text.Wrap
+                            }
+
+                            Button {
+                                id: retryFailedButton
+                                text: "Reintentar"
+                                Accessible.onPressAction: retryFailedButton.click()
+                                onClicked: stack.catalog.reload()
+                            }
                         }
                     }
 
                     RowLayout {
                         visible: grid.empty
-                        spacing: 16
+                        width: parent.width
+                        spacing: Theme.pad
 
                         Label {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             text: !stack.catalog.browsing ? "El catálogo no tiene animes todavía"
                                   : stack.catalog.search.trim() === "" ? "Ningún anime coincide con los filtros"
                                   : stack.catalog.status === 0 && stack.catalog.genre === ""
                                     ? "Ningún anime coincide con «" + stack.catalog.search.trim() + "»"
                                     : "Ningún anime coincide con «" + stack.catalog.search.trim() + "» y los filtros"
-                            color: Theme.ink
+                            color: Theme.muted
                             font.pixelSize: Theme.body
+                            wrapMode: Text.Wrap
                         }
                         // While searching, "Quitar filtros" is already in the toolbar.
                         Button {
+                            id: retryEmptyButton
                             visible: !stack.catalog.browsing
                             text: "Reintentar"
+                            Accessible.onPressAction: retryEmptyButton.click()
                             onClicked: stack.catalog.reload()
                         }
                     }
@@ -432,6 +475,7 @@ StackView {
 
                 PosterCard {
                     focus: true
+                    x: grid.focusPad
                     // The grid is the keyboard's stop, not each card.
                     focusPolicy: Qt.ClickFocus
                     width: parent.width - Theme.posterGap
@@ -448,11 +492,14 @@ StackView {
 
             footer: Item {
                 width: grid.width
-                height: grid.waiting ? shape.height : 72
+                height: grid.waiting ? shape.height
+                        : stack.catalog.problemBelow ? Math.max(72, problemBelowCol.implicitHeight + 24)
+                        : 72
 
                 // The first results on their way.
                 Grid {
                     id: shape
+                    x: grid.focusPad
                     visible: grid.waiting
                     columns: grid.columns
 
@@ -479,18 +526,38 @@ StackView {
 
                 // The next page failed: the reason where the list stopped.
                 ColumnLayout {
+                    id: problemBelowCol
                     anchors.centerIn: parent
+                    width: Math.min(Math.max(0, parent.width - Theme.section), 560)
                     visible: stack.catalog.problemBelow
                     spacing: 8
 
-                    Label {
+                    RowLayout {
                         Layout.alignment: Qt.AlignHCenter
-                        text: stack.catalog.problem
-                        color: Theme.ink
+                        Layout.maximumWidth: parent.width
+                        spacing: 8
+
+                        Glyph {
+                            glyph: Theme.icon.warning
+                            size: 14
+                            color: Theme.danger
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            text: stack.catalog.problem
+                            color: Theme.ink
+                            font.pixelSize: Theme.body
+                        }
                     }
                     Button {
+                        id: retryMoreButton
                         Layout.alignment: Qt.AlignHCenter
                         text: "Reintentar"
+                        Accessible.onPressAction: retryMoreButton.click()
                         onClicked: stack.catalog.loadMore()
                     }
                 }
@@ -503,6 +570,7 @@ StackView {
     Shortcut {
         sequence: "Esc"
         enabled: stack.active && stack.depth > 1
+                 && (!stack.ApplicationWindow.window || stack.ApplicationWindow.window.modalLayers === 0)
         onActivated: stack.currentItem.selecting ? stack.currentItem.clearSelection() : stack.back()
     }
 }

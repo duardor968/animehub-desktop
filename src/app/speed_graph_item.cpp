@@ -21,7 +21,6 @@ constexpr qreal kBarWidth = 3.0;
 constexpr qreal kDashLength = 6.0;
 constexpr qreal kDashGap = 3.0;
 constexpr qreal kLimitHeight = 1.5;
-constexpr qreal kJdEpsilon = 0.5;
 constexpr qreal kJdAlpha = 0.75;
 constexpr qreal kNativeTopAlpha = 0.65;
 constexpr qreal kNativeBottomAlpha = 1.0;
@@ -149,7 +148,6 @@ void SpeedGraphItem::setSamples(const QList<qreal>& samples) {
     }
     samples_ = samples;
     emit samplesChanged();
-    recomputeShowsJd();
     scheduleUpdate();
 }
 
@@ -159,7 +157,6 @@ void SpeedGraphItem::setNativeSamples(const QList<qreal>& samples) {
     }
     native_samples_ = samples;
     emit nativeSamplesChanged();
-    recomputeShowsJd();
     scheduleUpdate();
 }
 
@@ -229,26 +226,6 @@ qreal SpeedGraphItem::nativeSampleAt(qsizetype visible_index, qsizetype bars, qr
     return std::clamp(native_samples_.at(native_index), qreal{0.0}, total);
 }
 
-void SpeedGraphItem::recomputeShowsJd() {
-    bool found = false;
-    const qsizetype bars = visibleBarCount(width());
-    if (bars > 0 && !native_samples_.isEmpty()) {
-        const qsizetype start = samples_.size() - bars;
-        for (qsizetype i = 0; i < bars; ++i) {
-            const qreal total = std::max<qreal>(0.0, samples_.at(start + i));
-            const qreal native = nativeSampleAt(i, bars, total);
-            if (std::max<qreal>(0.0, total - native) > kJdEpsilon) {
-                found = true;
-                break;
-            }
-        }
-    }
-    if (shows_jd_ != found) {
-        shows_jd_ = found;
-        emit showsJdChanged();
-    }
-}
-
 void SpeedGraphItem::scheduleUpdate() {
     if (isVisible()) {
         update();
@@ -258,7 +235,6 @@ void SpeedGraphItem::scheduleUpdate() {
 void SpeedGraphItem::itemChange(ItemChange change, const ItemChangeData& value) {
     QQuickItem::itemChange(change, value);
     if (change == ItemVisibleHasChanged && value.boolValue) {
-        recomputeShowsJd();
         update();
     }
 }
@@ -266,7 +242,6 @@ void SpeedGraphItem::itemChange(ItemChange change, const ItemChangeData& value) 
 void SpeedGraphItem::geometryChange(const QRectF& new_geometry, const QRectF& old_geometry) {
     QQuickItem::geometryChange(new_geometry, old_geometry);
     if (new_geometry.size() != old_geometry.size()) {
-        recomputeShowsJd();
         scheduleUpdate();
     }
 }

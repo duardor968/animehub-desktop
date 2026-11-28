@@ -6,38 +6,65 @@ import AnimeHub
 // A section of the Downloads page as in Steam: its name, how many it holds, and a hairline to
 // the edge, with the section's own actions at the end. A click anywhere on the line folds the
 // section; its chevron sits on the right, as in WinUI's Expander, in the column of the rows' own.
-AbstractButton {
+Item {
     id: root
 
+    property string text
     property int count
     property bool folded
     default property alias actions: actionRow.data
 
-    hoverEnabled: true
-    focusPolicy: Qt.StrongFocus
-    topPadding: 6
-    bottomPadding: 6
-    Accessible.role: Accessible.Heading
-    Accessible.name: text + " (" + count + ")"
-    // QML has no expanded state: a toggle reads as one.
-    Accessible.checkable: true
-    Accessible.checked: !folded
-    Accessible.onPressAction: clicked()
+    signal clicked()
 
-    // As the rows': past the content by the same margin on both sides.
-    background: Rectangle {
-        x: -16
-        width: root.width + 32
-        radius: Theme.radius
-        color: root.hovered ? Theme.hover : "transparent"
+    implicitHeight: Math.max(contentRow.implicitHeight + 12, 36)
 
-        // The keyboard's frame, as every control's.
-        FocusFrame { visible: root.activeFocus && InputModality.keyboard }
+    // Fold trigger kept as a sibling of section action buttons (zero nested buttons).
+    AbstractButton {
+        id: toggleButton
+        anchors.fill: parent
+        hoverEnabled: true
+        focusPolicy: Qt.StrongFocus
+        Accessible.role: Accessible.Heading
+        Accessible.name: root.text + " (" + root.count + ")"
+        // QML has no expanded state: a toggle reads as one.
+        Accessible.checkable: true
+        Accessible.checked: !root.folded
+        Accessible.onPressAction: toggleButton.click()
+        Keys.onReturnPressed: event => {
+            event.accepted = true
+            toggleButton.click()
+        }
+        Keys.onEnterPressed: event => {
+            event.accepted = true
+            toggleButton.click()
+        }
+        onClicked: root.clicked()
+
+        // As the rows': past the content by the same margin on both sides.
+        background: Rectangle {
+            x: -16
+            width: toggleButton.width + 32
+            radius: Theme.radius
+            color: toggleButton.down ? Theme.raised
+                   : toggleButton.hovered ? Theme.hover : "transparent"
+
+            // The keyboard's frame, as every control's.
+            FocusFrame {
+                visible: toggleButton.activeFocus && InputModality.keyboard
+                radiusInside: Theme.radius
+            }
+        }
+
+        contentItem: Item {}
     }
 
     // The catalog's headings follow the same measures: the count 8 px after the name, the
     // line 12 px after the count.
-    contentItem: RowLayout {
+    RowLayout {
+        id: contentRow
+        anchors.fill: parent
+        anchors.topMargin: 6
+        anchors.bottomMargin: 6
         spacing: 0
 
         Label {
@@ -74,7 +101,7 @@ AbstractButton {
         Glyph {
             Layout.leftMargin: 12
             Layout.preferredWidth: 16
-            glyph: root.folded ? "e70d" : "e70e"
+            glyph: root.folded ? Theme.icon.chevronDown : Theme.icon.chevronUp
             size: 12
             color: Theme.muted
         }

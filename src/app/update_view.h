@@ -91,6 +91,9 @@ public:
     // Notifies bindings when active download count changes.
     void notifyActiveDownloadsChanged();
 
+    // Translates technical updater errors into concise Spanish copy (never leaks raw English).
+    [[nodiscard]] static QString formatErrorSummary(const QString& raw);
+
     // Smoke-capture helper used ONLY with --smoke-update-state under --smoke-screenshot.
     void previewState(const QString& state, const QString& mode = {});
 

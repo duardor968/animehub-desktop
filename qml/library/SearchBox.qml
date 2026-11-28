@@ -2,32 +2,41 @@ import QtQuick
 import QtQuick.Controls
 import AnimeHub
 
-// Fluent's search field, with the clear button. Qt's style draws no placeholder for it: the
-// label sits where TextField draws its own, in the same colour.
+// Fluent's native SearchField (Qt 6.12 draws its own placeholder and clear indicator), with
+// accessible labels on the inner editor and clear button plus standardized tooltip timing.
 SearchField {
     id: root
-
-    property string placeholderText
 
     Accessible.name: placeholderText
     // The text field inside is what takes the keyboard: it carries the name a reader announces.
     Binding {
-        target: root.contentItem.Accessible
+        target: root.contentItem ? root.contentItem.Accessible : null
         property: "name"
         value: root.placeholderText
     }
-
-    Label {
-        x: root.contentItem.x + root.contentItem.leftPadding
-        y: root.contentItem.y + root.contentItem.topPadding
-        width: root.contentItem.width - root.contentItem.leftPadding - root.contentItem.rightPadding
-        height: root.contentItem.height - root.contentItem.topPadding - root.contentItem.bottomPadding
-        visible: root.text === ""
-        text: root.placeholderText
-        color: root.palette.placeholderText
-        font: root.font
-        verticalAlignment: root.contentItem.verticalAlignment
-        elide: Text.ElideRight
-        Accessible.ignored: true
+    Binding {
+        target: root.clearIndicator.indicator ? root.clearIndicator.indicator.Accessible : null
+        property: "name"
+        value: "Limpiar búsqueda"
+    }
+    Binding {
+        target: root.clearIndicator.indicator ? root.clearIndicator.indicator.ToolTip : null
+        property: "visible"
+        value: root.clearIndicator.hovered && root.text.length > 0
+    }
+    Binding {
+        target: root.clearIndicator.indicator ? root.clearIndicator.indicator.ToolTip : null
+        property: "delay"
+        value: Theme.tooltipDelay
+    }
+    Binding {
+        target: root.clearIndicator.indicator ? root.clearIndicator.indicator.ToolTip : null
+        property: "timeout"
+        value: Theme.tooltipTimeout
+    }
+    Binding {
+        target: root.clearIndicator.indicator ? root.clearIndicator.indicator.ToolTip : null
+        property: "text"
+        value: "Limpiar búsqueda"
     }
 }

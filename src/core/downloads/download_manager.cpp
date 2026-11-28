@@ -462,7 +462,8 @@ DownloadManager::enqueueMany(const QString& slug, const QList<double>& numbers,
     const auto settings = fixedSettings.value_or(settings_());
     if (!sourceRequestId.isEmpty()) {
         if (settings.directory.isEmpty())
-            return std::unexpected(QStringLiteral("El pedido no tiene un destino local fijado."));
+            return std::unexpected(
+                QStringLiteral("La solicitud no tiene un destino local fijado."));
         const auto folder = services_.library.workFolder(settings.directory, slug, anime_title);
         if (!folder)
             return std::unexpected(folder.error().message);

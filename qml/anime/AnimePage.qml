@@ -49,11 +49,13 @@ Item {
     }
 
     // Selectable synopsis: collapsed to `lines` when very long, genuinely mouse-selectable in all states.
-    component Synopsis: ColumnLayout {
+    component Synopsis: Column {
         id: about
 
         property int lines: 3
         property bool expanded: false
+        property Flickable scroller: null
+        property real topClearance: 12
         // Each anime opens collapsed.
         readonly property var paragraphs: page.view.synopsis.split(/\n\s*\n/)
         readonly property string shownText: about.expanded ? page.view.synopsis : about.paragraphs[0]
@@ -70,13 +72,12 @@ Item {
         visible: page.view.synopsis !== ""
 
         Item {
-            Layout.fillWidth: true
-            Layout.maximumWidth: 900
-            Layout.preferredHeight: width > 0
-                                    ? (about.lineOverflow
-                                       ? Math.ceil(about.singleLineH * about.lines)
-                                       : Math.ceil(synopsisEdit.contentHeight))
-                                    : 0
+            width: Math.min(about.width, 900)
+            height: width > 0
+                    ? (about.lineOverflow
+                       ? Math.ceil(about.singleLineH * about.lines)
+                       : Math.ceil(synopsisEdit.contentHeight))
+                    : 0
             clip: about.lineOverflow
 
             TextEdit {
@@ -86,11 +87,11 @@ Item {
                 selectByMouse: true
                 activeFocusOnTab: false
                 selectionColor: Theme.accent
-                selectedTextColor: "#ffffff"
+                selectedTextColor: Theme.accentInk
                 text: about.shownText
                 color: Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.88)
                 font.family: fontProbe.font.family
-                font.pixelSize: 13
+                font.pixelSize: Theme.small
                 wrapMode: Text.Wrap
                 padding: 0
                 leftPadding: 0
@@ -116,12 +117,19 @@ Item {
         }
 
         Button {
+            id: expandButton
             visible: about.canExpand
             flat: true
             text: about.expanded ? "Mostrar menos" : "Mostrar más"
+            Accessible.onPressAction: click()
+            Keys.onReturnPressed: event => { event.accepted = true; click() }
+            Keys.onEnterPressed: event => { event.accepted = true; click() }
+            onActiveFocusChanged: if (activeFocus && InputModality.keyboard)
+                                      page.ensureVisibleIn(about.scroller, expandButton,
+                                                           about.topClearance, 16)
             onClicked: about.expanded = !about.expanded
             // Its text in the synopsis column; the hover background may overhang, as in WinUI.
-            Layout.leftMargin: -leftPadding
+            x: -leftPadding
         }
     }
 
@@ -131,14 +139,16 @@ Item {
         id: detailsRoot
 
         property int synopsisLines: 10
+        property Flickable scroller: null
+        property real topClearance: 12
         readonly property bool hasTop: page.view.synopsis !== "" || page.view.mature
         readonly property bool hasBottom: page.view.hasDetails || page.hasLinks
         readonly property var detailCells: {
             const cells = []
             const rows = page.view.details || []
             for (let i = 0; i < rows.length; ++i) {
-                cells.push({ isValue: false, text: rows[i].label ?? "" })
-                cells.push({ isValue: true, text: rows[i].value ?? "" })
+                cells.push({ isValue: false, text: rows[i].label ?? "", icon: "" })
+                cells.push({ isValue: true, text: rows[i].value ?? "", icon: rows[i].icon ?? "" })
             }
             return cells
         }
@@ -161,6 +171,8 @@ Item {
             Synopsis {
                 Layout.fillWidth: true
                 lines: detailsRoot.synopsisLines
+                scroller: detailsRoot.scroller
+                topClearance: detailsRoot.topClearance
             }
         }
 
@@ -169,7 +181,7 @@ Item {
             visible: page.view.mature
             implicitWidth: matureRow.implicitWidth + 16
             implicitHeight: 24
-            radius: 4
+            radius: Theme.radiusSm
             color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.14)
             border.width: 1
             border.color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.30)
@@ -230,16 +242,34 @@ Item {
                 Repeater {
                     model: detailsRoot.detailCells
 
-                    delegate: Label {
+                    delegate: RowLayout {
+                        id: detailCell
                         required property var modelData
                         Layout.fillWidth: modelData.isValue
                         Layout.minimumWidth: 0
                         Layout.alignment: Qt.AlignTop
-                        text: modelData.text
-                        color: modelData.isValue ? Theme.ink : Theme.muted
-                        font.pixelSize: 13
-                        font.weight: modelData.isValue ? Font.DemiBold : Font.Normal
-                        wrapMode: modelData.isValue ? Text.Wrap : Text.NoWrap
+                        spacing: 5
+
+                        Glyph {
+                            visible: detailCell.modelData.isValue
+                                     && detailCell.modelData.icon === "starFilled"
+                            Layout.alignment: Qt.AlignTop
+                            Layout.topMargin: 2
+                            glyph: Theme.icon.starFilled
+                            size: Theme.small
+                            color: Theme.warning
+                        }
+
+                        Label {
+                            Layout.fillWidth: detailCell.modelData.isValue
+                            Layout.minimumWidth: 0
+                            Layout.alignment: Qt.AlignTop
+                            text: detailCell.modelData.text
+                            color: detailCell.modelData.isValue ? Theme.ink : Theme.muted
+                            font.pixelSize: Theme.small
+                            font.weight: detailCell.modelData.isValue ? Font.DemiBold : Font.Normal
+                            wrapMode: detailCell.modelData.isValue ? Text.Wrap : Text.NoWrap
+                        }
                     }
                 }
             }
@@ -251,33 +281,58 @@ Item {
                 spacing: 8
 
                 AccentButton {
+                    id: trailerButton
                     visible: page.view.trailerUrl.toString() !== ""
                     emphasized: false
-                    glyphCode: Theme.icon.play
-                    iconSize: 11
-                    fontPixelSize: 13
+                    glyphCode: Theme.icon.video
+                    iconSize: 14
+                    fontPixelSize: Theme.small
                     implicitHeight: 30
                     leftPadding: 12
                     rightPadding: 12
                     text: "Ver tráiler"
+                    onActiveFocusChanged: if (activeFocus && InputModality.keyboard)
+                                              page.ensureVisibleIn(detailsRoot.scroller, trailerButton,
+                                                                   detailsRoot.topClearance, 16)
                     onClicked: page.view.openTrailer()
-                    Keys.onReturnPressed: event => { event.accepted = true; clicked() }
-                    Keys.onEnterPressed: event => { event.accepted = true; clicked() }
                 }
 
-                Button {
+                AccentButton {
+                    id: sourceButton
                     visible: page.view.sourceUrl !== ""
-                    flat: true
+                    emphasized: false
+                    glyphCode: Theme.icon.openExternal
+                    iconSize: 14
+                    fontPixelSize: Theme.small
                     implicitHeight: 30
-                    leftPadding: 10
-                    rightPadding: 10
+                    leftPadding: 12
+                    rightPadding: 12
                     text: "Ver en AnimeAV1"
-                    icon.source: Theme.source(Theme.icon.openExternal)
-                    icon.color: Theme.accentText
-                    font.pixelSize: 13
+                    onActiveFocusChanged: if (activeFocus && InputModality.keyboard)
+                                              page.ensureVisibleIn(detailsRoot.scroller, sourceButton,
+                                                                   detailsRoot.topClearance, 16)
                     onClicked: page.view.openSource()
                 }
             }
+        }
+    }
+
+    function ensureVisibleIn(flick, item, topClearance, bottomClearance) {
+        if (!flick || !item || !flick.contentItem)
+            return
+        const pos = item.mapToItem(flick.contentItem, 0, 0)
+        const top = pos.y - topClearance
+        const bottom = pos.y + item.height + bottomClearance
+        const minY = flick.originY
+        const maxY = Math.max(minY, flick.originY + flick.contentHeight + flick.bottomMargin - flick.height)
+        if (top < flick.contentY) {
+            if (flick === list)
+                page.scrolled = true
+            flick.contentY = Math.max(minY, Math.min(top, maxY))
+        } else if (bottom > flick.contentY + flick.height) {
+            if (flick === list)
+                page.scrolled = true
+            flick.contentY = Math.max(minY, Math.min(bottom - flick.height, maxY))
         }
     }
 
@@ -352,6 +407,25 @@ Item {
             })
         }
         function onCancelConfirmationNeeded(number, question, detail) {
+            if (number < 0 && !page.view.single) {
+                const count = Math.max(0, page.view.episodes.total
+                                       - page.view.onDiskCount - page.view.missingCount)
+                const scope = count === 1 ? "Cancelar 1 episodio"
+                              : count > 1 ? "Cancelar " + count + " episodios"
+                              : "Cancelar descargas"
+                const finalQuestion = count > 0
+                                      ? "¿" + scope + " de " + page.view.title + "?"
+                                      : question
+                const kept = page.view.onDiskCount === 1
+                             ? " El episodio ya completado se queda en disco."
+                             : page.view.onDiskCount > 1
+                               ? " Los " + page.view.onDiskCount + " episodios ya completados se quedan en disco."
+                               : " Los episodios ya completados se quedan en disco."
+                confirm.ask(finalQuestion, detail + kept, scope, "Seguir descargando", () => {
+                    page.view.cancelSeries(true)
+                })
+                return
+            }
             confirm.ask(question, detail, "Cancelar la descarga", "Seguir descargando", () => {
                 if (number < 0)
                     page.view.cancelSeries(true)
@@ -427,7 +501,6 @@ Item {
                 metaLine: page.view.metaLine
                 genres: page.view.genres
                 genreChips: page.view.genreChips
-                chips: page.view.chips
                 posterUrl: page.view.posterUrl
                 backdropUrl: page.view.backdropUrl
                 onGenreSelected: slug => page.genreSelected(slug)
@@ -465,7 +538,14 @@ Item {
                     }
 
                     Button {
+                        id: retryButton
                         text: "Reintentar"
+                        Accessible.onPressAction: click()
+                        Keys.onReturnPressed: event => { event.accepted = true; click() }
+                        Keys.onEnterPressed: event => { event.accepted = true; click() }
+                        onActiveFocusChanged: if (activeFocus && InputModality.keyboard)
+                                                  page.ensureVisibleIn(list, retryButton,
+                                                                       actionBar.singleRowHeight + 12, 16)
                         onClicked: page.view.reload()
                     }
                 }
@@ -480,6 +560,8 @@ Item {
                     sourceComponent: Component {
                         DetailsColumn {
                             synopsisLines: 10
+                            scroller: list
+                            topClearance: actionBar.singleRowHeight + 12
                         }
                     }
                 }
@@ -521,6 +603,8 @@ Item {
             view: page.view
             menu: episodeMenu
             selecting: page.selecting
+            onKeyboardFocused: target => page.ensureVisibleIn(list, target,
+                                                              actionBar.singleRowHeight + 12, 16)
         }
 
         footer: Column {
@@ -562,6 +646,8 @@ Item {
                 sourceComponent: Component {
                     DetailsColumn {
                         synopsisLines: 5
+                        scroller: list
+                        topClearance: actionBar.singleRowHeight + 12
                     }
                 }
             }
@@ -622,6 +708,8 @@ Item {
                 id: sideContent
                 width: sideFlick.width
                 synopsisLines: 10
+                scroller: sideFlick
+                topClearance: 12
             }
         }
     }
@@ -664,6 +752,9 @@ Item {
             visible: page.view.loaded && !page.view.inLibrary
             text: "Añadir a la biblioteca"
             icon.source: Theme.source(Theme.icon.add)
+            Accessible.onPressAction: click()
+            Keys.onReturnPressed: event => { event.accepted = true; click() }
+            Keys.onEnterPressed: event => { event.accepted = true; click() }
             onClicked: page.view.setInLibrary(true)
         }
 
@@ -676,22 +767,30 @@ Item {
                 text: page.view.favorite ? "Quitar de favoritos" : "Añadir a favoritos"
                 Accessible.checkable: true
                 Accessible.checked: page.view.favorite
-                ToolTip.visible: hovered
+                Accessible.onPressAction: click()
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
+                Keys.onReturnPressed: event => { event.accepted = true; click() }
+                Keys.onEnterPressed: event => { event.accepted = true; click() }
                 onClicked: page.view.setFavorite(!page.view.favorite)
             },
             ToolButton {
-                // Segoe's bell with a stroke through it.
-                readonly property string bellOff: "e7ed"
                 visible: page.view.airing && page.view.inLibrary
-                icon.source: Theme.source(page.view.notify ? Theme.icon.bell : bellOff)
+                icon.source: Theme.source(page.view.notify ? Theme.icon.bell : Theme.icon.bellOff)
                 display: AbstractButton.IconOnly
                 text: page.view.notify ? "Dejar de avisar de episodios nuevos"
                                        : "Avisar de episodios nuevos"
                 Accessible.checkable: true
                 Accessible.checked: page.view.notify
-                ToolTip.visible: hovered
+                Accessible.onPressAction: click()
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
+                Keys.onReturnPressed: event => { event.accepted = true; click() }
+                Keys.onEnterPressed: event => { event.accepted = true; click() }
                 onClicked: page.view.setNotify(!page.view.notify)
             },
             ToolButton {
@@ -700,8 +799,13 @@ Item {
                 icon.source: Theme.source(Theme.icon.more)
                 display: AbstractButton.IconOnly
                 text: "Más opciones"
-                ToolTip.visible: hovered
+                Accessible.onPressAction: click()
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
+                Keys.onReturnPressed: event => { event.accepted = true; click() }
+                Keys.onEnterPressed: event => { event.accepted = true; click() }
                 onClicked: {
                     moreMenu.folderExists = page.view.hasFolder()
                     moreMenu.show(moreButton, true)
@@ -727,18 +831,21 @@ Item {
             id: watchedEntry
             property bool wanted: page.view.watchedProgress < 1
             text: page.view.single ? "Marcar como visto" : "Marcar todo como visto"
+            glyph: Theme.icon.check
             onTriggered: page.view.markAllWatched()
         }
         MenuEntry {
             id: unwatchedEntry
             property bool wanted: page.view.started
             text: page.view.single ? "Marcar como no visto" : "Marcar todo como no visto"
+            glyph: Theme.icon.undo
             onTriggered: page.view.markAllUnwatched()
         }
         MenuEntry {
             id: positionEntry
             property bool wanted: page.view.single
             text: "Indicar dónde te quedaste…"
+            glyph: Theme.icon.clock
             onTriggered: episodeMenu.askPosition(page.view.firstNumber, page.view.title)
         }
         MenuSeparator {
@@ -767,14 +874,17 @@ Item {
             id: pauseEntry
             property bool wanted: !page.view.single && page.view.downloadRunning
                                   && page.view.primaryAction !== AnimeView.PauseAll
-            text: "Pausar las descargas"
+            text: "Pausar descargas"
+            glyph: Theme.icon.pause
             onTriggered: page.view.pauseSeries()
         }
         MenuEntry {
             id: resumeEntry
             property bool wanted: !page.view.single && page.view.downloadPaused
                                   && page.view.primaryAction !== AnimeView.ResumeAll
-            text: "Reanudar las descargas"
+            text: "Reanudar descargas"
+            // Play is for watching: resuming a download keeps the download glyph.
+            glyph: Theme.icon.download
             onTriggered: page.view.resumeSeries()
         }
         MenuEntry {
@@ -782,7 +892,8 @@ Item {
             // Beyond the next episode's, which the main button retries.
             property bool wanted: !page.view.single && page.view.failedCount
                                   > (page.view.primaryAction === AnimeView.Failed ? 1 : 0)
-            text: "Reintentar las fallidas"
+            text: "Reintentar fallidos"
+            glyph: Theme.icon.retry
             onTriggered: page.view.retryFailed()
         }
         MenuSeparator {
@@ -792,19 +903,22 @@ Item {
         MenuEntry {
             id: trailerEntry
             property bool wanted: page.view.trailerUrl.toString() !== ""
-            text: "Ver el tráiler"
+            text: "Ver tráiler"
+            glyph: Theme.icon.video
             onTriggered: page.view.openTrailer()
         }
         MenuEntry {
             id: sourceEntry
             property bool wanted: page.view.sourceUrl !== ""
             text: "Ver en AnimeAV1"
+            glyph: Theme.icon.openExternal
             onTriggered: page.view.openSource()
         }
         MenuEntry {
             id: folderEntry
             property bool wanted: moreMenu.folderExists
             text: "Abrir la carpeta"
+            glyph: Theme.icon.folder
             onTriggered: page.view.openFolder()
         }
         MenuSeparator {
@@ -814,25 +928,29 @@ Item {
         MenuEntry {
             id: cancelEntry
             property bool wanted: page.view.hasDownloads
-            text: page.view.single ? "Cancelar la descarga" : "Cancelar las descargas"
+            text: page.view.single ? "Cancelar la descarga" : "Cancelar descargas"
+            glyph: Theme.icon.cancel
             onTriggered: page.view.cancelSeries(false)
         }
         MenuEntry {
             id: trashWatchedEntry
             property bool wanted: page.view.watchedOnDisk && !page.view.single
             text: "Mover los vistos a la Papelera"
+            glyph: Theme.icon.trash
             onTriggered: page.view.trashWatched()
         }
         MenuEntry {
             id: trashFilmEntry
             property bool wanted: page.view.single && page.view.onDiskCount > 0
             text: "Mover a la Papelera"
+            glyph: Theme.icon.trash
             onTriggered: page.view.trashFile(page.view.firstNumber)
         }
         MenuEntry {
             id: removeEntry
             property bool wanted: page.view.inLibrary
             text: "Quitar de la biblioteca…"
+            glyph: Theme.icon.remove
             onTriggered: removalDialog.show([page.view.slug], page.view.title, false)
         }
     }
@@ -846,6 +964,7 @@ Item {
         id: autoDownloadDialog
         width: 480
         title: "Descargar episodios nuevos"
+        onOpened: autoAcceptButton.forceActiveFocus(InputModality.reason)
 
         // Fixed widths on both sides: Fluent's Dialog loops when its content follows it.
         Label {
@@ -857,15 +976,19 @@ Item {
                   + ". Puedes dejar de hacerlo en este mismo menú."
         }
 
+        // Windows order: primary action on the left, Cancel on the right.
         footer: DialogButtonBox {
-            Button {
+            AccentButton {
+                id: autoAcceptButton
                 text: "Activar"
-                highlighted: autoDownloadDialog.visible // DialogButtonBox clears it while it builds
                 DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
             }
             Button {
                 text: "Cancelar"
                 DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                Accessible.onPressAction: click()
+                Keys.onReturnPressed: event => { event.accepted = true; click() }
+                Keys.onEnterPressed: event => { event.accepted = true; click() }
             }
         }
         onAccepted: page.view.setAutoDownload(true)

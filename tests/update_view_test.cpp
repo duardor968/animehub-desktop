@@ -167,7 +167,7 @@ private slots:
         QVERIFY(view.ready());
         QVERIFY(view.pillVisible());
         QCOMPARE(view.pillIcon(), QStringLiteral("e777"));
-        QCOMPARE(view.pillLabel(), QStringLiteral("Actualizar a 0.5.0"));
+        QCOMPARE(view.pillLabel(), QStringLiteral("Actualizar a 0.6.0"));
         QCOMPARE(view.readySubtitleText(), QStringLiteral("Se instalará al reiniciar o al salir"));
 
         // Preview ready in Manual mode: NEVER shows pill.
@@ -180,7 +180,7 @@ private slots:
         QVERIFY(view.available());
         QVERIFY(view.pillVisible());
         QCOMPARE(view.pillIcon(), QStringLiteral("e896"));
-        QCOMPARE(view.pillLabel(), QStringLiteral("Nueva versión 0.5.0"));
+        QCOMPARE(view.pillLabel(), QStringLiteral("Nueva versión 0.6.0"));
         QCOMPARE(view.sizeText(), QStringLiteral("1,4 MB"));
 
         // Preview notify-downloading: pill shown with progress %, click opens Acerca de.
@@ -188,7 +188,7 @@ private slots:
         QVERIFY(view.downloading());
         QVERIFY(view.pillVisible());
         QCOMPARE(view.pillIcon(), QStringLiteral("e896"));
-        QCOMPARE(view.pillLabel(), QStringLiteral("Descargando 0.5.0 · 79 %"));
+        QCOMPARE(view.pillLabel(), QStringLiteral("Descargando 0.6.0 · 79 %"));
         QSignalSpy about_spy(&view, &UpdateView::openAboutRequested);
         view.handlePillClick();
         QCOMPARE(about_spy.size(), 1);
@@ -210,7 +210,7 @@ private slots:
         // Manual download uses injectable openUrl callback.
         view.openManualDownload();
         QVERIFY(opened.isValid());
-        QVERIFY(opened.toString().contains(QStringLiteral("0.5.0")));
+        QVERIFY(opened.toString().contains(QStringLiteral("0.6.0")));
     }
 
     void notifyOnlyInlineDownloadAndActiveDownloadsRestartGate() {
@@ -421,6 +421,107 @@ private slots:
 
         view.openManualDownload();
         QCOMPARE(opened, deb_url);
+    }
+
+    void errorClassificationNeverMisclassifiesUntrustedHostAndNeverLeaksEnglish() {
+        const auto blocked_redirect = UpdateView::formatErrorSummary(
+            QStringLiteral("Blocked redirect to untrusted host 'evil.example'"));
+        QCOMPARE(blocked_redirect, QStringLiteral("Redirección bloqueada por seguridad"));
+        QVERIFY(blocked_redirect != u"Sin conexión");
+
+        const auto blocked_url = UpdateView::formatErrorSummary(
+            QStringLiteral("Blocked update URL outside allowlist: http://evil.example/a.ahpack"));
+        QCOMPARE(blocked_url, QStringLiteral("Origen de actualización bloqueado por seguridad"));
+        QVERIFY(blocked_url != u"Sin conexión");
+
+        QCOMPARE(UpdateView::formatErrorSummary(
+                     QStringLiteral("Too many redirects while downloading update")),
+                 QStringLiteral("Demasiadas redirecciones al descargar la actualización"));
+        QCOMPARE(UpdateView::formatErrorSummary(
+                     QStringLiteral("Manifest was signed with a revoked key")),
+                 QStringLiteral("Firma de actualización revocada"));
+        QCOMPARE(UpdateView::formatErrorSummary(
+                     QStringLiteral("Manifest was signed with an untrusted key")),
+                 QStringLiteral("Firma de actualización no confiable"));
+        QCOMPARE(UpdateView::formatErrorSummary(
+                     QStringLiteral("Manifest Ed25519 signature verification failed")),
+                 QStringLiteral("No se pudo verificar la firma de la actualización"));
+        QCOMPARE(UpdateView::formatErrorSummary(
+                     QStringLiteral("Rejected downgrade from 0.5.0 to 0.4.0")),
+                 QStringLiteral("Actualización rechazada por seguridad"));
+        QCOMPARE(
+            UpdateView::formatErrorSummary(QStringLiteral("SHA-256 mismatch for AnimeHub.exe")),
+            QStringLiteral("Falló la verificación de integridad de la actualización"));
+        QCOMPARE(UpdateView::formatErrorSummary(QStringLiteral("Truncated zstd stream")),
+                 QStringLiteral("El paquete de actualización llegó dañado o incompleto"));
+        QCOMPARE(UpdateView::formatErrorSummary(
+                     QStringLiteral("Manifest has no valid .ahpack artifact")),
+                 QStringLiteral("No hay un paquete de actualización disponible para este sistema"));
+        QCOMPARE(UpdateView::formatErrorSummary(QStringLiteral("Invalid update manifest JSON")),
+                 QStringLiteral("La información de actualización no es válida"));
+        QCOMPARE(UpdateView::formatErrorSummary(
+                     QStringLiteral("Could not launch updater helper: permission denied")),
+                 QStringLiteral("No se pudo iniciar el asistente de actualización"));
+        QCOMPARE(UpdateView::formatErrorSummary(QStringLiteral("Could not back up settings.ini")),
+                 QStringLiteral("No se pudo crear la copia de seguridad previa"));
+        QCOMPARE(
+            UpdateView::formatErrorSummary(QStringLiteral("Could not commit staged files")),
+            QStringLiteral("No se pudieron guardar los archivos de actualización en el disco"));
+        QCOMPARE(UpdateView::formatErrorSummary(
+                     QStringLiteral("HTTP 404 from https://api.animehub.example/release")),
+                 QStringLiteral("No se encontró la actualización en el servidor"));
+        QCOMPARE(UpdateView::formatErrorSummary(
+                     QStringLiteral("HTTP 503 from https://api.animehub.example/release")),
+                 QStringLiteral("El servidor de actualizaciones no está disponible"));
+        QCOMPARE(
+            UpdateView::formatErrorSummary(QStringLiteral("Host api.animehub.example not found")),
+            QStringLiteral("Sin conexión"));
+        QCOMPARE(UpdateView::formatErrorSummary(QStringLiteral("Connection refused")),
+                 QStringLiteral("Sin conexión"));
+
+        const auto unknown =
+            UpdateView::formatErrorSummary(QStringLiteral("Unexpected internal frobnitz error"));
+        QCOMPARE(unknown, QStringLiteral("No se pudo completar la actualización"));
+        QVERIFY(!unknown.contains(QStringLiteral("frobnitz"), Qt::CaseInsensitive));
+
+        // End-to-end check: a server redirect to an untrusted host surfaces as a security error,
+        // NEVER "Sin conexión" and NEVER leaking the raw English message.
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        HttpTestServer server;
+        QVERIFY(server.listen());
+        const auto redirect_to_evil = [](const HttpTestServer::Request&) {
+            return HttpTestServer::Response{
+                .status = 302,
+                .body = {},
+                .headers = {{"Location", "https://evil.example/manifest.json"}},
+            };
+        };
+        server.route("GET", "/api/v1/desktop/releases/latest", redirect_to_evil);
+        server.route("GET", "/github-fallback.json", redirect_to_evil);
+        InstallContext ctx;
+        ctx.installDir = temp.filePath(QStringLiteral("install"));
+        ctx.dataDir = temp.filePath(QStringLiteral("data"));
+        ctx.currentVersion = SemVer{0, 4, 0};
+        ctx.installMode = InstallMode::WindowsPortable;
+        ctx.apiBaseUrl = server.url(QStringLiteral("/api/v1/"));
+        ctx.githubFallbackUrl = server.url(QStringLiteral("/github-fallback.json"));
+        ctx.urlPolicy.allowInsecureLoopback = true;
+
+        QNetworkAccessManager network;
+        UpdateService svc(network, ctx);
+        AppSettings settings(temp.filePath(QStringLiteral("settings.ini")), temp.path());
+        UpdateView view(svc, settings, [](const QUrl&) {});
+
+        QSignalSpy check_spy(&svc, &UpdateService::checkFinished);
+        view.checkNow();
+        QVERIFY(check_spy.wait(5'000));
+        QVERIFY(view.error());
+        QCOMPARE(
+            view.errorDetailText(),
+            QStringLiteral("Redirección bloqueada por seguridad · Sigues en la versión 0.4.0"));
+        QVERIFY(!view.errorDetailText().contains(QStringLiteral("Sin conexión")));
+        QVERIFY(!view.errorDetailText().contains(QStringLiteral("Blocked")));
     }
 };
 

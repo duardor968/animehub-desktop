@@ -49,10 +49,24 @@ Item {
                 Accessible.role: Accessible.PageTab
                 Accessible.name: modelData.fullName + (modelData.isToday ? " (Hoy)" : "")
                                  + ", " + cnt + (cnt === 1 ? " emisión" : " emisiones")
+                Accessible.onPressAction: tabBtn.clicked()
+                ToolTip.visible: root.compactLabels && (hovered || (activeFocus && InputModality.keyboard))
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
+                ToolTip.text: modelData.fullName + (modelData.isToday ? " (Hoy)" : "")
                 onClicked: root.daySelected(modelData.weekday)
-                Keys.onReturnPressed: clicked()
-                Keys.onEnterPressed: clicked()
-                Keys.onSpacePressed: clicked()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    tabBtn.clicked()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    tabBtn.clicked()
+                }
+                Keys.onSpacePressed: event => {
+                    event.accepted = true
+                    tabBtn.clicked()
+                }
 
                 background: Item {
                     // Subtle hover tint only — no rectangular box borders.
@@ -60,8 +74,9 @@ Item {
                         anchors.fill: parent
                         anchors.topMargin: 2
                         anchors.bottomMargin: 3
-                        radius: 4
-                        color: !tabBtn.active && tabBtn.hovered ? Qt.rgba(1, 1, 1, 0.04) : "transparent"
+                        radius: Theme.radiusSm
+                        color: !tabBtn.active && tabBtn.down ? Theme.pressSubtle
+                               : !tabBtn.active && tabBtn.hovered ? Theme.hoverSubtle : "transparent"
                     }
 
                     // Crisp 2 px #2f81f7 bottom underline resting directly on the hairline.
@@ -95,9 +110,9 @@ Item {
                     Label {
                         anchors.verticalCenter: parent.verticalCenter
                         text: root.compactLabels ? tabBtn.modelData.shortName : tabBtn.modelData.fullName
-                        color: tabBtn.active ? "#f3f6fa"
+                        color: tabBtn.active ? Theme.ink
                                : tabBtn.hovered ? Theme.ink : Theme.muted
-                        font.pixelSize: 13
+                        font.pixelSize: Theme.small
                         font.weight: tabBtn.active || tabBtn.modelData.isToday ? Font.DemiBold : Font.Normal
                         Accessible.ignored: true
                     }
@@ -106,14 +121,14 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: String(tabBtn.cnt)
                         color: tabBtn.active ? Theme.accentText : Theme.faint
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.caption
                         font.weight: tabBtn.active ? Font.DemiBold : Font.Normal
                         Accessible.ignored: true
                     }
                 }
 
                 FocusFrame {
-                    radiusInside: 4
+                    radiusInside: Theme.radiusSm
                     visible: tabBtn.activeFocus && InputModality.keyboard
                 }
             }

@@ -1,8 +1,8 @@
 import QtQuick
 import AnimeHub
 
-// An icon from the system icon font (hex codepoint like "e713") or a crisp vector icon served
-// by GlyphProvider ("pot-play", "pot-pause", "pot-stop", "bookmark-ribbon").
+// An icon from the system icon font (hex codepoint from Theme.icon.*) or a crisp vector icon
+// served by GlyphProvider ("pot-play", "pot-pause", "bookmark-ribbon").
 Item {
     id: root
 

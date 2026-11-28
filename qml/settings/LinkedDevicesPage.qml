@@ -41,8 +41,8 @@ ColumnLayout {
 
     SettingRow {
         visible: !page.remote.registered
-        label: "Nombre de este PC"
-        info: "Vincula este PC con la web de AnimeHub para enviarle descargas desde el navegador."
+        label: "Nombre de este equipo"
+        info: "Vincula este equipo con la web de AnimeHub para enviarle descargas desde el navegador."
 
         // The field in Ajustes' column of lists and fields, its button under it, as MyJDownloader's
         // sign-in.
@@ -56,10 +56,10 @@ ColumnLayout {
                 Layout.maximumWidth: page.controlWidth
                 text: page.remote.suggestedName
                 maximumLength: 80
-                Accessible.name: "Nombre de este PC"
+                Accessible.name: "Nombre de este equipo"
                 onAccepted: if (activate.enabled) activate.clicked()
             }
-            Button {
+            AccentButton {
                 id: activate
                 Layout.alignment: Qt.AlignRight
                 text: "Activar vinculación"
@@ -71,7 +71,7 @@ ColumnLayout {
 
     SettingRow {
         visible: page.remote.registered
-        label: "Este PC"
+        label: "Este equipo"
         value: page.remote.deviceName
     }
 
@@ -120,11 +120,21 @@ ColumnLayout {
                             elide: Text.ElideRight
                         }
                         Button {
+                            id: unlinkPromptButton
                             visible: !link.confirming
                             text: "Desvincular…"
                             enabled: !page.remote.busy
                             onClicked: page.revokeId = link.modelData.id
                             Accessible.name: "Desvincular " + link.modelData.name
+                            Accessible.onPressAction: unlinkPromptButton.click()
+                            Keys.onReturnPressed: event => {
+                                event.accepted = true
+                                unlinkPromptButton.click()
+                            }
+                            Keys.onEnterPressed: event => {
+                                event.accepted = true
+                                unlinkPromptButton.click()
+                            }
                         }
                     }
 
@@ -142,7 +152,7 @@ ColumnLayout {
                         visible: link.confirming
                         spacing: 8
 
-                        Button {
+                        AccentButton {
                             text: "Desvincular"
                             enabled: !page.remote.busy
                             onClicked: {
@@ -152,7 +162,17 @@ ColumnLayout {
                             Accessible.name: "Desvincular " + link.modelData.name
                         }
                         Button {
+                            id: cancelUnlinkButton
                             text: "Cancelar"
+                            Accessible.onPressAction: cancelUnlinkButton.click()
+                            Keys.onReturnPressed: event => {
+                                event.accepted = true
+                                cancelUnlinkButton.click()
+                            }
+                            Keys.onEnterPressed: event => {
+                                event.accepted = true
+                                cancelUnlinkButton.click()
+                            }
                             onClicked: page.revokeId = ""
                         }
                     }
@@ -194,9 +214,24 @@ ColumnLayout {
                     property bool copied: false
                     text: copied ? "Copiado" : "Copiar el código"
                     display: AbstractButton.IconOnly
-                    icon.source: Theme.source(copied ? Theme.icon.check : "e8c8")
-                    ToolTip.visible: hovered || copied
+                    icon.source: Theme.source(copied ? Theme.icon.check : Theme.icon.copy)
+                    icon.width: 14
+                    icon.height: 14
+                    icon.color: copied ? Theme.success : (hovered ? Theme.ink : Theme.muted)
+                    ToolTip.visible: hovered || copied || (activeFocus && InputModality.keyboard)
+                    ToolTip.delay: copied ? 0 : Theme.tooltipDelay
+                    ToolTip.timeout: Theme.tooltipTimeout
                     ToolTip.text: text
+                    Accessible.name: text
+                    Accessible.onPressAction: copy.click()
+                    Keys.onReturnPressed: event => {
+                        event.accepted = true
+                        copy.click()
+                    }
+                    Keys.onEnterPressed: event => {
+                        event.accepted = true
+                        copy.click()
+                    }
                     onClicked: {
                         page.remote.copyCode()
                         copied = true
@@ -226,9 +261,19 @@ ColumnLayout {
                 color: Theme.success
             }
             Button {
+                id: generateCodeButton
                 Layout.alignment: pairingColumn.side
                 text: page.remote.code ? "Generar otro código" : "Generar código"
                 enabled: !page.remote.busy
+                Accessible.onPressAction: generateCodeButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    generateCodeButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    generateCodeButton.click()
+                }
                 onClicked: {
                     page.justLinked = false
                     page.remote.generatePairingCode()

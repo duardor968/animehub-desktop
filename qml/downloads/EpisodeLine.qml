@@ -105,7 +105,7 @@ Item {
         return parts.length > 0 ? parts.join(" · ") : "—"
     }
 
-    readonly property string transportIcon: canResume ? Theme.icon.play
+    readonly property string transportIcon: canResume ? Theme.icon.download
                                             : (failed || canRetryNow) ? Theme.icon.retry
                                             : Theme.icon.pause
     readonly property string transportTooltip: failed ? "Reintentar"
@@ -140,8 +140,8 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: root.compactMode ? 0 : 4
         anchors.rightMargin: root.compactMode ? 0 : 4
-        radius: 4
-        color: rowHover.hovered ? Qt.rgba(1, 1, 1, 0.045) : "transparent"
+        radius: Theme.radiusSm
+        color: rowHover.hovered ? Theme.hoverSubtle : "transparent"
     }
 
     // CARDS MODE (Ronda 3 B): 16:9 anime still + title + status + progress bar + controls.
@@ -157,7 +157,6 @@ Item {
             Layout.preferredHeight: 52
             Layout.alignment: Qt.AlignVCenter
             source: root.stillUrl
-            radius: 4
             opacity: root.completed ? 0.72 : 1.0
             border.width: 1
             border.color: Qt.rgba(1, 1, 1, 0.08)
@@ -174,10 +173,12 @@ Item {
                 Layout.fillWidth: true
                 text: root.fullTitle
                 color: root.completed ? Theme.muted : Theme.ink
-                font.pixelSize: 13
+                font.pixelSize: Theme.small
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
                 ToolTip.visible: titleHover.hovered && truncated
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
                 HoverHandler { id: titleHover }
             }
@@ -197,9 +198,11 @@ Item {
                     Layout.fillWidth: true
                     text: root.cardsSubtitle
                     color: root.cardsSubtitleColor
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.caption
                     elide: Text.ElideRight
                     ToolTip.visible: subHover.hovered && truncated
+                    ToolTip.delay: Theme.tooltipDelay
+                    ToolTip.timeout: Theme.tooltipTimeout
                     ToolTip.text: text
                     HoverHandler { id: subHover }
                 }
@@ -225,53 +228,103 @@ Item {
             spacing: 4
 
             ToolButton {
+                id: cardPlayButton
                 visible: root.completed && root.canPlay
                 display: AbstractButton.TextBesideIcon
                 text: "Ver"
                 icon.source: Theme.source(Theme.icon.play)
                 icon.width: 14
                 icon.height: 14
-                font.pixelSize: 12
+                font.pixelSize: Theme.caption
                 topPadding: 5
                 bottomPadding: 5
                 leftPadding: 10
                 rightPadding: 10
+                Accessible.name: "Ver " + root.label
+                Accessible.onPressAction: cardPlayButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    cardPlayButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    cardPlayButton.click()
+                }
                 onClicked: root.downloads.play(root.taskId)
             }
 
             ToolButton {
+                id: cardFolderButton
                 visible: root.completed && root.hasFile
                 display: AbstractButton.IconOnly
                 text: "Mostrar en la carpeta"
                 icon.source: Theme.source(Theme.icon.folder)
                 icon.width: 14
                 icon.height: 14
-                ToolTip.visible: hovered
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
+                Accessible.name: "Mostrar " + root.label + " en la carpeta"
+                Accessible.onPressAction: cardFolderButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    cardFolderButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    cardFolderButton.click()
+                }
                 onClicked: root.downloads.showFile(root.taskId)
             }
 
             ToolButton {
+                id: cardTransportButton
                 visible: !root.completed && root.showTransportAction
                 display: AbstractButton.IconOnly
                 text: root.transportTooltip
                 icon.source: Theme.source(root.transportIcon)
                 icon.width: 14
                 icon.height: 14
-                ToolTip.visible: hovered
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
+                Accessible.name: root.transportTooltip + " " + root.label
+                Accessible.onPressAction: cardTransportButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    cardTransportButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    cardTransportButton.click()
+                }
                 onClicked: root.triggerTransport()
             }
 
             ToolButton {
+                id: cardCancelButton
                 visible: !root.completed && root.showCancelAction
                 display: AbstractButton.IconOnly
                 text: root.cancelTooltip
                 icon.source: Theme.source(Theme.icon.cancel)
-                icon.width: 12
-                icon.height: 12
-                ToolTip.visible: hovered
+                icon.width: 14
+                icon.height: 14
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
+                Accessible.name: root.cancelTooltip + " (" + root.label + ")"
+                Accessible.onPressAction: cardCancelButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    cardCancelButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    cardCancelButton.click()
+                }
                 onClicked: root.triggerCancel()
             }
         }
@@ -292,10 +345,12 @@ Item {
             Layout.maximumWidth: 68
             text: "Ep. " + root.episode
             color: root.completed ? Theme.muted : Theme.ink
-            font.pixelSize: 12
+            font.pixelSize: Theme.caption
             font.weight: Font.DemiBold
             elide: Text.ElideRight
             ToolTip.visible: epHover.hovered
+            ToolTip.delay: Theme.tooltipDelay
+            ToolTip.timeout: Theme.tooltipTimeout
             ToolTip.text: root.fullTitle
             HoverHandler { id: epHover }
         }
@@ -352,7 +407,7 @@ Item {
                        : (root.completed && root.hasFile) ? Theme.success
                        : root.paused ? Theme.warning
                        : Theme.muted
-                font.pixelSize: 12
+                font.pixelSize: Theme.caption
                 font.weight: Font.DemiBold
                 font.features: ({ "tnum": 1 })
             }
@@ -369,7 +424,7 @@ Item {
                    : root.paused ? Theme.warning
                    : root.failed ? Theme.danger
                    : Theme.muted
-            font.pixelSize: 12
+            font.pixelSize: Theme.caption
             font.weight: Font.Medium
             elide: Text.ElideRight
         }
@@ -382,7 +437,7 @@ Item {
             Layout.maximumWidth: 96
             text: root.running ? root.speedText : "—"
             color: root.running && root.speedText !== "—" ? Theme.ink : Theme.muted
-            font.pixelSize: 12
+            font.pixelSize: Theme.caption
             font.features: ({ "tnum": 1 })
             elide: Text.ElideRight
         }
@@ -392,9 +447,11 @@ Item {
             Layout.minimumWidth: 0
             text: root.compactSizeEta
             color: root.failed ? Theme.danger : Theme.muted
-            font.pixelSize: 12
+            font.pixelSize: Theme.caption
             elide: Text.ElideRight
             ToolTip.visible: sizeHover.hovered && truncated
+            ToolTip.delay: Theme.tooltipDelay
+            ToolTip.timeout: Theme.tooltipTimeout
             ToolTip.text: text
             HoverHandler { id: sizeHover }
         }
@@ -407,6 +464,7 @@ Item {
             spacing: 4
 
             ToolButton {
+                id: compactFolderButton
                 visible: root.completed && root.hasFile
                 implicitHeight: 28
                 topPadding: 3
@@ -418,12 +476,25 @@ Item {
                 icon.source: Theme.source(Theme.icon.folder)
                 icon.width: 13
                 icon.height: 13
-                ToolTip.visible: hovered
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
+                Accessible.name: "Mostrar " + root.label + " en la carpeta"
+                Accessible.onPressAction: compactFolderButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    compactFolderButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    compactFolderButton.click()
+                }
                 onClicked: root.downloads.showFile(root.taskId)
             }
 
             ToolButton {
+                id: compactPlayButton
                 visible: root.completed && root.canPlay
                 implicitHeight: 28
                 topPadding: 3
@@ -435,11 +506,22 @@ Item {
                 icon.source: Theme.source(Theme.icon.play)
                 icon.width: 13
                 icon.height: 13
-                font.pixelSize: 12
+                font.pixelSize: Theme.caption
+                Accessible.name: "Ver " + root.label
+                Accessible.onPressAction: compactPlayButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    compactPlayButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    compactPlayButton.click()
+                }
                 onClicked: root.downloads.play(root.taskId)
             }
 
             ToolButton {
+                id: compactCancelButton
                 visible: !root.completed && root.showCancelAction
                 implicitHeight: 28
                 topPadding: 3
@@ -449,14 +531,27 @@ Item {
                 display: AbstractButton.IconOnly
                 text: root.cancelTooltip
                 icon.source: Theme.source(Theme.icon.cancel)
-                icon.width: 11
-                icon.height: 11
-                ToolTip.visible: hovered
+                icon.width: 13
+                icon.height: 13
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
+                Accessible.name: root.cancelTooltip + " (" + root.label + ")"
+                Accessible.onPressAction: compactCancelButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    compactCancelButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    compactCancelButton.click()
+                }
                 onClicked: root.triggerCancel()
             }
 
             ToolButton {
+                id: compactTransportButton
                 visible: !root.completed && root.showTransportAction
                 implicitHeight: 28
                 topPadding: 3
@@ -466,10 +561,22 @@ Item {
                 display: AbstractButton.IconOnly
                 text: root.transportTooltip
                 icon.source: Theme.source(root.transportIcon)
-                icon.width: 14
-                icon.height: 14
-                ToolTip.visible: hovered
+                icon.width: 13
+                icon.height: 13
+                ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+                ToolTip.delay: Theme.tooltipDelay
+                ToolTip.timeout: Theme.tooltipTimeout
                 ToolTip.text: text
+                Accessible.name: root.transportTooltip + " " + root.label
+                Accessible.onPressAction: compactTransportButton.click()
+                Keys.onReturnPressed: event => {
+                    event.accepted = true
+                    compactTransportButton.click()
+                }
+                Keys.onEnterPressed: event => {
+                    event.accepted = true
+                    compactTransportButton.click()
+                }
                 onClicked: root.triggerTransport()
             }
         }

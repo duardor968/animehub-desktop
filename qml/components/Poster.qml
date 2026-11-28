@@ -59,7 +59,7 @@ Rectangle {
         anchors.centerIn: parent
         visible: image.status !== Image.Ready && image.status !== Image.Loading
         glyph: Theme.icon.video
-        size: Math.min(root.width, root.height) / 4
+        size: Math.max(10, Math.round(Math.min(root.width, root.height) / 4))
         color: Theme.faint
     }
 }

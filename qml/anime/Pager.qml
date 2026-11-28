@@ -21,11 +21,16 @@ RowLayout {
 
     ToolButton {
         enabled: root.episodes.page > 0
-        icon.source: Theme.source("e76b")
+        icon.source: Theme.source(Theme.icon.chevronLeft)
         display: AbstractButton.IconOnly
         text: "Episodios anteriores"
-        ToolTip.visible: hovered
+        ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+        ToolTip.delay: Theme.tooltipDelay
+        ToolTip.timeout: Theme.tooltipTimeout
         ToolTip.text: text
+        Accessible.onPressAction: click()
+        Keys.onReturnPressed: event => { event.accepted = true; click() }
+        Keys.onEnterPressed: event => { event.accepted = true; click() }
         onClicked: root.go(root.episodes.page - 1)
     }
 
@@ -46,11 +51,16 @@ RowLayout {
 
     ToolButton {
         enabled: root.episodes.page < root.episodes.pageCount - 1
-        icon.source: Theme.source("e76c")
+        icon.source: Theme.source(Theme.icon.chevronRight)
         display: AbstractButton.IconOnly
         text: "Episodios siguientes"
-        ToolTip.visible: hovered
+        ToolTip.visible: hovered || (activeFocus && InputModality.keyboard)
+        ToolTip.delay: Theme.tooltipDelay
+        ToolTip.timeout: Theme.tooltipTimeout
         ToolTip.text: text
+        Accessible.onPressAction: click()
+        Keys.onReturnPressed: event => { event.accepted = true; click() }
+        Keys.onEnterPressed: event => { event.accepted = true; click() }
         onClicked: root.go(root.episodes.page + 1)
     }
 }
