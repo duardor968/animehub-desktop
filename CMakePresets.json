@@ -81,6 +81,7 @@
         "outputOnFailure": true
       },
       "execution": {
+        "jobs": 4,
         "noTestsAction": "error"
       }
     },
@@ -91,6 +92,7 @@
         "outputOnFailure": true
       },
       "execution": {
+        "jobs": 4,
         "noTestsAction": "error"
       }
     }

@@ -28,9 +28,6 @@ constexpr qint64 kSpaceMargin = 256LL * 1024 * 1024;
 // Without MEGA's own time, when a quota-bound episode tries MEGA again.
 constexpr auto kQuotaWait = 30min;
 constexpr auto kProgressSaveInterval = 5s;
-// Each look at JDownloader is a request to it, through MyJDownloader's servers when it is not
-// local; its transfers last minutes, so a look every few seconds is enough.
-constexpr auto kJdPollInterval = 5s;
 // Every server AnimeHub knows: the API is asked for all of them, so an episode none of the
 // enabled ones has says where it is.
 constexpr std::array kKnownProviders{api::Provider::Mega, api::Provider::Pixeldrain,
@@ -88,9 +85,9 @@ DownloadManager::DownloadManager(Services services, std::function<DownloadSettin
                                  QObject* parent)
     : QObject(parent), services_(services), settings_(std::move(settings)) {
     jd_network_.setProxy(QNetworkProxy::NoProxy);
-    poll_timer_.setInterval(700);
+    poll_timer_.setInterval(services_.pollInterval);
     connect(&poll_timer_, &QTimer::timeout, this, &DownloadManager::poll);
-    jd_poll_timer_.setInterval(kJdPollInterval);
+    jd_poll_timer_.setInterval(services_.jdPollInterval);
     connect(&jd_poll_timer_, &QTimer::timeout, this, &DownloadManager::pollJdTasks);
     wake_timer_.setSingleShot(true);
     connect(&wake_timer_, &QTimer::timeout, this, &DownloadManager::pump);

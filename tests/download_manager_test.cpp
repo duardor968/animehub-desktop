@@ -239,6 +239,8 @@ class DownloadManagerTest final : public QObject {
     int jd_launches_ = 0;
     QList<QDateTime> jd_launched_at_;
     std::chrono::milliseconds jd_launch_wait_{500};
+    std::chrono::milliseconds poll_interval_{50};
+    std::chrono::milliseconds jd_poll_interval_{50};
 
     void serveMega(int bytes_per_tick = 0, int status = 200) {
         server_->route("POST", "/cs", [this](const HttpTestServer::Request&) {
@@ -419,7 +421,7 @@ class DownloadManagerTest final : public QObject {
                                           jd_launched_at_.append(QDateTime::currentDateTimeUtc());
                                           return launch_jd_ && launch_jd_();
                                       },
-                                      jd_launch_wait_},
+                                      jd_launch_wait_, poll_interval_, jd_poll_interval_},
             [this] {
                 return DownloadSettings{.directory = downloads_,
                                         .providers = providers_,
@@ -520,6 +522,8 @@ private slots:
         jd_launches_ = 0;
         jd_launched_at_.clear();
         jd_launch_wait_ = std::chrono::milliseconds(500);
+        poll_interval_ = std::chrono::milliseconds(50);
+        jd_poll_interval_ = std::chrono::milliseconds(50);
         makeManager();
     }
 
@@ -714,6 +718,12 @@ private slots:
     }
 
     void jdTasksLeaveTheNativeSlotsFree() {
+        const DownloadManager::Services defaults{*api_,        *aria2_,      *mega_,
+                                                 *pixeldrain_, *repository_, *library_};
+        QCOMPARE(defaults.jdPollInterval, std::chrono::seconds(5));
+        QVERIFY(defaults.jdPollInterval > defaults.pollInterval);
+        jd_poll_interval_ = std::chrono::milliseconds(1000);
+        restart();
         max_concurrent_ = 1;
         engine_ = DownloadEngine::JDownloaderLocal;
         auto& jd = jds_.emplace_back();
@@ -730,10 +740,10 @@ private slots:
         QVERIFY(native);
         QTRY_COMPARE_WITH_TIMEOUT(taskOf(*native)->state, TaskState::Completed, kTimeout);
         QCOMPARE(taskOf(*handed)->state, TaskState::Downloading); // still JDownloader's
-        // JDownloader is asked every few seconds, not at aria2's pace.
+        // JDownloader is asked on its own slower cadence, not at aria2's pace.
         const auto before = server_->count("/downloadsV2/queryLinks");
-        QTest::qWait(5500);
-        QVERIFY(server_->count("/downloadsV2/queryLinks") - before <= 2);
+        QTest::qWait(2200);
+        QVERIFY(server_->count("/downloadsV2/queryLinks") - before <= 3);
     }
 
     void jdJobWithoutFilesFailsAndARetryHandsItOverAgain() {
@@ -1507,16 +1517,16 @@ private slots:
 
     void pausesAndResumes() {
         resolveTo(resolution({{"MEGA", megaUrl()}}));
-        serveMega(16 * 1024); // ~1.6 MB/s: long enough to pause mid-transfer
+        serveMega(32 * 1024); // ~3.2 MB/s: long enough to pause mid-transfer
         QSignalSpy completed(manager_.get(), &DownloadManager::taskCompleted);
         const auto id = *manager_->enqueue(QStringLiteral("sousou-no-frieren"), 1,
                                            QStringLiteral("Sousou no Frieren"), TaskOrigin::Manual);
         QTRY_VERIFY_WITH_TIMEOUT(taskOf(id)->bytesDone > 0, kTimeout);
         manager_->pause(id);
         QCOMPARE(taskOf(id)->state, TaskState::Paused);
-        QTest::qWait(1500);
+        QTest::qWait(300);
         const auto paused_at = taskOf(id)->bytesDone;
-        QTest::qWait(1000);
+        QTest::qWait(300);
         QCOMPARE(taskOf(id)->bytesDone, paused_at);
         // Asking for the episode again resumes the same task.
         QCOMPARE(*manager_->enqueue(QStringLiteral("sousou-no-frieren"), 1,
@@ -1674,7 +1684,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(taskOf(running)->bytesDone > 0, kTimeout);
         QCOMPARE(enqueueMany(kFrieren, {1, 2})->added, 2);
         QCOMPARE(enqueueMany(kBebop, {1})->added, 1);
-        QTest::qWait(1000);
+        QTest::qWait(300);
         QCOMPARE(taskOf(running)->state, TaskState::Downloading);
         QCOMPARE(taskFor(kFrieren, 1)->state, TaskState::Queued);
         QCOMPARE(listed(),
@@ -1776,7 +1786,7 @@ private slots:
         for (const auto& task : manager_->tasks()) {
             QCOMPARE(task.state, TaskState::Paused);
         }
-        QTest::qWait(1000);
+        QTest::qWait(300);
         QCOMPARE(taskFor(kFrieren, 3)->state, TaskState::Paused); // its slot stayed free
         QVERIFY(!resolved().contains(Episode{kFrieren, 3}));
 

@@ -129,7 +129,13 @@ if(ANIMEHUB_TEST_ARIA2)
       ANIMEHUB_MPV_EXECUTABLE="${ANIMEHUB_TEST_MPV}"
     )
   endforeach()
+  # Schedule the longest suites first when ctest runs in parallel.
+  set_tests_properties(download-manager-test PROPERTIES COST 100)
+  set_tests_properties(player-test PROPERTIES COST 50)
+  set_tests_properties(aria2-test PROPERTIES COST 40)
 endif()
+set_tests_properties(remote-service-test PROPERTIES COST 30)
+set_tests_properties(api-client-test anime-view-test qml-components-test PROPERTIES COST 20)
 
 if(LINUX)
   animehub_add_test(platform-linux-test platform_linux_test.cpp)

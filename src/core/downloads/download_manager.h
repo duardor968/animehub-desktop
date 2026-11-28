@@ -66,6 +66,9 @@ public:
         std::function<bool()> launchJDownloader;
         // How long each start gets to open the API before the next one.
         std::chrono::milliseconds jdLaunchWait = std::chrono::seconds(40);
+        // How often aria2 and JDownloader are polled while transfers run.
+        std::chrono::milliseconds pollInterval = std::chrono::milliseconds(700);
+        std::chrono::milliseconds jdPollInterval = std::chrono::seconds(5);
     };
 
     // MEGA's transfer quota ran out for this IP: MEGA is skipped until `until`. `known` says

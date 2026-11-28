@@ -4,7 +4,7 @@
 when:
   - event: push
     branch: [main, dev]
-  - event: pull_request
+  - event: [pull_request, manual]
 
 steps:
   linux:
@@ -49,21 +49,15 @@ steps:
       - cmake --build --preset linux-debug --parallel 4
       - ccache --show-stats
       # Static analysis on Linux with clang-tidy-20 (Clang 20 supports C++26 & libstdc++-14 <expected>;
-      # moved from Windows CI where VS18 STL1000 broke clang-tidy). Strip ccache from a temp compile DB.
+      # moved from Windows CI where VS18 STL1000 broke clang-tidy). Deduplicates compile_commands.json
+      # and checks only changed C++ files/header dependents on dev/PR (full sweep on main/manual).
       - >-
-        python3 -c 'import json, os, shlex, sys;
-        root = os.path.realpath(os.getcwd());
-        allowed = (os.path.join(root, "src") + os.sep, os.path.join(root, "tests") + os.sep);
-        db = json.load(open("out/build/linux-debug/compile_commands.json"));
-        strip = lambda cmd: shlex.join((lambda p: p[1:] if p and os.path.basename(p[0]) == "ccache" else p)(shlex.split(cmd)));
-        clean = [dict(e, command=strip(e["command"])) for e in db];
-        os.makedirs("/tmp/tidy-db", exist_ok=True);
-        json.dump(clean, open("/tmp/tidy-db/compile_commands.json", "w"));
-        files = sorted({os.path.realpath(e["file"]) for e in db if os.path.realpath(e["file"]).startswith(allowed) and e["file"].endswith(".cpp")});
-        sys.stdout.write(chr(0).join(files))' |
-        xargs -0 -r -P 4 -n 4 clang-tidy-20 -p /tmp/tidy-db
+        python3 scripts/run-clang-tidy.py
+        --build-dir out/build/linux-debug
+        --clang-tidy clang-tidy-20
+        --jobs 4
         --extra-arg=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/14
-        --extra-arg=-Wno-unknown-warning-option --quiet
+        --extra-arg=-Wno-unknown-warning-option
       # A throwaway session bus and keyring (in a folder of its own, so no earlier keyring with
       # another password asks to be unlocked), so the credential test runs too.
       - export XDG_RUNTIME_DIR=$(mktemp -d) && chmod 700 "$${XDG_RUNTIME_DIR}"
