@@ -29,6 +29,25 @@ function(animehub_deploy_runtime target)
     list(APPEND unused "$<TARGET_FILE_DIR:${target}>/${path}")
   endforeach()
 
+  # Also copy the core MSVC runtime DLLs next to bundled mpv.exe (MSVC build) so mpv runs
+  # standalone on clean Windows machines without a Visual C++ Redistributable installed.
+  set(mpv_runtime_libs)
+  foreach(lib IN LISTS CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+    get_filename_component(lib_name "${lib}" NAME)
+    string(TOLOWER "${lib_name}" lib_lower)
+    if(lib_lower MATCHES "^(msvcp140|vcruntime140|vcruntime140_1)\\.dll$")
+      list(APPEND mpv_runtime_libs "${lib}")
+    endif()
+  endforeach()
+
+  set(deploy_mpv_crt_cmd)
+  if(ANIMEHUB_BUNDLE_ENGINES AND mpv_runtime_libs)
+    set(deploy_mpv_crt_cmd
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${mpv_runtime_libs}
+              "$<TARGET_FILE_DIR:${target}>/engines/mpv"
+    )
+  endif()
+
   add_custom_command(TARGET ${target} POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E env QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES=1
             "${ANIMEHUB_WINDEPLOYQT}"
@@ -44,7 +63,8 @@ function(animehub_deploy_runtime target)
             "$<TARGET_FILE:${target}>"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
             "$<TARGET_FILE_DIR:${target}>"
-    # windeployqt 6.11 ignores --skip-plugin-types and --exclude-plugins: drop what AnimeHub does
+    ${deploy_mpv_crt_cmd}
+    # windeployqt ignores --skip-plugin-types and --exclude-plugins: drop what AnimeHub does
     # not use (QML debugging, touch, reachability, other databases, OpenSSL, unused images, the
     # Controls styles other than FluentWinUI3 and the Fusion and Basic it builds on, and the parts
     # of the MSVC runtime nothing links).

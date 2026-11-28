@@ -1,8 +1,8 @@
 # Dot-sourced by build.ps1 and run.ps1. Deployed binaries load their own Qt runtime.
 param([switch]$BundledQt)
-$qtRoot = if ($env:QT_ROOT) { $env:QT_ROOT } else { "C:\Qt\6.11.0\msvc2022_64" }
+$qtRoot = if ($env:QT_ROOT) { $env:QT_ROOT } else { "C:\Qt\6.12.1\msvc2022_64" }
 if (-not $BundledQt -and -not (Test-Path -LiteralPath (Join-Path $qtRoot "bin\qmake.exe"))) {
-    throw "Qt 6.11 MSVC was not found. Set QT_ROOT to the kit directory."
+    throw "Qt 6.12 MSVC was not found. Set QT_ROOT to the kit directory."
 }
 
 Add-Type -Namespace AnimeHub -Name ErrorMode -MemberDefinition @'

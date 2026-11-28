@@ -1,4 +1,4 @@
-find_package(Qt6 6.11 REQUIRED COMPONENTS Test)
+find_package(Qt6 6.12 REQUIRED COMPONENTS Test)
 
 qt_add_library(animehub-test-support STATIC
   support/http_test_server.cpp
@@ -99,7 +99,7 @@ elseif(LINUX)
 endif()
 
 # QML components on their own, as Qt Quick Test cases, in the style the app uses.
-find_package(Qt6 6.11 REQUIRED COMPONENTS QuickTest)
+find_package(Qt6 6.12 REQUIRED COMPONENTS QuickTest)
 qt_add_executable(qml-components-test qml_components_test.cpp support/noninteractive_guard.cpp)
 target_link_libraries(qml-components-test PRIVATE Qt6::QuickTest)
 target_compile_definitions(qml-components-test PRIVATE

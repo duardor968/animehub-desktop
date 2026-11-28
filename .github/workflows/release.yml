@@ -15,16 +15,16 @@ jobs:
   windows:
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
       - uses: jwlawson/actions-setup-cmake@v2
         with:
-          cmake-version: 4.4.1
+          cmake-version: 4.5.1
       - uses: jurplel/install-qt-action@v4
         with:
-          version: 6.11.0
+          version: 6.12.1
           arch: win64_msvc2022_64
           modules: qtimageformats
           cache: true
@@ -105,7 +105,7 @@ jobs:
           while ((Test-Path -LiteralPath (Join-Path $dir "AnimeHub.exe")) -and (Get-Date) -lt $deadline) { Start-Sleep 1 }
           if (Test-Path -LiteralPath (Join-Path $dir "AnimeHub.exe")) { throw "The uninstaller left AnimeHub.exe behind." }
           if (Test-Path -LiteralPath $updateDir) { throw "The uninstaller left .update behind." }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: |
@@ -118,7 +118,7 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install the compiler, the libraries and the packaging tools
         run: |
           sudo apt-get update
@@ -129,10 +129,10 @@ jobs:
             fonts-dejavu-core xvfb x11-utils
       - uses: jwlawson/actions-setup-cmake@v2
         with:
-          cmake-version: 4.4.1
+          cmake-version: 4.5.1
       - uses: jurplel/install-qt-action@v4
         with:
-          version: 6.11.0
+          version: 6.12.1
           arch: linux_gcc_64
           modules: qtimageformats
           cache: true
@@ -177,7 +177,7 @@ jobs:
             --deb "out/package/animehub_${version}_amd64.deb" \
             --base-url "$base_url" \
             --output "out/package/update-linux-x64.json"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: |
@@ -192,8 +192,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

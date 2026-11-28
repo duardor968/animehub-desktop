@@ -11,10 +11,11 @@ Aplicación nativa de Windows y Linux para seguir anime: una biblioteca personal
 - **Reproducción**: con mpv (incluido en Windows; en Linux, el del sistema) AnimeHub sabe en qué minuto te quedaste y marca el episodio como visto al terminarlo; con la aplicación predeterminada del sistema, abrirlo lo marca como visto. Cualquier episodio se puede marcar a mano como visto, no visto o en curso desde un minuto concreto.
 - **Episodios nuevos**: AnimeHub comprueba la biblioteca mientras está abierto (también en la bandeja), avisa y, si lo activas en un anime, los descarga solo.
 - **JDownloader** (opcional): descarga lo que solo está en MP4Upload o 1Fichier, o todo si lo eliges como motor, en la carpeta de AnimeHub y con su progreso en Descargas. El de este equipo por su API local o cualquiera de tus equipos por MyJDownloader. De la cuenta solo se guardan las claves derivadas, en el almacén del sistema: el Administrador de credenciales en Windows, el llavero (Secret Service) en Linux.
+- **Dispositivos vinculados y actualizaciones internas**: vincula navegadores desde la web para enviar descargas directas a tu equipo y recibe actualizaciones delta verificadas con Ed25519 (`.ahpack` en Windows y `.zsync` en Linux AppImage) con respaldo previo de la biblioteca y reversión automática.
 
 ## Compilar
 
-Requisitos: Visual Studio 2022 (o Build Tools) con *Desktop development with C++*, Qt 6.11 para MSVC 2022 64-bit con el módulo **Qt Image Formats** (las portadas son WebP), el MinGW de Qt (en *Build Tools* del instalador de Qt; basta cualquier `strip` de binutils en el `PATH`) y CMake 4.0 o posterior.
+Requisitos: Visual Studio 2022 (o Build Tools) con *Desktop development with C++*, Qt 6.12 LTS para MSVC 2022 64-bit con el módulo **Qt Image Formats** (las portadas son WebP) y CMake 4.0 o posterior.
 
 ```powershell
 .\scripts\build.ps1                         # Debug y pruebas
@@ -23,9 +24,9 @@ Requisitos: Visual Studio 2022 (o Build Tools) con *Desktop development with C++
 
 El script prepara MSVC, Qt y CMake solo para su proceso; no toca el `PATH` global. `-Fresh` reconfigura desde cero. Si Qt está en otra ruta, define `QT_ROOT`.
 
-La primera configuración descarga **aria2 1.37.0** y **mpv 0.41.0** desde sus versiones oficiales y comprueba su SHA-256 (fijado en [`cmake/Engines.cmake`](cmake/Engines.cmake)); quedan en `out/engine-cache` para las siguientes. A mpv se le quita la información de depuración que trae incrustada, más de un tercio de su tamaño.
+La primera configuración descarga **aria2 1.37.0** y **mpv 0.42.0** (compilación oficial MSVC) desde sus versiones oficiales y comprueba su SHA-256 (fijado en [`cmake/Engines.cmake`](cmake/Engines.cmake)); quedan en `out/engine-cache` para las siguientes.
 
-En Linux (Ubuntu 24.04 o equivalente): GCC 14, CMake 4.0 o posterior, Qt 6.11 `linux_gcc_64` con **Qt Image Formats**, `libssl-dev`, `libsecret-1-dev`, y `mpv` y `aria2` para usarla y para las pruebas. Con `QT_ROOT` apuntando al kit:
+En Linux (Ubuntu 24.04 o equivalente): GCC 14, CMake 4.0 o posterior, Qt 6.12 LTS `linux_gcc_64` con **Qt Image Formats**, `libssl-dev`, `libsecret-1-dev`, y `mpv` y `aria2` para usarla y para las pruebas. Con `QT_ROOT` apuntando al kit:
 
 ```bash
 cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug
@@ -38,7 +39,7 @@ La primera configuración descarga la fuente de iconos (Uno Fluent Icons) y comp
 
 Cada versión está en [Releases](https://github.com/duardor968/animehub-desktop/releases), con `SHA256SUMS.txt` para comprobar cada archivo.
 
-**Windows** 10 (1809) o posterior, sin Qt ni Visual C++ instalados:
+**Windows** 10 (1903) o posterior, sin Qt ni Visual C++ instalados:
 
 - `AnimeHub-<versión>-setup.exe`: instalador para tu usuario, sin permisos de administrador, en `%LOCALAPPDATA%\Programs\AnimeHub`. Añade AnimeHub al menú Inicio y se desinstala desde Configuración → Aplicaciones; desinstalar pregunta antes de borrar la biblioteca y nunca toca los vídeos descargados.
 - `AnimeHub-<versión>-win64.zip`: la misma carpeta para usar desde cualquier sitio, sin instalar.

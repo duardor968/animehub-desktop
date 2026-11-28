@@ -32,7 +32,7 @@ if [[ ! -x "$build/animehub" ]]; then
   exit 1
 fi
 if [[ ! -x "${QT_ROOT:-}/bin/qmake" ]]; then
-  echo "Set QT_ROOT to Qt 6.11's linux_gcc_64 kit." >&2
+  echo "Set QT_ROOT to Qt 6.12's linux_gcc_64 kit." >&2
   exit 1
 fi
 

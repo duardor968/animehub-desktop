@@ -12,16 +12,16 @@ jobs:
   windows:
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
       - uses: jwlawson/actions-setup-cmake@v2
         with:
-          cmake-version: 4.4.1
+          cmake-version: 4.5.1
       - uses: jurplel/install-qt-action@v4
         with:
-          version: 6.11.0
+          version: 6.12.1
           arch: win64_msvc2022_64
           modules: qtimageformats
           cache: true

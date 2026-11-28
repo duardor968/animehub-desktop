@@ -3,8 +3,8 @@
 # volume:
 #   docker build -t animehub-linux-build:24.04 -f scripts/linux-build.Dockerfile scripts
 #   docker run --rm -v animehub-qt-cache:/opt/qt animehub-linux-build:24.04 \
-#     aqt install-qt linux desktop 6.11.0 linux_gcc_64 -m qtimageformats -O /opt/qt
-# then, with that volume at /opt/qt: QT_ROOT=/opt/qt/6.11.0/gcc_64 and the linux-* presets, the
+#     aqt install-qt linux desktop 6.12.1 linux_gcc_64 -m qtimageformats -O /opt/qt
+# then, with that volume at /opt/qt: QT_ROOT=/opt/qt/6.12.1/gcc_64 and the linux-* presets, the
 # test command of .woodpecker/ci.yaml and scripts/package-linux.sh as release.yml runs it.
 FROM ubuntu:24.04
 
@@ -28,5 +28,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-14 100
 
 RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir cmake==4.4.2 aqtinstall==3.3.0 zstandard cryptography
+    && /opt/venv/bin/pip install --no-cache-dir cmake==4.4.5 aqtinstall==3.3.0 zstandard cryptography
 ENV PATH=/opt/venv/bin:$PATH
