@@ -57,11 +57,11 @@ jobs:
         env:
           UPDATER_SIGNING_KEY: ${{ secrets.UPDATER_SIGNING_KEY }}
         run: |
-          $args = @("-Smoke")
+          $packageParams = @{ Smoke = $true }
           if (Test-Path -LiteralPath "scripts/update-tool.py") {
-            $args += "-BuildUpdatePack"
+            $packageParams["BuildUpdatePack"] = $true
           }
-          ./scripts/package.ps1 @args
+          ./scripts/package.ps1 @packageParams
       - name: Check the installer (fresh, upgrade/reinstall, uninstall)
         shell: pwsh
         run: |
