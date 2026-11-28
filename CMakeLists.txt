@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.0)
 
 project(
   AnimeHubDesktop
-  VERSION 0.5.0
+  VERSION 0.6.0
   DESCRIPTION "Native AnimeHub desktop application"
   HOMEPAGE_URL "https://github.com/duardor968/animehub-desktop"
   LANGUAGES C CXX
@@ -13,13 +13,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(ANIMEHUB_ENABLE_CLANG_TIDY "Run clang-tidy while compiling" OFF)
 option(ANIMEHUB_BUNDLE_ENGINES "Download and verify aria2 and mpv next to the executable" ON)
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Network Sql Qml Quick QuickControls2 Widgets)
+find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Network Sql Qml Quick QuickControls2 Widgets)
 if(LINUX)
   # Desktop notifications and "show in folder" go over the session bus.
-  find_package(Qt6 6.11 REQUIRED COMPONENTS DBus)
+  find_package(Qt6 6.12 REQUIRED COMPONENTS DBus)
 endif()
 
-# MSVC exposes the evolving C++26 mode as /std:c++latest. CMake 4.4 does not
+# MSVC exposes the evolving C++26 mode as /std:c++latest. CMake does not
 # map CXX26 to that flag yet, so keep the requested standard exact and provide
 # the missing compiler mapping locally.
 if(MSVC)
@@ -32,7 +32,7 @@ endif()
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-qt_standard_project_setup(REQUIRES 6.11)
+qt_standard_project_setup(REQUIRES 6.12)
 
 if(ANIMEHUB_ENABLE_CLANG_TIDY)
   find_program(CLANG_TIDY_EXECUTABLE NAMES clang-tidy REQUIRED)

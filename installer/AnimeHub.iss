@@ -2,7 +2,7 @@
 ; settings live in %LOCALAPPDATA%\AnimeHub, so updates keep them; uninstalling asks before
 ; removing them and never touches the downloaded videos.
 ;
-;   ISCC /DAppVersion=0.4.0 /DSourceDir=<packaged AnimeHub folder> /DOutputDir=<folder> AnimeHub.iss
+;   ISCC /DAppVersion=0.6.0 /DSourceDir=<packaged AnimeHub folder> /DOutputDir=<folder> AnimeHub.iss
 ;
 ; scripts\package.ps1 prepares the folder and calls this.
 
@@ -43,8 +43,8 @@ DisableWelcomePage=no
 DisableProgramGroupPage=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-; Qt 6.11 runs on Windows 10 1809 and later.
-MinVersion=10.0.17763
+; Qt 6.12 LTS and mpv 0.42 MSVC (system icu.dll) require Windows 10 1903 or later.
+MinVersion=10.0.18362
 OutputDir={#OutputDir}
 OutputBaseFilename=AnimeHub-{#AppVersion}-setup
 SetupIconFile=..\assets\animehub.ico
